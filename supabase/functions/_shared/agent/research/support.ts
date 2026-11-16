@@ -136,6 +136,24 @@ export function plainTalk(s: string, allowed = ""): boolean {
 }
 // Live-12 (item 5): a sentence of joined clauses ("…; …", "…, and …", "…, so …") is read clause by clause.
 export const clausesOf = (s: string) => bare(s).replace(/[.!?]+$/, "").split(/;\s+|,\s+(?:and|so|but)\s+/u).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
+// Round 8 of #849 (B3; trunk judged the whole sentence): a clause split off a sentence keeps the sentence's subject. A clause that
+// names nothing of its own ("they must pass a background check") is never read alone: it stays joined to the clause before it. A
+// clause that names something else is read with the subject the first clause names ("Jane Street: Chicago pay is …"), read as
+// hardParts reads an owner (a run of two words or more, an acronym, or a name after the first word; a single opening word is not).
+// (`free`: a clause that states nothing to check, a caveat or code's record check, is never joined: it stands alone as before)
+export function clausesWithSubject(s: string, free: (c: string) => boolean = () => false): string[] {
+  const cs = clausesOf(s), out: string[] = [];
+  for (const c of cs) {
+    const h = hardParts(c);
+    if (out.length && !h.names.length && !free(c) && !free(out[out.length - 1])) out[out.length - 1] = `${out[out.length - 1]}, and ${c}`;
+    else out.push(c);
+  }
+  if (out.length < 2) return out;
+  const h0 = hardParts(out[0]), r = h0.names[0];
+  const at = r ? out[0].toLowerCase().indexOf(r.join(" ")) : -1;
+  const subj = r && at >= 0 && (r.length > 1 || at > 0 || /^[\p{Lu}\p{N}&]{2,}$/u.test(out[0].slice(at, at + r[0].length))) ? out[0].slice(at, at + r.join(" ").length) : null;
+  return out.map((c, k) => k > 0 && subj && !nameFoundIn(subj, c) ? `${subj}: ${c}` : c);
+}
 export const isQuoted = (text: string) => /^".*"$/s.test(String(text ?? "").trim());
 
 // ------------------------------------------------------------------------------------------------ layer A
@@ -756,8 +774,13 @@ export async function keepSupported(reply: string, sources: (string | { text: st
     const gText = o.joint.guide.map((g) => g.text).join("\n");
     const gTitles = o.joint.guide.map((g) => g.title ?? "").join("\n");
     const recLines = o.joint.record.split(/\n+/).map((x) => squash(x)).filter(Boolean);
-    const source = clip([`Two passages, read together. The guide the answer cites (${squash(o.joint.guide[0].title ?? "") || "guide"}):`, `>>> ${squash(gText).slice(0, 1400)} <<<`,
-      "The person's confirmed record (each line is one fact about them; never join two lines into one fact):", ...recLines.map((l) => `- ${l}`)].join("\n"), PASSAGE_MAX);
+    const parts = [`Two passages, read together. The guide the answer cites (${squash(o.joint.guide[0].title ?? "") || "guide"}):`, `>>> ${squash(gText).slice(0, 1400)} <<<`,
+      "The person's confirmed record (each line is one fact about them; never join two lines into one fact):", ...recLines.map((l) => `- ${l}`)];
+    const source = clip(parts.join("\n"), PASSAGE_MAX);
+    // (CodeRabbit on #849: a sentence the drafts admitted at layer A is judged with them too, labelled as not confirmed; no other
+    // sentence's judge ever reads them)
+    const draftLines = String(o.joint.drafts ?? "").split(/\n+/).map((x) => squash(x)).filter(Boolean);
+    const sourceD = draftLines.length ? clip([...parts, "The person's items that are NOT confirmed (read only for a sentence that removes or leaves one out):", ...draftLines.map((l) => `- ${l}`)].join("\n"), PASSAGE_MAX) : source;
     const tryJoint = wants.map((w, k) => {
       const rec = withAlso[k] && recD ? recD : rec0;
       if (vs[k].how !== "drop" || !rec) return false;
@@ -771,23 +794,23 @@ export async function keepSupported(reply: string, sources: (string | { text: st
     });
     const ks = tryJoint.flatMap((t, k) => t ? [k] : []);
     if (ks.length) {
-      const got = await judgeAll(o.judge, ks.map((k) => ({ claim: wants[k].claim, source })));
+      const got = await judgeAll(o.judge, ks.map((k) => ({ claim: wants[k].claim, source: withAlso[k] && recD ? sourceD : source })));
       ks.forEach((k, j) => { if (got[j]) vs[k] = { how: "model", sentence: wants[k].claim, page: 0 }; });
     }
   }
   // Live-12 (item 5): a refused sentence of joined clauses stands when every clause stands on its own (a clause with no claim, code's
   // record check, or a unit that holds it whole and the judge's yes), each possibly on a different unit; no clause spans two units.
-  const split = vs.map((v, k) => v.how === "drop" && !withAlso[k] ? clausesOf(wants[k].claim) : []).map((cs) => cs.length > 1 ? cs : []);
+  const split = vs.map((v, k) => v.how === "drop" && !withAlso[k] ? clausesWithSubject(wants[k].claim, freeOf) : []).map((cs) => cs.length > 1 ? cs : []);
   const cw: Wanted[] = [], of: number[] = [];
   split.forEach((cs, k) => { for (const c of cs) if (!freeOf(c) && o.onRecord?.(c) !== false) { cw.push({ claim: c, ...(o.instructions ? { instruction: true } : {}) }); of.push(k); } });
-  if (cw.length) {
-    const vc = await decide(cw, idx, o.judge);
-    split.forEach((cs, k) => {
-      if (!cs.length || cs.some((c) => o.onRecord?.(c) === false)) return;
-      const mine = of.flatMap((x, j) => x === k ? [vc[j]] : []);
-      if (mine.length && mine.every((v) => v.how === "model")) vs[k] = { how: "model", sentence: wants[k].claim, page: (mine[0] as { page: number }).page };
-    });
-  } else split.forEach((cs, k) => { if (cs.length && cs.every((c) => freeOf(c))) vs[k] = { how: "model", sentence: wants[k].claim, page: 0 }; });
+  // (CodeRabbit on #849: each sentence on its own clauses: one whose clauses are all free stands whatever other sentences sent to the
+  // judge; a clause code's record check refuses removes it)
+  const vc = cw.length ? await decide(cw, idx, o.judge) : [];
+  split.forEach((cs, k) => {
+    if (!cs.length || cs.some((c) => o.onRecord?.(c) === false)) return;
+    const mine = of.flatMap((x, j) => x === k ? [vc[j]] : []);
+    if (mine.every((v) => v.how === "model")) vs[k] = { how: "model", sentence: wants[k].claim, page: (mine[0] as { page: number } | undefined)?.page ?? 0 };
+  });
   const removed: string[] = [];
   // What was judged is what is emitted: on a "model" verdict the sentence as written (it was the judged claim); on a "quote" verdict
   // (the sentence is a source's own unit said again) the unit's own text; otherwise nothing.

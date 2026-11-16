@@ -80,7 +80,8 @@ export function createFileTool(files: FileService): ToolSpec {
       else if (!r.url) throw new Error("not created: the link could not be made");
       // Ruling 2026-11-14 (live-10 C1): the File's text, every leaf of which just passed the fact guard above (it traces to a tool
       // result this turn or to the person), is a source the reply may restate.
-      if (c.turn) ((c.turn as any).fileTexts ??= []).push(...leaves(data).map((x: string) => String(x).replace(/\s+/g, " ").trim()).filter((x: string) => x.length > 2));
+      // (CodeRabbit on #849: the text the File holds, the validated data, not keys the validator dropped)
+      if (c.turn) ((c.turn as any).fileTexts ??= []).push(...leaves((v as any).data ?? data).map((x: string) => String(x).replace(/\s+/g, " ").trim()).filter((x: string) => x.length > 2));
       return { created: true, kind: r.kind, title: r.title, expires_in_hours: files.ttlHours(), note: "The link is added after your reply. Do not write a URL." };
     },
   };

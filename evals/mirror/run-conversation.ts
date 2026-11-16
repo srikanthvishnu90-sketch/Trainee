@@ -95,12 +95,13 @@ const replayed = (chat: any): string | { calls: { name: string; args: Record<str
 };
 const scripted = (chat: any) => {
   modelCalls++;
+  // (CodeRabbit on #849: a replayed request's prompt is logged too)
+  if (promptLog) prompts.push(`=== ${label}\n${JSON.stringify(chat.messages?.[0]?.content ?? "").slice(0, 20000)}`);
   const rp = replayed(chat);
   if (rp !== null) {
     if (typeof rp === "string") return Response.json({ id: "mirror-replay", model: chat.model, choices: [{ index: 0, message: { role: "assistant", content: rp }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
     return Response.json({ id: "mirror-replay", model: chat.model, choices: [{ index: 0, message: { role: "assistant", content: null, tool_calls: rp.calls.map((c, k) => ({ id: `rp-${label}-${step}-${k}`, type: "function", function: { name: c.name, arguments: JSON.stringify(c.args ?? {}) } })) }, finish_reason: "tool_calls" }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
   }
-  if (promptLog) prompts.push(`=== ${label}\n${JSON.stringify(chat.messages?.[0]?.content ?? "").slice(0, 20000)}`);
   const text = chat.response_format ? "{}" : `Dry run, no model (${label}).`;
   return Response.json({ id: "mirror-dry", model: chat.model, choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
 };

@@ -890,7 +890,7 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
 const plainLine = (s: string) => bare(s).replace(/\s*[.!?]+$/, "");
 const noEmphasis = (t: string) => String(t ?? "").replace(/\*\*|__/g, "");
 export interface ResearchCheck { sentence: string; verdict: string; unit: string | null; url: string | null; passage: string | null }
-export async function enforceMarketReplySupported(reply: string, r: MarketResult, shown: { text: string; url: string | null }[] = [], o: { judge?: SupportJudge | null; ask?: string; chat?: { text: string; title?: string; url: string | null }[]; trace?: (rows: ResearchCheck[]) => void } = {}): Promise<string> {
+export async function enforceMarketReplySupported(reply: string, r: MarketResult, shown: { text: string; url: string | null }[] = [], o: { judge?: SupportJudge | null; ask?: string; chat?: { text: string; title?: string; url: string | null; places?: string[] }[]; trace?: (rows: ResearchCheck[]) => void } = {}): Promise<string> {
   if (!FAIL_CLOSED.support) return enforceMarketReply(reply, r, shown);
   const ask = String(o.ask ?? "");
   const pieces = (t: string) => String(t ?? "").split(/\n+/).flatMap((l) => splitSentences(stripUrls(l), /(?<=[.!?]["')*_]*(?:\s*\[\d+\])*)\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
@@ -907,7 +907,8 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
   // research turn too, read after the pages; a sentence that stands on one carries that link, not a page number.
   const chat = (o.chat ?? []).filter((c) => c && c.text);
   const nPages = sup.idx.pages.length;
-  const cIdx = chat.length ? indexPages(chat.map((c) => ({ text: c.text, title: c.title ?? "Read in this chat", url: c.url ?? undefined })), sup.idx.read, sup.idx.subjects, { ask: sup.idx.ask }) : null;
+  // (CodeRabbit on #849: a posting's own places ride its unit, so "Chicago, IL" in it is read as a place, never as an owner)
+  const cIdx = chat.length ? indexPages(chat.map((c) => ({ text: c.text, title: c.title ?? "Read in this chat", url: c.url ?? undefined, places: c.places ?? [] })), sup.idx.read, sup.idx.subjects, { ask: sup.idx.ask }) : null;
   const idx = cIdx ? { ...sup.idx, pages: [...sup.idx.pages, ...cIdx.pages] } : sup.idx;
   const chatPages = chat.map((_, j) => nPages + j);
   const chatLinks: string[] = [];
@@ -951,7 +952,7 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
   const said = new Set(kept.map((p) => plainLine(p.text.replace(/^"(.*)"$/s, "$1")).toLowerCase()).filter((k) => rows.flat().some((x) => typeof x === "string" && plainLine(x.replace(/"/g, "")).toLowerCase().includes(k))));
   const onChat = (x: number) => vs[x].how !== "drop" && (vs[x] as { page: number }).page >= nPages;
   const anyStood = rows.flat().some((x) => typeof x === "string" || (vs[x].how !== "drop" && (sup.pageOfN.indexOf((vs[x] as { page: number }).page) >= 0 || onChat(x) || cpages[x].length > 0)));
-  const body = rows.map((row) => row.map((x) => {
+  const outRows = rows.map((row) => row.map((x) => {
     if (typeof x === "string") return x;
     const v = vs[x], n = v.how === "drop" ? 0 : sup.pageOfN.indexOf(v.page) + 1;
     // A sentence that stood on this chat's tool results (wholly, or clause by clause with pages): its pages' numbers and the chat's links.
@@ -983,10 +984,17 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
     if (said.has(key)) return "";
     said.add(key);
     return show(text, [n]);
-  }).filter(Boolean).join(" ")).filter(Boolean)
-    // Live-11 C9: a paragraph whose first kept sentence opens on a pronoun ("It calls the bonus ...") points at a sentence that was
-    // removed: it goes (a fragment with no subject of its own).
-    .filter((para) => !/^(?:It|They|This|These|That|Those|He|She|Its|Their)\b/.test(para.trim())).join("\n\n");
+  }));
+  // Live-11 C9: a paragraph whose first kept sentence opens on a pronoun ("It calls the bonus ...") right after a sentence that was
+  // removed points at that sentence: it goes (a fragment with no subject of its own). (CodeRabbit on #849: only then; a pronoun
+  // whose sentence before it stood, or that opens the reply, keeps its paragraph.)
+  const flat = outRows.flatMap((row, i) => row.map((t, j) => ({ i, j, t })));
+  const body = outRows.map((row, i) => {
+    const j0 = row.findIndex(Boolean);
+    if (j0 < 0) return "";
+    const at = flat.findIndex((f) => f.i === i && f.j === j0), prev = at > 0 ? flat[at - 1] : null;
+    return prev && !prev.t && /^(?:It|They|This|These|That|Those|He|She|Its|Their)\b/.test(row[j0].trim()) ? "" : row.filter(Boolean).join(" ");
+  }).filter(Boolean).join("\n\n");
   // (a body of hedges alone answers nothing: it is said only beside a sentence that stood; else code says it could not verify one)
   const answered = rows.flat().some((x) => typeof x === "number" && vs[x].how !== "drop") || rows.flat().some((x) => typeof x === "string" && !noClaim(x) && !personQuestion(x, ask));
   const withChat = chatLinks.length && body ? `${body}\n${chatLinks.join("\n")}` : body;

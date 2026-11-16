@@ -286,6 +286,20 @@ export async function agentTurn(o: {
   // Round 2: also when an open-question research ran in the same turn (trace.r): the market or company result's check is the one
   // that stands, since its sources are the numbered ones the reply cites.
   // Live-11 (C9: 10 of 11 drafted lines dropped and the trace held none of them): a research turn's draft is recorded too.
+  // Live-12 (item 6, C4: "Your city and phone aren't on file" was refused): whether something is on the person's record is code's to
+  // say, from the record itself (their facts, confirmed or not, and their profile's contact fields): true when none of the things the
+  // sentence names is there, false when one is.
+  const recordWords = hypo ? "" : [...(((o.stores as any)?.profile?.facts ?? []) as any[]).map((f) => `${String(f?.kind ?? "")} ${String(f?.name ?? "")} ${String(f?.text ?? "")}`),
+    ...Object.entries({ ...((o.stores as any)?.profile?.basics ?? {}), ...((o.stores as any)?.profile?.resume_header ?? {}) }).filter(([, v]) => typeof v === "string" && v.trim()).map(([k2, v]) => `${k2} ${v}`)].join("\n").toLowerCase();
+  const NOT_ON_FILE = /^(?:but\s+)?(?:(?:i\s+(?:don't|do not)\s+have\s+)(.{2,60}?)\s+on\s+(?:file|record)|(.{2,60}?)\s+(?:isn't|is not|aren't|are not)\s+on\s+(?:file|record|your record))$/iu;
+  // (CodeRabbit on #849: built before the reply pipeline, which takes it too, so a tagged claim about the record is code's check)
+  const onRecord = (x: string): boolean | null => {
+    const m = NOT_ON_FILE.exec(bare(x).replace(/[’]/g, "'").replace(/[.!?]+$/, "").trim());
+    if (!m || hypo) return null;
+    const items = String(m[1] ?? m[2]).toLowerCase().replace(/\b(?:your|the|my|a|an|line|lines|details?|exact)\b/g, " ").split(/,|\band\b|\bor\b|\//).map((w) => w.trim()).filter(Boolean);
+    if (!items.length) return null;
+    return items.every((w) => !w.split(/\s+/).every((t) => new RegExp(`(?<![\\p{L}\\p{N}])${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u").test(recordWords)));
+  };
   let piped: Awaited<ReturnType<typeof runReplyPipeline>> | null = null;
   // The path, by the draft: tagged -> the reply pipeline; untagged -> the support check as before (a stray tag never reaches anyone).
   // Review of #849 (round 2): the pipeline runs only on a turn that rests on evidence a tool read this turn; a plain advice or chat
@@ -297,7 +311,7 @@ export async function agentTurn(o: {
     const l0 = replyLength(o.message, o.history);
     const repair = async (x: { system: string; user: string }) => { const res = await o.model({ system: x.system, messages: [{ role: "user", content: [{ type: "text", text: x.user }] }], tools: [], max_tokens: 500, tool_choice: { type: "none" } } as any); return ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim(); };
     const names = [...new Set((o.history ?? []).filter((m: any) => typeof m?.content === "string").flatMap((m: any) => (m.content as string).match(/(?<![\p{L}])\p{Lu}[\p{L}&'-]{2,}/gu) ?? []))];
-    piped = await runReplyPipeline(result.reply, ledger!, { judge: o.market?.judge ?? null, repair, own: [...(result.codeLines ?? [])], ask: o.message, contracts, names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
+    piped = await runReplyPipeline(result.reply, ledger!, { judge: o.market?.judge ?? null, repair, own: [...(result.codeLines ?? [])], onRecord, ask: o.message, contracts, names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
     // Live-12 review (item 2): a link stays only when a ledger unit, a tool result or a File made this turn gave it (after the draft and
     // after the repair alike: this runs on what the pipeline returns).
     result = { ...result, reply: stripUnseenLinks(piped.text, [...(result.linksSeen ?? []), ...(result.fileLinks ?? []), ...shownBefore(o.history), ...ledger!.units.map((u) => u.url).filter((u): u is string => !!u)]) };
@@ -307,7 +321,9 @@ export async function agentTurn(o: {
   // posting lines Trainee's earlier replies gave from them, each with its link.
   let researchRows: ResearchCheck[] | null = null;
   const chatUnits = () => [
-    ...[...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].map((p: any) => ({ text: [p?.company, p?.title, p?.location, p?.pay ? `pay ${p.pay}` : "", p?.deadline ? `closes ${p.deadline}` : "", p?.state ? `is ${p.state}` : ""].filter((x) => typeof x === "string" && x.trim()).join(", "), title: "A posting read in this chat", url: typeof p?.url === "string" ? p.url : null })).filter((x) => /\d/.test(x.text)),
+    ...[...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].map((p: any) => ({ text: [p?.company, p?.title, p?.location, p?.pay ? `pay ${p.pay}` : "", p?.deadline ? `closes ${p.deadline}` : "", p?.state ? `is ${p.state}` : ""].filter((x) => typeof x === "string" && x.trim()).join(", "), title: "A posting read in this chat", url: typeof p?.url === "string" ? p.url : null,
+      // (CodeRabbit on #849: the posting's own places, its location and the places its pay is given for)
+      places: [p?.location, ...String(p?.pay ?? "").split(/;\s*/).map((x: string) => /^([^:$]+):/.exec(x)?.[1])].filter((x): x is string => typeof x === "string" && /,/.test(x)).map((x) => x.trim()) })).filter((x) => /\d/.test(x.text)),
     ...(hypo ? [] : shownPayOf("what is the pay", o.history)).map((l) => ({ text: l.text, title: "A posting line shown earlier in this chat", url: l.url })),
   ];
   if (piped) { /* the reply pipeline checked it */ }
@@ -414,19 +430,6 @@ export async function agentTurn(o: {
   //     records and the lines shown earlier; with nothing left, the records themselves.
   // Live-10 diagnosis: the model's draft before the check, and each sentence the check removed with its reason, ride the turn's trace.
   const supportTrace: { draft: string; refused: { sentence: string; why: string }[] } | null = FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show ? { draft: String(result.reply), refused: [] } : null;
-  // Live-12 (item 6, C4: "Your city and phone aren't on file" was refused): whether something is on the person's record is code's to
-  // say, from the record itself (their facts, confirmed or not, and their profile's contact fields): true when none of the things the
-  // sentence names is there, false when one is.
-  const recordWords = hypo ? "" : [...(((o.stores as any)?.profile?.facts ?? []) as any[]).map((f) => `${String(f?.kind ?? "")} ${String(f?.name ?? "")} ${String(f?.text ?? "")}`),
-    ...Object.entries({ ...((o.stores as any)?.profile?.basics ?? {}), ...((o.stores as any)?.profile?.resume_header ?? {}) }).filter(([, v]) => typeof v === "string" && v.trim()).map(([k2, v]) => `${k2} ${v}`)].join("\n").toLowerCase();
-  const NOT_ON_FILE = /^(?:but\s+)?(?:(?:i\s+(?:don't|do not)\s+have\s+)(.{2,60}?)\s+on\s+(?:file|record)|(.{2,60}?)\s+(?:isn't|is not|aren't|are not)\s+on\s+(?:file|record|your record))$/iu;
-  const onRecord = (x: string): boolean | null => {
-    const m = NOT_ON_FILE.exec(bare(x).replace(/[’]/g, "'").replace(/[.!?]+$/, "").trim());
-    if (!m || hypo) return null;
-    const items = String(m[1] ?? m[2]).toLowerCase().replace(/\b(?:your|the|my|a|an|line|lines|details?|exact)\b/g, " ").split(/,|\band\b|\bor\b|\//).map((w) => w.trim()).filter(Boolean);
-    if (!items.length) return null;
-    return items.every((w) => !w.split(/\s+/).every((t) => new RegExp(`(?<![\\p{L}\\p{N}])${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u").test(recordWords)));
-  };
   const keepSupportedT: typeof keepSupported = async (r0, src, opts) => { const k = await keepSupported(r0, src, { onRecord, ...(opts ?? {}) }); supportTrace?.refused.push(...((k as any).why ?? [])); return k; };
   if (FAIL_CLOSED.support && !piped && !trace.m && result.reply && result.stopped === "final" && !result.show) {
     const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);

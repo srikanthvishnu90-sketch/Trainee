@@ -38,7 +38,21 @@ The fix is for the drafting model to say which unit each sentence rests on, and 
    - Layer A runs on an index of the cited units; record units are read as one record.
    - The judge then reads the clauses, in one batch.
    - Whether something is on the record is code's check (`onRecord`), not layer A's.
-   - A sentence stands only when every one of its clauses stands. No clause ever spans two units.
+   - A sentence stands only when every one of its clauses stands. No clause ever spans two units (a clause the judge reads with no
+     figure is shown one unit at a time).
+   - **Subjects are structural** (round 8 of #849). Every clause has a subject: the employer it names, else the one carried from the
+     clause before it, across sentences, whatever words refer back ("it", "the company", "there", "this role", or none). Only a newly
+     named employer changes it. A clause may stand on its subject's units, or (for a carried subject) on a unit that names no employer;
+     never on another employer's, and never on a line from an earlier reply whose employer code cannot tell. The judge always reads the
+     clause with its subject ("PayPal: It requires a clearance").
+     Stated limit: a general sentence right after an employer's ("Software engineering interns earn $45 an hour") carries that
+     employer, so a careful judge may refuse it; that fails closed, and naming the new subject avoids it.
+   - A clause naming two or more employers is a comparison: each part (from one employer's name to the next) must hold its figures,
+     names and dates in a unit of that part's own employer; the judge then reads the whole clause against those units.
+   - What is sent is what was verified: a dropped sentence changes what the next one refers back to, so the check runs again on what
+     stood until nothing more fails.
+   - On the untagged path (`keepSupported`), a clause split off a refused sentence keeps the sentence's subject: a clause that names
+     nothing is never read alone, and one that names something else is read with the subject the first clause names.
    - Tags are removed before the reply is sent.
 4. **One repair** (`runReplyPipeline`): at most one model call, and only when something failed. The call gets:
    - each failing sentence, with code's reason in code's words (for example "'$50 an hour' is in no cited unit");
@@ -46,12 +60,16 @@ The fix is for the drafting model to say which unit each sentence rests on, and 
    - what the contract finds missing;
    - the ledger.
 
-   The answer is verified again, and what still fails is dropped. A repaired first sentence goes first, so the answer still comes
-   first. If the reply is still over the limit, whole sentences are dropped from the end.
+   The repaired sentences are verified where they will be sent (after what stood, with its subject carried into them; or first, when
+   the opening sentence failed), and the whole is settled again; what still fails is dropped. A repaired first sentence goes first, so
+   the answer still comes first. A length repair that is verified, fits the limit and still answers replaces the overlong text. If the
+   reply is still over the limit, whole sentences are dropped from the end.
 
    This pass replaces the shortener and the quote fallback on that turn.
 5. **Fallback** (`fallbackLine`). When nothing left answers the question, code says it could not verify an answer. It then adds
-   what the ledger holds for the words of the ask (a posting's pay, with its link).
+   what the ledger holds for the words of the ask (a posting's pay, with its link), and only the ask's subject's own posting facts:
+   the employer the ask names, else the one the draft names first, else the turn's only employer. With several and none named, or a
+   line whose employer code cannot tell, nothing is listed.
 
 ## Task contract (`CONTRACTS`, per intent, never per turn)
 

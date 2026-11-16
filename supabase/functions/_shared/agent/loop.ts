@@ -538,6 +538,8 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         continue;
       }
       try {
+        // (what a File tool adds to the turn while it runs: its link and its text, for the ledger; CodeRabbit on #849)
+        const fl0 = (o.ctx.turn?.fileLinks ?? []).length, ft0 = (((o.ctx.turn as any)?.fileTexts ?? []) as string[]).length;
         const out = await t.run(input, o.ctx);
         // REPLY SHAPE: a staged document passes the same guards as a reply (facts about the person, money, links) or the model is told why not.
         const att = u.name === "attach_document" && out && typeof out === "object" ? (out as any).attachment : null;
@@ -551,8 +553,8 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         }
         tool_calls.push({ name: t.name, ok: true, effect: t.effectOf ? t.effectOf(out) : t.effect, ...(args ? { args } : {}) });
         // REPLY PIPELINE: with the evidence ledger on, the units this result adds ride it, numbered, for the draft to cite.
-        const led = (o.ctx as any).ledger as { fromToolResult: (n: string, x: unknown) => string[]; block: (ids?: string[]) => string } | undefined;
-        const evIds = led ? led.fromToolResult(u.name, out) : [];
+        const led = (o.ctx as any).ledger as { fromToolResult: (n: string, x: unknown, f?: { fileUrl?: string | null; fileTexts?: string[] }) => string[]; block: (ids?: string[]) => string } | undefined;
+        const evIds = led ? led.fromToolResult(u.name, out, { fileUrl: (o.ctx.turn?.fileLinks ?? []).slice(fl0).at(-1) ?? null, fileTexts: (((o.ctx.turn as any)?.fileTexts ?? []) as string[]).slice(ft0) }) : [];
         // (inside the result's own JSON, as one more field, so the result reads as it always did)
         const withEv = evIds.length && out && typeof out === "object" && !Array.isArray(out) ? { ...(out as Record<string, unknown>), evidence: led!.block(evIds).split("\n") } : out;
         results.push({ type: "tool_result", tool_use_id: u.id, content: resultText(withEv) });

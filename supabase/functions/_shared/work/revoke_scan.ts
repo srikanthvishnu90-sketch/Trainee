@@ -4,6 +4,7 @@
 import { unzlibSync } from "npm:fflate@0.8.2";
 import zlib from "node:zlib";
 import { asciiDigits } from "./model.ts";
+import { isGif, isJpeg, isPng, jpegText, pngText } from "./image_text.ts";
 
 export type RevokedValue = string | number | { before: string | number; after: string | number };
 export type PartCategory = "body" | "metadata" | "alt text or media" | "comments or notes" | "filename" | "unreadable container";
@@ -110,7 +111,11 @@ function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: stri
       return [...reads].map((n) => pct ? `${n * sc}%` : n * sc);
     }).filter((n) => typeof n === "string" || (Number.isFinite(n) && !(Number.isInteger(n) && Math.abs(n) < 10)));
     const subs = nums.map((n) => matchersFor(n));
-    return { form: "text", test: (s) => re.test(s) || subs.some((m) => m.test(s)) };
+    // Round 14 (B5): in a JOINED view (PDF strings run together, separators removed) the phrase is matched with its own
+    // separators removed, so a gap drawn by a kerning offset counts as an optional space.
+    const bare = clean(String(v)).normalize("NFC").trim().replace(/[\s\-_]+/g, "");
+    const joined = bare.length >= 2 ? new RegExp(esc(bare), "i") : null;
+    return { form: "text", test: (s) => re.test(s) || (!!joined && s.startsWith(JOINED) && joined.test(s)) || subs.some((m) => m.test(s)) };
   }
   const unit = p.unit ? UNIT_WORDS[p.unit.toLowerCase()] ?? `\\s?${esc(p.unit)}\\b` : "";
   // A small whole number (under 10) is everywhere in a file; it is a hit only with its own unit or currency sign beside
@@ -225,6 +230,8 @@ const STRUCTURAL = new Set(["version", "encoding", "standalone", "id", "rid", "s
   "pos", "lim", "dist", "distt", "distb", "distl", "distr", "simplepos", "relativeheight", "behinddoc", "locked", "layoutincell", "allowoverlap", "noproof",
   "orient", "code", "char", "pitchfamily", "charset", "typeface", "panose", "mod", "sx", "sy", "kx", "ky", "spid", "shapeid", "nvpr", "ph", "hasCustomPrompt".toLowerCase()]);
 const CELLS = "\u0002cells ";
+const OPEN_OR_ATTR = new RegExp(`<(?:[\\w.-]+:)?([\\w.-]+)|${ATTR.source}`, "g");
+const chainGap = (g: string) => !g || /^(?:\s+[^\s=<>]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*$/.test(g);
 const VAL_CONTENT = new Set(["alias", "tag", "docvar", "listitem", "displaytext", "placeholder", "comboboxitem", "dropdownlistitem", "text", "title", "fldsimple",
   "default", "listentry", "statustext", "helptext", "cfvo", "crossesat", "max", "min", "result", "calcpr"]);
 const APP_COUNTERS = /<(?:\w+:)?(?:AppVersion|TotalTime|Words|Characters|CharactersWithSpaces|Pages|Lines|Paragraphs|Slides|Notes|HiddenSlides|MMClips|DocSecurity)>[^<]*</gi;
@@ -245,12 +252,17 @@ function views(raw: string, pdf = false, part = ""): string[] {
   // presentation tag, a list item); on sz, color, jc, numFmt and the like it is a setting.
   const attrs: string[] = [];
   // Round 8: attributes are read across the whole part (a quoted value may hold ">"), each with the element it sits on.
-  for (const m of body.matchAll(ATTR)) {
-    const name = m[2].toLowerCase(), prefix = (m[1] ?? "").toLowerCase();
+  // Round 14 (B4): one forward pass. An element start sets the element; each attribute belongs to it while only attributes
+  // and spaces lie between them (the same rule the old per-attribute look-back applied, which was quadratic in the part).
+  let el = "", chainEnd = -1;
+  for (const m of body.matchAll(OPEN_OR_ATTR)) {
+    if (m[1] !== undefined) { el = m[1].toLowerCase(); chainEnd = m.index! + m[0].length; continue; }
+    const on = chainEnd >= 0 && chainGap(body.slice(chainEnd, m.index!)) ? el : "";
+    chainEnd = on ? m.index! + m[0].length : -1;
+    const name = m[3].toLowerCase(), prefix = (m[2] ?? "").toLowerCase();
     if (prefix.startsWith("xmlns") || name === "xmlns" || STRUCTURAL.has(name)) continue;
-    const el = (/<(?:[\w.-]+:)?([\w.-]+)(?:\s+[^\s=<>]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*$/.exec(body.slice(0, m.index!))?.[1] ?? "").toLowerCase();
-    if (name === "val" && !VAL_CONTENT.has(el)) continue;
-    attrs.push(m[3] ?? m[4] ?? "");
+    if (name === "val" && !VAL_CONTENT.has(on)) continue;
+    attrs.push(m[4] ?? m[5] ?? "");
   }
 
   // Stored cell values on their own (xlsx <v>, pivot-cache v=): the view in which a "$5" is just 5.
@@ -271,32 +283,207 @@ export function clean(t: string): string {
 // A PDF's text is in Flate-compressed content streams; each is inflated and its string operands added as a part, so a
 // value docs.ts printed in a PDF is found (second review of WO-124d: the scan saw nothing in a PDF).
 const GLYPH: Record<string, string> = { zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", space: " ", period: ".", comma: ",", percent: "%", dollar: "$", hyphen: "-", minus: "-", plus: "+" };
+// Round 9: "stream" is followed by CRLF, LF, a lone CR, or spaces before the end of line; each is a stream start.
+// Round 10: only after a dictionary's close (">>"), as a reader parses it; the word "stream" in a title is not one.
+// Round 11: a comment ("%…" to the end of its line) between ">>" and "stream" is whitespace to a reader, so to the scan too.
+const STREAM_AT = />>(?:\s|%[^\r\n]*(?:\r\n|\r|\n))*stream[ \t]*(\r\n|\r|\n)?/y;
+const OBJ_AT = /(\d+)\s+\d+\s+obj(?![\w])/y;
+function streamBody(bytes: Uint8Array, s: string, m: RegExpExecArray): Uint8Array | null {
+  const start = m.index + m[0].length, end = s.indexOf("endstream", start);
+  if (end < 0) return null;
+  return bytes.subarray(start, s[end - 1] === "\n" ? (s[end - 2] === "\r" ? end - 2 : end - 1) : s[end - 1] === "\r" ? end - 1 : end);
+}
+// Round 14 (D-088): a PDF is read as a reader parses it, not by windows of raw text. One forward pass skips comments,
+// literal and hex strings and stream bodies, matches every << with its >>, and records each top-level dictionary, the object
+// it opens ("N G obj"), and the stream after it. An unterminated string, an unbalanced >>, an unclosed << or a stream with no
+// end is not a file the scan can place: the PDF is unreadable.
+interface PdfStream { dict: string; num: number | null; m: RegExpExecArray; body: Uint8Array }
+interface Lexed { dicts: string[]; streams: PdfStream[]; objs: Map<number, string>; bad: boolean }
+function lexPdf(s: string, bytes: Uint8Array | null): Lexed {
+  const dicts: string[] = [], streams: PdfStream[] = [], objs = new Map<number, string>(), stack: number[] = [];
+  let cur: number | null = null, bad = false, i = 0;
+  const n = s.length;
+  while (i < n) {
+    const c = s[i];
+    if (c === "%") { while (i < n && s[i] !== "\n" && s[i] !== "\r") i++; continue; }
+    if (c === "(") {
+      let d = 0;
+      for (; i < n; i++) { const ch = s[i]; if (ch === "\\") { i++; continue; } if (ch === "(") d++; else if (ch === ")" && --d === 0) break; }
+      if (i >= n) { bad = true; break; }
+      i++; continue;
+    }
+    if (c === "<") {
+      if (s[i + 1] === "<") { stack.push(i); i += 2; continue; }
+      const e = s.indexOf(">", i);
+      if (e < 0) { bad = true; break; }
+      i = e + 1; continue;
+    }
+    if (c === ">" && s[i + 1] === ">") {
+      const o = stack.pop();
+      if (o === undefined) { bad = true; break; }
+      if (!stack.length) {
+        const dict = s.slice(o, i + 2), num = cur;
+        dicts.push(dict);
+        if (cur !== null) { if (!objs.has(cur)) objs.set(cur, dict); cur = null; }
+        if (bytes) {
+          STREAM_AT.lastIndex = i;
+          const m = STREAM_AT.exec(s);
+          if (m) {
+            const body = m[1] ? streamBody(bytes, s, m) : null; // "stream" with no end of line: not a stream the scan can place
+            if (!body) { bad = true; break; }
+            streams.push({ dict, num, m, body });
+            i = s.indexOf("endstream", m.index + m[0].length) + 9; continue;
+          }
+        }
+      }
+      i += 2; continue;
+    }
+    if (!stack.length && c >= "0" && c <= "9" && (i === 0 || /[\s\])>]/.test(s[i - 1]))) {
+      OBJ_AT.lastIndex = i;
+      const m = OBJ_AT.exec(s);
+      if (m) { cur = Number(m[1]); i += m[0].length; continue; }
+    }
+    i++;
+  }
+  return { dicts, streams, objs, bad: bad || stack.length > 0 };
+}
+// Names may be written with #xx escapes (/Type#30 is /Type0); every check reads them decoded.
+const names = (d: string) => d.replace(/#([0-9A-Fa-f]{2})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)));
+// A dictionary's own top level: nested dictionaries kept only as "<<>>" and strings dropped, so a key is read where it is.
+function topLevel(d: string): string {
+  let out = "", depth = 0;
+  for (let i = 0; i < d.length; i++) {
+    if (d[i] === "(") { let k = 0; for (; i < d.length; i++) { if (d[i] === "\\") { i++; continue; } if (d[i] === "(") k++; else if (d[i] === ")" && --k === 0) break; } continue; }
+    if (d[i] === "<" && d[i + 1] === "<") { if (++depth === 2) out += "<<"; i++; continue; }
+    if (d[i] === ">" && d[i + 1] === ">") { if (depth-- === 2) out += ">>"; i++; continue; }
+    if (depth <= 1) out += d[i];
+  }
+  return out;
+}
+const FLATE = (d: string) => /\/(?:FlateDecode|Fl)(?![\w])/.test(names(d));
+const streamData = (st: PdfStream) => FLATE(st.dict) ? new Uint8Array(zlib.inflateSync(st.body, { maxOutputLength: 256 * 1024 * 1024 } as never)) : st.body;
+// The objects of a PDF: raw ones, and those packed in compressed object streams (/Type /ObjStm, PDF 1.5+, pdf-lib's default),
+// whose inflated text is kept too so every structural check reads it (round 14: fonts packed there were never checked).
+interface PdfModel { s: string; streams: PdfStream[]; dicts: string[]; objs: Map<number, string>; packed: string[]; bad: boolean }
+const MODELS = new WeakMap<Uint8Array, PdfModel>();
+function pdfModel(bytes: Uint8Array): PdfModel {
+  const had = MODELS.get(bytes);
+  if (had) return had;
+  const s = latin1(bytes), lx = lexPdf(s, bytes), packed: string[] = [], dicts = [...lx.dicts];
+  let bad = lx.bad;
+  for (const st of lx.streams) {
+    const own = topLevel(names(st.dict));
+    if (!/\/Type\s*\/ObjStm(?![\w])/.test(own)) continue;
+    let t: string;
+    try { t = latin1(streamData(st)); } catch { bad = true; continue; }
+    packed.push(t);
+    const N = /\/N\s+(\d+)/.exec(own), F = /\/First\s+(\d+)/.exec(own);
+    if (!N || !F) { bad = true; continue; }
+    const first = Number(F[1]), count = Number(N[1]), headText = t.slice(0, first).trim();
+    const head = headText ? headText.split(/\s+/).map(Number) : [];
+    if (head.length !== 2 * count || head.some((x) => !Number.isInteger(x) || x < 0)) { bad = true; continue; }
+    for (let k = 0; k < count; k++) {
+      const piece = t.slice(first + head[2 * k + 1], k + 1 < count ? first + head[2 * k + 3] : t.length), sub = lexPdf(piece, null);
+      if (sub.bad) bad = true;
+      dicts.push(...sub.dicts);
+      if (sub.dicts.length && /^\s*<</.test(piece) && !lx.objs.has(head[2 * k])) lx.objs.set(head[2 * k], sub.dicts[0]);
+    }
+  }
+  const model = { s, streams: lx.streams, dicts, objs: lx.objs, packed, bad };
+  MODELS.set(bytes, model);
+  return model;
+}
+// The values of a dictionary of references (a font resource dictionary, an /EF dictionary): each is "N G R" (resolved
+// through the object table) or an inline dictionary. Anything else, or a reference to no object, returns null.
+function entries(d: string, objs: Map<number, string>): { dict: string | null; num: number | null }[] | null {
+  const body = d.replace(/^<<|>>$/g, ""), out: { dict: string | null; num: number | null }[] = [];
+  let i = 0;
+  const sp = () => { while (i < body.length && /\s/.test(body[i])) i++; };
+  for (sp(); i < body.length; sp()) {
+    const k = /^\/[^\s\/<>\[\]()]*/.exec(body.slice(i));
+    if (!k) return null;
+    i += k[0].length; sp();
+    const r = /^(\d+)\s+\d+\s+R(?![\w])/.exec(body.slice(i));
+    if (r) { i += r[0].length; out.push({ dict: objs.get(Number(r[1])) ?? null, num: Number(r[1]) }); continue; }
+    if (body.startsWith("<<", i)) { const sub = lexPdf(body.slice(i), null); if (!sub.dicts.length) return null; out.push({ dict: sub.dicts[0], num: null }); i += sub.dicts[0].length; continue; }
+    return null;
+  }
+  return out;
+}
+// The value at a key: an inline dictionary, or the dictionary an "N G R" reference names (null when it names none).
+function valueDicts(d: string, key: string, objs: Map<number, string>): (string | null)[] {
+  const out: (string | null)[] = [], re = new RegExp(`\\/${key}(?![\\w])\\s*(?:(<<)|(\\d+)\\s+\\d+\\s+R(?![\\w]))`, "g");
+  for (const m of d.matchAll(re)) {
+    if (m[1]) { const sub = lexPdf(d.slice(m.index! + m[0].length - 2), null); out.push(sub.dicts[0] ?? null); }
+    else out.push(objs.get(Number(m[2])) ?? null);
+  }
+  return out;
+}
+// Round 14 (D-088): a font is readable only on an allow-list: a simple Type1 or TrueType font whose codes are its standard
+// encoding's characters (none, WinAnsi, MacRoman or Standard), with no /Differences, no /ToUnicode and no descendants. A
+// Type0 or Type3 font, a CMap, a custom encoding, or any other shape draws codes that are not the text the scan reads.
+function fontReadable(d: string): boolean {
+  const full = names(d), top = topLevel(full);
+  const sub = [...top.matchAll(/\/Subtype\s*\/([^\s\/<>\[\]()]+)/g)].map((m) => m[1]);
+  if (sub.length !== 1 || !["Type1", "TrueType"].includes(sub[0])) return false;
+  if (/\/(?:ToUnicode|DescendantFonts|Differences)(?![\w])/.test(full)) return false;
+  const enc = [...top.matchAll(/\/Encoding(?![\w])\s*(\/[^\s\/<>\[\]()]+)?/g)];
+  return enc.length === 0 || (enc.length === 1 && /^\/(?:WinAnsiEncoding|MacRomanEncoding|StandardEncoding)$/.test(enc[0][1] ?? ""));
+}
+// Every font in the file: each dictionary that is one (/Type /Font or a /BaseFont at its top level), and each entry of every
+// /Font resource dictionary, inline or referenced. A font entry that names no object is unreadable.
+function fontsReadable(md: PdfModel): boolean {
+  for (const raw of md.dicts) {
+    const d = names(raw);
+    if (/\/Type\s*\/Font(?![\w])|\/BaseFont(?![\w])/.test(topLevel(d)) && !fontReadable(d)) return false;
+    for (const res of valueDicts(d, "Font", md.objs)) {
+      if (res === null) return false;
+      const es = entries(names(res), md.objs);
+      if (!es || es.some((e) => e.dict === null || !fontReadable(e.dict))) return false;
+    }
+  }
+  return true;
+}
+// Round 14 (B1): attachments by structure. A stream is an attachment if its own dictionary (nested /Params included) says
+// /Type /EmbeddedFile, or if any /EF dictionary references it. Each /EF value must name a stream the scan opens; an
+// /EmbeddedFile dictionary that is not a stream's own (packed, inline, or stray), an /EF that is not a dictionary of
+// references, or related files (/RF) make the PDF unreadable.
+function attachments(md: PdfModel): { refs: Set<number>; bad: boolean } {
+  const refs = new Set<number>();
+  let bad = false;
+  const streamDicts = new Set(md.streams.map((st) => st.dict));
+  for (const raw of md.dicts) {
+    const d = names(raw);
+    if (/\/EmbeddedFile(?![\w])/.test(d) && !streamDicts.has(raw)) bad = true;
+    if (/\/RF(?![\w])/.test(d)) bad = true;
+    if (/\/EF(?![\w])/.test(d)) {
+      const vals = valueDicts(d, "EF", md.objs);
+      if (!vals.length) bad = true;
+      for (const v of vals) {
+        const es = v === null ? null : entries(names(v), md.objs);
+        if (!es || es.some((e) => e.num === null)) { bad = true; continue; }
+        for (const e of es) refs.add(e.num!);
+      }
+    }
+  }
+  for (const p of md.packed) if (/\/EmbeddedFile(?![\w])/.test(names(p))) bad = true;
+  const streamNums = new Set(md.streams.map((st) => st.num));
+  for (const r of refs) if (!streamNums.has(r)) bad = true;
+  return { refs, bad };
+}
 // Round 13: the inflated bodies of a PDF's metadata (XMP) and embedded-file streams, which viewers show (document properties,
 // attachments) but the string reading of content streams never saw. Content streams stay read by their strings only, since
 // their operators are full of layout numbers.
 export function pdfStreams(bytes: Uint8Array): Uint8Array[] {
-  const s = new TextDecoder("latin1").decode(bytes), out: Uint8Array[] = [];
-  for (const m of s.matchAll(STREAM)) {
-    if (!m[1]) continue;
-    const dict = s.slice(Math.max(0, m.index! - 400), m.index!), own = dict.slice(dict.lastIndexOf("<<"));
-    if (!/\/Type\s*\/(?:Metadata|EmbeddedFile)\b|\/Subtype\s*\/XML\b/.test(own)) continue;
-    const body = streamBody(bytes, s, m);
-    if (!body) continue;
-    try { out.push(unzlibSync(body)); } catch { out.push(body); }
+  const md = pdfModel(bytes), out: Uint8Array[] = [], { refs } = attachments(md);
+  for (const st of md.streams) {
+    if (!/\/Type\s*\/(?:Metadata|EmbeddedFile)(?![\w])|\/Subtype\s*\/XML(?![\w])/.test(names(st.dict)) && !(st.num !== null && refs.has(st.num))) continue;
+    try { out.push(streamData(st)); } catch { out.push(st.body); }
   }
   return out;
 }
 // Round 9: readers accept %PDF anywhere in the first 1024 bytes, so the scan does too.
 const isPdf = (b: Uint8Array) => b.length > 4 && latin1(b.subarray(0, 1024)).includes("%PDF");
-// Round 9: "stream" is followed by CRLF, LF, a lone CR, or spaces before the end of line; each is a stream start.
-// Round 10: only after a dictionary's close (">>"), as a reader parses it; the word "stream" in a title is not one.
-// Round 11: a comment ("%…" to the end of its line) between ">>" and "stream" is whitespace to a reader, so to the scan too.
-const STREAM = />>(?:\s|%[^\r\n]*(?:\r\n|\r|\n))*stream[ \t]*(\r\n|\r|\n)?/g;
-function streamBody(bytes: Uint8Array, s: string, m: RegExpMatchArray): Uint8Array | null {
-  const start = m.index! + m[0].length, end = s.indexOf("endstream", start);
-  if (end < 0) return null;
-  return bytes.subarray(start, s[end - 1] === "\n" ? (s[end - 2] === "\r" ? end - 2 : end - 1) : s[end - 1] === "\r" ? end - 1 : end);
-}
 // A stream that does not inflate and holds control bytes is compressed or binary data the scan cannot read.
 const binary = (b: Uint8Array) => b.some((x) => x < 0x09 || (x > 0x0d && x < 0x20));
 // Every PDF string, decoded (round 5): literal strings with all escapes (\\ddd octal, \\n, \\(, line continuations),
@@ -311,6 +498,11 @@ function utf16be(bin: string): string {
   for (let i = 2; i + 1 < bin.length; i += 2) out += String.fromCharCode((bin.charCodeAt(i) << 8) | bin.charCodeAt(i + 1));
   return out;
 }
+// Round 14 (B5): text drawn in pieces ("[(J)83(ordan)-333(Pik)28(e)] TJ", or strings placed one by one) may have a space at
+// any gap or none. The strings run together, with every space, hyphen and underscore removed, are a JOINED view, in which a
+// phrase is matched with its separators removed too ("JordanPike"), so each gap counts as an optional space.
+export const JOINED = "\u0003joined ";
+const squeeze = (t: string) => JOINED + t.replace(/[\s\-_]+/g, "");
 export function pdfStrings(src: string): string[] {
   const lit = [...src.matchAll(/\((?:\\[^]|[^\\)])*\)/g)].map((m) => utf16be(decodePdfLiteral(m[0].slice(1, -1))));
   const hex = [...src.matchAll(/<([0-9A-Fa-f\s]+)>/g)].map((m) => {
@@ -318,17 +510,20 @@ export function pdfStrings(src: string): string[] {
     for (let i = 0; i + 1 < h.length; i += 2) bin += String.fromCharCode(parseInt(h.slice(i, i + 2), 16));
     return utf16be(bin);
   });
-  return [lit.join(" "), lit.join(""), hex.join(" "), hex.join("")];
+  return [lit.join(" "), lit.join(""), hex.join(" "), hex.join(""), squeeze(lit.join("")), squeeze(hex.join(""))];
 }
-// Round 6: a stream with a filter other than FlateDecode, a Flate stream that will not inflate, or a Type0 (CID) font
-// whose glyph codes are not text cannot be read, so the PDF is reported as unreadable rather than clean.
+// Round 6: a stream with a filter other than FlateDecode, a Flate stream that will not inflate, or a font whose codes are
+// not text cannot be read, so the PDF is reported as unreadable rather than clean.
 export function pdfUnreadable(bytes: Uint8Array): boolean {
-  const s = new TextDecoder("latin1").decode(bytes);
+  const md = pdfModel(bytes);
+  if (md.bad) return true;
+  // Round 14: every check below reads the raw bytes and the inflated object streams, names decoded.
+  const s = names([md.s, ...md.packed].join("\n"));
   // Fonts whose codes are not text, encryption, and any /Filter anywhere in the file that is not plain Flate or DCT
   // (an indirect /Filter, an array, LZW, ASCII85...) make the PDF unreadable (round 7: a nested dictionary hid the filter).
   if (/\/Subtype\s*\/Type[03]\b|\/Encrypt\b/.test(s)) return true;
   // Round 13: a simple font's /Differences that draws a code as another digit or letter ("a" drawn as "one") hides text
-  // from the string reading, so the PDF is unreadable; ordinary encodings that keep each code's own character are fine.
+  // from the string reading, so the PDF is unreadable. (Round 14's font allow-list refuses every /Differences on a font.)
   for (const d of s.matchAll(/\/Differences\s*\[([^\]]*)\]/g)) {
     let code = -1;
     for (const t of d[1].matchAll(/(\d+)|\/([A-Za-z0-9._]+)/g)) {
@@ -339,37 +534,31 @@ export function pdfUnreadable(bytes: Uint8Array): boolean {
     }
   }
   for (const f of s.matchAll(/\/Filter\s*(\[[^\]]*\]|\/[A-Za-z0-9]+|\d+\s+\d+\s+R)/g)) {
-    const names = f[1].startsWith("[") ? [...f[1].matchAll(/\/([A-Za-z0-9]+)/g)].map((x) => x[1]) : f[1].startsWith("/") ? [f[1].slice(1)] : ["(indirect)"];
-    if (!names.length || names.some((n) => !["FlateDecode", "Fl", "DCTDecode", "DCT"].includes(n))) return true;
+    const fs = f[1].startsWith("[") ? [...f[1].matchAll(/\/([A-Za-z0-9]+)/g)].map((x) => x[1]) : f[1].startsWith("/") ? [f[1].slice(1)] : ["(indirect)"];
+    if (!fs.length || fs.some((n) => !["FlateDecode", "Fl", "DCTDecode", "DCT"].includes(n))) return true;
   }
-  for (const m of s.matchAll(STREAM)) {
-    if (!m[1]) return true; // "stream" with no end of line: not a stream the scan can place
-    const dict = s.slice(Math.max(0, m.index! - 400), m.index!);
-    const filters = [...(dict.slice(dict.lastIndexOf("<<")).matchAll(/\/(\w+Decode|AHx|A85|Fl|LZW|RL|CCF|DCT)\b/g))].map((x) => x[1]);
+  if (!fontsReadable(md) || attachments(md).bad) return true;
+  for (const st of md.streams) {
+    // Round 14: the stream's own dictionary, matched << to >>, nested dictionaries included, however long.
+    const own = names(st.dict);
+    const filters = [...own.matchAll(/\/(\w+Decode|AHx|A85|Fl|LZW|RL|CCF|DCT)\b/g)].map((x) => x[1]);
     if (filters.some((f) => f !== "FlateDecode" && f !== "Fl" && f !== "DCTDecode" && f !== "DCT")) return true;
     if (filters.some((f) => f === "DCTDecode" || f === "DCT")) continue; // an image
     // Round 13: a PNG/TIFF predictor scrambles the inflated bytes, so such a stream is unreadable unless it is a cross-reference
     // stream (numbers about the file's layout, not content).
-    const own = dict.slice(dict.lastIndexOf("<<"));
     if (/\/Predictor\s+(\d+)/.test(own) && Number(/\/Predictor\s+(\d+)/.exec(own)![1]) > 1 && !/\/Type\s*\/XRef\b/.test(own)) return true;
-    const body = streamBody(bytes, s, m);
-    if (!body) return true;
     // Round 9: a stream is readable only if it inflates or is plain text; a Flate stream whose dictionary the scan
     // did not see is never read as raw bytes.
-    try { unzlibSync(body); } catch { if (filters.length || binary(body)) return true; }
+    try { unzlibSync(st.body); } catch { if (filters.length || binary(st.body)) return true; }
   }
   return false;
 }
 function pdfText(bytes: Uint8Array): string[] {
-  const s = new TextDecoder("latin1").decode(bytes);
   const out: string[] = [];
-  for (const m of s.matchAll(STREAM)) {
-    if (!m[1]) continue;
-    let body = streamBody(bytes, s, m);
-    if (!body) continue;
+  for (const st of pdfModel(bytes).streams) {
+    let body = st.body;
     try { body = unzlibSync(body); } catch { /* not Flate: read as is */ }
-    const ops = new TextDecoder("latin1").decode(body);
-    out.push(...pdfStrings(ops));
+    out.push(...pdfStrings(latin1(body)));
   }
   return out;
 }
@@ -391,7 +580,7 @@ function inflateRaw(b: Uint8Array, max = 256 * 1024 * 1024): [Uint8Array, number
 // Round 11: the zip is read from its own central directory, not by unzip's name-keyed map: every entry (duplicate names
 // included) is returned, each inflated to its true end with no size hint, and an entry whose size, CRC, flags or method
 // disagree with its headers, or a duplicate name, makes the zip unreadable (throws).
-function zipEntries(b: Uint8Array): [string, Uint8Array][] {
+function zipEntries(b: Uint8Array): [[string, Uint8Array][], string] {
   // Round 12: a zip is opened only when every byte of it is accounted for, so nothing in it goes unread: exactly one end record
   // in the tail; one disk; its count, the records parsed and the central directory's size agree; the directory ends at the end
   // record and the comment at the end of the file; entries tile the file from byte 0 to the directory with no gap or overlap;
@@ -451,8 +640,8 @@ function zipEntries(b: Uint8Array): [string, Uint8Array][] {
   // Round 13: an end-record signature inside an entry's own data (a stored zip inside the zip) is that entry's, not a second
   // end record of this file; any other one is.
   if (ends.filter((i) => !spans.some(([a, z]) => i >= a && i < z)).length !== 1) throw new RangeError("second end record");
-  if (extras.some((x) => x.length)) out.push(["(zip extra fields)", new TextEncoder().encode(extras.map(latin1).join("\n"))]);
-  return out;
+  // Round 14: returned apart from the entries, so it is read as the text it is and no entry can take its name.
+  return [out, extras.some((x) => x.length) ? extras.map(latin1).join("\n") : ""];
 }
 // Round 11: every gzip member, each to its true end, with its CRC and size checked; the file must end exactly after the last
 // member. Returns the data of all members and the text of every header (stored names and comments).
@@ -476,16 +665,30 @@ function gzipMembers(b: Uint8Array): [Uint8Array, string] {
   const all = new Uint8Array(datas.reduce((n, d) => n + d.length, 0)); let i = 0; for (const d of datas) { all.set(d, i); i += d.length; }
   return [all, metas.join("\n")];
 }
+// Text: no control characters (C0 but tab, CR and LF; DEL; C1) once decoded as UTF-8, or as UTF-16 with a BOM, or as UTF-16
+// with no BOM only when nine in ten code units are ASCII (every other byte zero), as exported XML and text are.
+const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/;
+function textLike(b: Uint8Array): boolean {
+  const ok = (enc: string) => { try { return !CONTROL.test(new TextDecoder(enc, { fatal: true }).decode(b)); } catch { return false; } };
+  if (b[0] === 0xff && b[1] === 0xfe) return ok("utf-16le");
+  if (b[0] === 0xfe && b[1] === 0xff) return ok("utf-16be");
+  if (ok("utf-8")) return true;
+  if (b.length % 2) return false;
+  let zeroOdd = 0, zeroEven = 0;
+  for (let i = 0; i < b.length; i++) if (b[i] === 0) (i % 2 ? zeroOdd++ : zeroEven++);
+  return (zeroOdd >= 0.9 * b.length / 2 && ok("utf-16le")) || (zeroEven >= 0.9 * b.length / 2 && ok("utf-16be"));
+}
 function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array, boolean][] {
   const out: [string, Uint8Array, boolean][] = [];
   const walk = (name: string, bytes: Uint8Array, depth: number) => {
     if (isZip(bytes)) {
       if (depth >= MAX_DEPTH) { out.push([name, bytes, true]); return; }
-      let inner: [string, Uint8Array][];
-      try { inner = zipEntries(bytes); } catch { out.push([name, bytes, true]); return; }
+      let inner: [string, Uint8Array][], extra: string;
+      try { [inner, extra] = zipEntries(bytes); } catch { out.push([name, bytes, true]); return; }
       let note: string;
       try { note = zipComments(bytes); } catch { out.push([name, bytes, true]); return; }
       if (note) out.push([`${name}!comment`, new TextEncoder().encode(note), false]);
+      if (extra) out.push([`${name}!(zip extra fields)`, new TextEncoder().encode(extra), false]);
       for (const [n, b] of inner) walk(`${name}!${n}`, b, depth + 1);
       return;
     }
@@ -498,9 +701,24 @@ function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array, boolea
       walk(`${name}!gunzip`, inner, depth + 1);
       return;
     }
-    // Round 13: a PDF's metadata and attachments are parts of their own (an attached docx is opened like any zip).
-    if (isPdf(bytes) && depth < MAX_DEPTH) pdfStreams(bytes).forEach((b, k) => walk(`${name}!pdf-stream-${k}`, b, depth + 1));
-    out.push([name, bytes, false]);
+    // Round 14 (B3): every other part is read only on an allow-list: a PNG or JPEG whose every chunk or segment is known
+    // (its text chunks read, its thumbnail read as an image of its own), a PDF, or text (valid UTF-8 or BOM'd UTF-16 with no
+    // control bytes but tab, CR and LF). Anything else (GIF, raw zlib, bzip2, xz, zstd, brotli, .xlsb, vbaProject.bin, EMF,
+    // fonts) is unreadable: its bytes are not read as if they were text.
+    if (isPng(bytes) || isJpeg(bytes)) {
+      const r = depth < MAX_DEPTH && !isPdf(bytes) ? (isPng(bytes) ? pngText(bytes) : jpegText(bytes)) : null;
+      if (!r) { out.push([name, bytes, true]); return; }
+      out.push([name, new TextEncoder().encode(r.texts.join("\n").replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, " ")), false]);
+      r.inner.forEach((b, k) => walk(`${name}!thumbnail-${k}`, b, depth + 1));
+      return;
+    }
+    if (isPdf(bytes)) {
+      // Round 13: a PDF's metadata and attachments are parts of their own (an attached docx is opened like any zip).
+      if (depth < MAX_DEPTH) pdfStreams(bytes).forEach((b, k) => walk(`${name}!pdf-stream-${k}`, b, depth + 1));
+      out.push([name, bytes, false]);
+      return;
+    }
+    out.push([name, bytes, isGif(bytes) || !textLike(bytes)]);
   };
   for (const [n, b] of Object.entries(files)) walk(n, b, 0);
   return out;

@@ -37,7 +37,7 @@ export function normalise(says: string): string {
 // Round 5: a commitment that names its subject meets only a constraint about that subject ("Hybrid is available" does
 // not meet "fully remote"). A statement with no named subject ("yes", "we do") is read as about the constraint asked.
 const SUBJECTS: [RegExp, RegExp][] = [
-  [/\b(?:visas?|sponsor\w*|h-?1b|opt|work visa)\b/, /\b(?:visa|sponsor|h-?1b|opt|immigration|work authori[sz]ation)/],
+  [/\b(?:visas?|sponsor\w*|h-?1b|opt|work visa)\b/, /\b(?:visa|sponsor|h-?1b|immigration|work authori[sz]ation)|\bopt\b/],
   [/\breloc\w*\b/, /\breloc/],
   [/\bremote\b/, /\bremote\b/],
   [/\bhybrid\b/, /\bhybrid\b/],
@@ -46,11 +46,11 @@ const SUBJECTS: [RegExp, RegExp][] = [
 // ("fully remote, not relocation" is about remote, not relocation; round 6).
 // Round 10: a subject is wanted only when no negation stands anywhere in its clause, before or after it ("remote not
 // acceptable", "Remote: no.", "relocation is not wanted").
+// Round 11: the whole text is read, not clause by clause; a split at a comma or a bracket cut "Remote, not acceptable"
+// from its negation. Several subjects are already refused before this (round 7), so nothing needs splitting.
+const REFUSAL = /\b(?:dealbreaker|deal breaker|unacceptable|not acceptable|not ok|not okay|out of the question|won't|can't|avoid\w*|is out|anything but|opposite)\b/;
 function topicHas(topic: string, about: RegExp): boolean {
-  for (const clause of topic.split(/[;,.!?()\n]+|\s(?:but|however|although|though)\s/)) {
-    if (new RegExp(about.source).test(clause) && !NEG.test(clause) && !/\b(?:dealbreaker|deal breaker|unacceptable|not acceptable|not ok|not okay|out of the question|won't|can't)\b/.test(clause)) return true;
-  }
-  return false;
+  return new RegExp(about.source).test(topic) && !NEG.test(topic) && !REFUSAL.test(topic);
 }
 function aboutOther(s: string, limit?: { id: string; text: string }): boolean {
   if (!limit) return false;

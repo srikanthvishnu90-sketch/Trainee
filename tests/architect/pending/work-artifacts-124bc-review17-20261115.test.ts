@@ -25,3 +25,10 @@ Deno.test("124c review 17: reversed times and duplicate UIDs are lint findings",
   has(lintIcs(rev), "DTEND is not after DTSTART", "reversed");
   has(lintIcs(writeIcs([ok, { ...ok }], NOW)), "duplicate UID", "duplicate");
 });
+
+Deno.test("124c review 17 delta: a parameter cannot hide reversed times, and an unclosed VEVENT is a finding", () => {
+  const p = writeIcs([ok], NOW).replace("DTSTART:20261120T100000Z", "DTSTART;VALUE=DATE-TIME:20261120T120000Z");
+  has(lintIcs(p), "DTEND is not after DTSTART", "parameter");
+  const open = writeIcs([ok], NOW).replace("CLASS:PRIVATE", "CLASS:PUBLIC").replace("END:VEVENT\r\n", "");
+  has(lintIcs(open), "not closed", "unclosed");
+});

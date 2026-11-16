@@ -105,7 +105,9 @@ export function lintIcs(text: string): string[] {
     if (norm === "END:VEVENT" && ev) {
       const uid = ev.find((x) => x.startsWith("UID:")) ?? "(no UID)";
       if (uid !== "(no UID)") { if (uids.has(uid)) f.push(`${uid}: duplicate UID`); uids.add(uid); }
-      const ds = ev.find((x) => x.startsWith("DTSTART:"))?.slice(8), de = ev.find((x) => x.startsWith("DTEND:"))?.slice(6);
+      // The value after any parameters (DTSTART;VALUE=DATE-TIME:...), so a parameter cannot hide reversed times.
+      const val = (p: string) => { const x = ev!.find((y) => new RegExp(`^${p}[;:]`, "i").test(y)); return x?.slice(x.indexOf(":") + 1); };
+      const ds = val("DTSTART"), de = val("DTEND");
       if (ds && de && /^\d{8}T\d{6}Z$/.test(ds) && /^\d{8}T\d{6}Z$/.test(de) && de <= ds) f.push(`${uid}: DTEND is not after DTSTART`);
       for (const req of ["UID:", "DTSTAMP:", "DTSTART", "DTEND"]) if (!ev.some((x) => x.startsWith(req))) f.push(`${uid}: ${req.replace(":", "")} missing`);
       if (!ev.includes("CLASS:PRIVATE")) f.push(`${uid}: CLASS:PRIVATE missing`);
@@ -120,6 +122,7 @@ export function lintIcs(text: string): string[] {
       if (bad) f.push(`${name} has an unescaped "${bad}"`);
     }
   }
+  if (ev) f.push("a VEVENT is not closed with END:VEVENT");
   if (!events) f.push("no VEVENT");
   return f;
 }

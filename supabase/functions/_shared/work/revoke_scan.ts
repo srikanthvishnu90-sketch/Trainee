@@ -352,37 +352,68 @@ function cp(n: number, raw: string): string { return Number.isInteger(n) && n >=
 const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function crc32(b: Uint8Array): number { let c = 0xffffffff; for (const x of b) c = CRC[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
 // Inflates a raw deflate stream to its true end, with no size hint; returns the data and how many input bytes it used.
-function inflateRaw(b: Uint8Array): [Uint8Array, number] {
-  const r = zlib.inflateRawSync(b, { info: true } as never) as unknown as { buffer: Uint8Array; engine: { bytesWritten: number } };
+function inflateRaw(b: Uint8Array, max = 256 * 1024 * 1024): [Uint8Array, number] {
+  // (capped, so a small entry cannot expand without bound; past the cap it throws and the container is unreadable)
+  const r = zlib.inflateRawSync(b, { info: true, maxOutputLength: max } as never) as unknown as { buffer: Uint8Array; engine: { bytesWritten: number } };
   return [new Uint8Array(r.buffer), r.engine.bytesWritten];
 }
 // Round 11: the zip is read from its own central directory, not by unzip's name-keyed map: every entry (duplicate names
 // included) is returned, each inflated to its true end with no size hint, and an entry whose size, CRC, flags or method
 // disagree with its headers, or a duplicate name, makes the zip unreadable (throws).
 function zipEntries(b: Uint8Array): [string, Uint8Array][] {
+  // Round 12: a zip is opened only when every byte of it is accounted for, so nothing in it goes unread: exactly one end record
+  // in the tail; one disk; its count, the records parsed and the central directory's size agree; the directory ends at the end
+  // record and the comment at the end of the file; entries tile the file from byte 0 to the directory with no gap or overlap;
+  // each local header matches its central record (name, flags, method, CRC and sizes, or a matching data descriptor); only
+  // known extra fields. Anything else throws, and the file is unreadable.
+  let ends = 0;
+  for (let i = Math.max(0, b.length - 65557); i + 3 < b.length; i++) if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x05 && b[i + 3] === 0x06) ends++;
   const e = eocdAt(b);
-  if (e < 0) throw new RangeError("no central directory");
-  const n = u16(b, e + 10), out: [string, Uint8Array][] = [], seen = new Set<string>();
-  if (n === 0xffff || u32(b, e + 16) === 0xffffffff) throw new RangeError("zip64");
-  let p = u32(b, e + 16);
+  if (e < 0 || ends !== 1) throw new RangeError("end record");
+  const n = u16(b, e + 10), cdSize = u32(b, e + 12), cdOff = u32(b, e + 16);
+  if (u16(b, e + 4) || u16(b, e + 6) || u16(b, e + 8) !== n || n === 0xffff || cdOff === 0xffffffff) throw new RangeError("end record fields");
+  if (cdOff + cdSize !== e || e + 22 + u16(b, e + 20) !== b.length) throw new RangeError("directory bounds");
+  const KNOWN_EXTRA = new Set([0x5455, 0x7875, 0x000a, 0xcafe, 0x5855, 0x7855]);
+  const extrasOk = (x: Uint8Array) => { let q = 0; while (q < x.length) { if (q + 4 > x.length) return false; const id = u16(x, q), len = u16(x, q + 2); if (!KNOWN_EXTRA.has(id) || q + 4 + len > x.length) return false; q += 4 + len; } return true; };
+  const out: [string, Uint8Array][] = [], seen = new Set<string>(), spans: [number, number][] = [];
+  let p = cdOff;
   for (let k = 0; k < n; k++) {
     if (u32(b, p) !== 0x02014b50) throw new RangeError("central directory");
     const flags = u16(b, p + 8), method = u16(b, p + 10), crc = u32(b, p + 16), csize = u32(b, p + 20), usize = u32(b, p + 24);
     const nl = u16(b, p + 28), xl = u16(b, p + 30), cl = u16(b, p + 32), off = u32(b, p + 42);
-    const name = new TextDecoder().decode(b.subarray(p + 46, p + 46 + nl));
+    const nameBytes = b.subarray(p + 46, p + 46 + nl), name = new TextDecoder().decode(nameBytes);
     if ((flags & 1) || ![0, 8].includes(method) || csize === 0xffffffff || usize === 0xffffffff || seen.has(name)) throw new RangeError("entry");
+    if (u16(b, p + 34) || !extrasOk(b.subarray(p + 46 + nl, p + 46 + nl + xl))) throw new RangeError("central extra");
     seen.add(name);
-    if (u32(b, off) !== 0x04034b50 || (u16(b, off + 6) & 1) || u16(b, off + 8) !== method) throw new RangeError("local header");
-    const start = off + 30 + u16(b, off + 26) + u16(b, off + 28);
-    if (start + csize > b.length) throw new RangeError("short entry");
+    if (u32(b, off) !== 0x04034b50 || u16(b, off + 6) !== flags || u16(b, off + 8) !== method) throw new RangeError("local header");
+    const lnl = u16(b, off + 26), lxl = u16(b, off + 28);
+    const lname = b.subarray(off + 30, off + 30 + lnl);
+    if (lnl !== nl || lname.some((x, i) => x !== nameBytes[i]) || !extrasOk(b.subarray(off + 30 + lnl, off + 30 + lnl + lxl))) throw new RangeError("local name or extra");
+    const desc = (flags & 8) !== 0;
+    const lc = u32(b, off + 14), lcs = u32(b, off + 18), lus = u32(b, off + 22);
+    if (!desc ? (lc !== crc || lcs !== csize || lus !== usize) : ((lc || lcs || lus) && (lc !== crc || lcs !== csize || lus !== usize))) throw new RangeError("local sizes");
+    const start = off + 30 + lnl + lxl;
+    if (start + csize > cdOff) throw new RangeError("short entry");
     const raw = b.subarray(start, start + csize);
     let data: Uint8Array;
-    if (method === 0) data = raw;
-    else { const [d, used] = inflateRaw(raw); if (used !== csize) throw new RangeError("deflate length"); data = d; }
+    if (method === 0) { if (csize !== usize) throw new RangeError("stored size"); data = raw; }
+    else { const [d, used] = inflateRaw(raw, usize + 1); if (used !== csize) throw new RangeError("deflate length"); data = d; }
     if (data.length !== usize || crc32(data) !== crc) throw new RangeError("size or crc");
+    let endAt = start + csize;
+    if (desc) {
+      const q = u32(b, endAt) === 0x08074b50 ? endAt + 4 : endAt;
+      if (u32(b, q) !== crc || u32(b, q + 4) !== csize || u32(b, q + 8) !== usize) throw new RangeError("data descriptor");
+      endAt = q + 12;
+    }
+    spans.push([off, endAt]);
     out.push([name, data]);
     p += 46 + nl + xl + cl;
   }
+  if (p !== e) throw new RangeError("directory size");
+  spans.sort((x, y) => x[0] - y[0]);
+  let at = 0;
+  for (const [a, z] of spans) { if (a !== at) throw new RangeError("gap or overlap"); at = z; }
+  if (at !== cdOff) throw new RangeError("bytes before the directory");
   return out;
 }
 // Round 11: every gzip member, each to its true end, with its CRC and size checked; the file must end exactly after the last
@@ -417,7 +448,7 @@ function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array, boolea
       let note: string;
       try { note = zipComments(bytes); } catch { out.push([name, bytes, true]); return; }
       if (note) out.push([`${name}!comment`, new TextEncoder().encode(note), false]);
-      inner.forEach(([n, b], k) => walk(`${name}!${n}${inner.findIndex(([x]) => x === n) === k ? "" : `#${k}`}`, b, depth + 1));
+      for (const [n, b] of inner) walk(`${name}!${n}`, b, depth + 1);
       return;
     }
     if (isGzip(bytes)) {

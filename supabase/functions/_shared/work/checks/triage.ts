@@ -55,14 +55,16 @@ function topicHas(topic: string, about: RegExp): boolean {
 function aboutOther(s: string, limit?: { id: string; text: string }): boolean {
   if (!limit) return false;
   // When the constraint's id names a subject, that is its subject; otherwise its text's un-negated subjects are.
-  const id = normalise(String(limit.id).replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " "));
+  const id = normalise(`${String(limit.id).replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ")} ${String(limit.id).replace(/[_-]+/g, " ")}`);
   // Round 12: a constraint that names a subject and carries a negation or refusal anywhere, in its id or its text, does not
   // plainly want that subject, so no commitment meets it: not one naming a subject, and not "yes", "it is available" or
   // "we offer it" either (the subject named only in the id, with "Not acceptable" as the text, had met).
   // Round 14: every dash and invisible format character, and camelCase ids ("noRemote"), are read as spaces; the subject
   // lists accept "h 1b" (round 13's hyphen map hid "H-1B").
-  const spaced = (x: string) => String(x ?? "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[\p{Cf}\u034F]/gu, "").replace(/[\p{Pd}_]+/gu, " ").replace(/\u02BC/g, "'");
-  const full = normalise(`${spaced(String(limit.id))} ${spaced(String(limit.text ?? ""))}`); // round 13: "deal-breaker", "un-acceptable"
+  const spaced = (x: string) => String(x ?? "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[\p{Cf}\u034F]/gu, "").replace(/[\p{Pd}_\u2212]+/gu, " ").replace(/\u02BC/g, "'");
+  // Round 15: the split and the unsplit forms both, so a camelCase split inside a word ("ReLocation") hides nothing.
+  const unsplit = (x: string) => String(x ?? "").replace(/[\p{Cf}\u034F]/gu, "").replace(/[\p{Pd}_\u2212]+/gu, " ").replace(/\u02BC/g, "'");
+  const full = normalise(`${spaced(String(limit.id))} ${spaced(String(limit.text ?? ""))} ${unsplit(String(limit.id))} ${unsplit(String(limit.text ?? ""))}`); // round 13: "deal-breaker", "un-acceptable"
   if (SUBJECTS.some(([, a]) => new RegExp(a.source).test(full)) && (NEG.test(full) || REFUSAL.test(full))) return true;
   // Round 8: the id goes through the same rules as the text: a negated subject (no_hybrid) is not the subject, and an id or
   // text naming several subjects (visa_and_relocation) lets no subject-bearing statement meet.

@@ -1,0 +1,186 @@
+{
+  "sdk": "@vercel/sandbox@3.9.1",
+  "started": "2026-11-16T00:32:52.210Z",
+  "A": {
+    "image": "vercel/sandbox/python:3.14",
+    "create": {
+      "median": 201,
+      "worst": 345,
+      "n": 5
+    },
+    "firstCommand": {
+      "median": 196,
+      "worst": 216,
+      "n": 5
+    }
+  },
+  "B": {
+    "image": "universal (default)",
+    "create": {
+      "median": 173,
+      "worst": 182,
+      "n": 5
+    },
+    "firstCommand": {
+      "median": 146,
+      "worst": 248,
+      "n": 5
+    }
+  },
+  "D": {
+    "total": {
+      "median": 770,
+      "worst": 983,
+      "n": 5
+    },
+    "results": [
+      {
+        "exit": 0,
+        "tail": " | OK"
+      },
+      {
+        "exit": 0,
+        "tail": " | OK"
+      },
+      {
+        "exit": 0,
+        "tail": " | OK"
+      },
+      {
+        "exit": 0,
+        "tail": " | OK"
+      },
+      {
+        "exit": 0,
+        "tail": " | OK"
+      }
+    ]
+  },
+  "E": {
+    "total": {
+      "median": 2175,
+      "worst": 3408,
+      "n": 5
+    },
+    "last": [
+      {
+        "variant": "ledger.py",
+        "exit": 0,
+        "tail": "OK"
+      },
+      {
+        "variant": "mutant1.py",
+        "exit": 1,
+        "tail": "FAILED (errors=3)"
+      },
+      {
+        "variant": "mutant2.py",
+        "exit": 1,
+        "tail": "FAILED (failures=1)"
+      },
+      {
+        "variant": "mutant3.py",
+        "exit": 1,
+        "tail": "FAILED (failures=2)"
+      }
+    ]
+  },
+  "F": {
+    "bigOutputExit": 0,
+    "bigOutputMs": 266,
+    "timeout": "resolved after 19690 ms, exit 143, out \"\""
+  },
+  "denyAll": {
+    "rows": [
+      {
+        "name": "dns system",
+        "exit": 2,
+        "out": "",
+        "err": ""
+      },
+      {
+        "name": "dns udp 8.8.8.8",
+        "exit": 1,
+        "out": "",
+        "err": "TimeoutError: timed out"
+      },
+      {
+        "name": "dns udp 1.1.1.1",
+        "exit": 1,
+        "out": "",
+        "err": "TimeoutError: timed out"
+      },
+      {
+        "name": "https name",
+        "exit": 6,
+        "out": "000",
+        "err": "curl: (6) Could not resolve host: example.com"
+      },
+      {
+        "name": "http name",
+        "exit": 6,
+        "out": "000",
+        "err": "curl: (6) Could not resolve host: example.com"
+      },
+      {
+        "name": "https raw ip",
+        "exit": 28,
+        "out": "000",
+        "err": "curl: (28) Connection timed out after 5002 milliseconds"
+      },
+      {
+        "name": "tcp 443",
+        "exit": 1,
+        "out": "",
+        "err": "TimeoutError: timed out"
+      },
+      {
+        "name": "tcp 80",
+        "exit": 1,
+        "out": "",
+        "err": "TimeoutError: timed out"
+      },
+      {
+        "name": "ipv6",
+        "exit": 7,
+        "out": "000",
+        "err": "curl: (7) Failed to connect to 2606:4700:4700::1111 port 443 after 0 ms: Could not connect to server"
+      },
+      {
+        "name": "icmp",
+        "exit": 127,
+        "out": "",
+        "err": "timeout: failed to execute process: No such file or directory (os error 2)"
+      },
+      {
+        "name": "metadata",
+        "exit": 28,
+        "out": "",
+        "err": "curl: (28) Connection timed out after 3002 milliseconds"
+      },
+      {
+        "name": "pip",
+        "exit": 1,
+        "out": "",
+        "err": "ERROR: No matching distribution found for requests"
+      }
+    ],
+    "envNames": "AWS_CA_BUNDLE CARGO_HTTP_CAINFO CURL_CA_BUNDLE GIT_SSL_CAINFO GRPC_DEFAULT_SSL_ROOTS_FILE_PATH HOME LANG NODE_EXTRA_CA_CERTS NODE_USE_SYSTEM_CA NPM_CONFIG_CAFILE PATH PIP_CERT PWD REQUESTS_CA_BUNDLE SHELL SHLVL SSL_CERT_FILE _"
+  },
+  "allowAll": [
+    {
+      "name": "dns system",
+      "exit": 0,
+      "out": "2606:4700:10::6814:179a example.com\n2606:4700:10::ac42:93f3 example.com"
+    },
+    {
+      "name": "https name",
+      "exit": 0,
+      "out": "200"
+    }
+  ],
+  "used": {
+    "creations": 23,
+    "vcpuMinutesUpperBound": 1.76
+  }
+}

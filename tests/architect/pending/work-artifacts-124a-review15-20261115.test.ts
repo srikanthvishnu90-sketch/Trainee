@@ -58,14 +58,18 @@ function revokedCase(values: string[] = [NAME]) {
   return c;
 }
 const memo = (text: string[]) => ({ cells: [{ id: "a", value: 12 }], text });
-const docxWriter = async (footer = "") => (await prov()).traineeWriter({
-  kind: "docx",
-  render: (m) => [{ filename: "memo.docx", mime: DOCX, bytes: docx({}, [...m.text, footer].join(" ")) }],
-});
-const pdfWriter = async () => (await prov()).traineeWriter({
-  kind: "pdf",
-  render: (m) => [{ filename: "memo.pdf", mime: "application/pdf", bytes: pdf(page(`BT /F1 12 Tf (${m.text.join(" ")}) Tj ET`)) }],
-});
+// Review 16 (B2) closed the set of writers: only the writer modules mint one, with their own import.meta. These stubs
+// stand in for docs.ts (WO-124d, not on this branch) by naming its URL, which only a test may do. Same renders as before.
+type M = { cells: unknown[]; text: string[] };
+type R = (m: M) => { filename: string; mime: string; bytes: Uint8Array }[];
+const DOCS_META = { url: new URL("../../../supabase/functions/_shared/work/docs.ts", import.meta.url).href };
+const stubWriter = async (kind: "docx" | "pdf", render: R) => (await prov()).mintWriter(DOCS_META, kind, render);
+const docxWriter = (footer = "") => stubWriter("docx",
+  (m) => [{ filename: "memo.docx", mime: DOCX, bytes: docx({}, [...m.text, footer].join(" ")) }],
+);
+const pdfWriter = () => stubWriter("pdf",
+  (m) => [{ filename: "memo.pdf", mime: "application/pdf", bytes: pdf(page(`BT /F1 12 Tf (${m.text.join(" ")}) Tj ET`)) }],
+);
 function io() {
   const calls: string[] = [];
   return {
@@ -140,7 +144,7 @@ Deno.test("124a review 15 gate: a revoked value in the source model is refused b
   const p = await prov();
   const c = revokedCase();
   let rendered = 0;
-  const w = p.traineeWriter({ kind: "docx", render: (m) => { rendered++; return [{ filename: "m.docx", mime: DOCX, bytes: docx({}, m.text.join(" ")) }]; } });
+  const w = await stubWriter("docx", (m) => { rendered++; return [{ filename: "m.docx", mime: DOCX, bytes: docx({}, m.text.join(" ")) }]; });
   const r = await p.write(c, w, memo([`Lead: ${NAME}`]));
   eq([r.ok, rendered], [false, 0], "refused, and the writer never ran");
   eq((r as { why: string }).why, "source holds a revoked value", "the reason");

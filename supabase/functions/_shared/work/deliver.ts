@@ -98,34 +98,54 @@ async function partsOf(f: WorkFile): Promise<WorkFile[]> {
   return Object.entries(unzipSync(f.bytes)).filter(([n]) => !n.endsWith("/")).map(([n, b]) => ({ filename: n, mime: "text/plain", bytes: b }));
 }
 
-export async function deliver(channel: Channel, f: WorkFile, io: DeliverIo, c: WorkCase): Promise<DeliverResult> {
+// Sixteenth review (B1): the file is read exactly once, at the start: its name and type as strings and its bytes copied
+// into a buffer only this call holds. The provenance check, the scan, the choice of rail and every send use that copy, so
+// bytes changed by the caller after the check (or a getter that answers differently on a later read) are never sent.
+// Each io call gets its own fresh copy, so one rail cannot change what the next one sends.
+type Snapshot = { readonly filename: string; readonly mime: string; readonly bytes: Uint8Array };
+function snapshot(f: unknown): Snapshot | null {
+  try {
+    if (!f || typeof f !== "object") return null;
+    const x = f as Record<string, unknown>;
+    const b = x.bytes; // the one read of bytes
+    // A real typed array (a Proxy or an array-like is refused), copied by its internal slots: no species, no iterator.
+    if (!ArrayBuffer.isView(b) || !(b instanceof Uint8Array)) return null;
+    const bytes = new Uint8Array(b);
+    const filename = String(x.filename ?? ""), mime = String(x.mime ?? "");
+    return Object.freeze({ filename, mime, bytes });
+  } catch { return null; }
+}
+const fresh = (s: Snapshot): WorkFile => ({ filename: s.filename, mime: s.mime, bytes: new Uint8Array(s.bytes) });
+
+export async function deliver(channel: Channel, file: WorkFile, io: DeliverIo, c: WorkCase): Promise<DeliverResult> {
   const tried: Delivery[] = [];
+  const f = snapshot(file);
   // The gate, before any call on io: provenance first (outside bytes are refused whatever a scan would say), then the scan.
-  if (!c || !(f?.bytes instanceof Uint8Array) || !writtenFor(c, f.bytes)) {
+  if (!c || !f || !writtenFor(c, f.bytes)) {
     return { how: "text_builder", ok: false, tried, refused: "not written by Trainee for this case",
       note: "This file was not made by Trainee for this work, so it was not sent. Nothing was sent anywhere." };
   }
   const values = revoked(c);
-  const hits = values.length ? await scan({ [f.filename]: f.bytes }, values) : [];
+  const hits = values.length ? await scan({ [f.filename]: new Uint8Array(f.bytes) }, values) : [];
   if (hits.length) {
     return { how: "text_builder", ok: false, tried, refused: "revoked value or unreadable", note: `${audit(hits)} Nothing was sent.` };
   }
   let how = chooseDelivery(channel, f.mime, { bytes: f.bytes.length, filePage: !!io.filePage });
   if (how === "native") {
     tried.push("native");
-    if ((await io.sendFile(f)).ok) return { how, ok: true, tried, note: `${f.filename} was sent as a file. ${NOT_RECALLED}` };
+    if ((await io.sendFile(fresh(f))).ok) return { how, ok: true, tried, note: `${f.filename} was sent as a file. ${NOT_RECALLED}` };
     how = io.filePage && f.bytes.length <= FILE_PAGE_MAX_BYTES ? "file_page" : "text_builder";
   }
   if (how === "file_page" && io.filePage) {
     tried.push("file_page");
-    const url = await io.filePage(f);
+    const url = await io.filePage(fresh(f));
     if (url && (await io.sendText(`${f.filename}: ${url}\nThis page is yours alone and expires.`)).ok) {
       return { how, ok: true, url, tried, note: `${f.filename} went to your own expiring page. ${NOT_RECALLED}` };
     }
   }
   tried.push("text_builder");
   let text: string | null = null;
-  try { text = await textBuilder(await partsOf(f)); } catch { text = null; }
+  try { text = await textBuilder(await partsOf(fresh(f))); } catch { text = null; }
   if (text && (await io.sendText(text)).ok) {
     return { how: "text_builder", ok: true, tried, note: `${f.filename} went as a text builder with a SHA-256 manifest. ${NOT_RECALLED}` };
   }

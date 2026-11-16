@@ -128,6 +128,22 @@ code and tested.
 - `deliver.ts`
   - `chooseDelivery(channel, mime)` returns `"native" | "file_page" | "text_builder"`.
   - `deliver()` uses only `channel_artifacts` and `trainee-file`.
+- `provenance.ts` (124a, owner scope ruling: delivery covers only bytes a Trainee writer produced for that case)
+  - `WRITERS`: one fixed, frozen handle per writer kind, made at load time from the real writers that `provenance.ts`
+    itself imports. The closed set of writers is that import list. No exported function takes a render function, a
+    module URL or an `import.meta`; there is no mint, no factory and no hook (tests included).
+  - `write(c, WRITERS.<kind>, model)` clones the model once, refuses a revoked value in it before rendering, renders
+    from the clone, scans the bytes and records `sha256(bytes)` with the case. `writtenFor(c, bytes)` is what
+    `deliver()` checks; any other bytes are refused before any send.
+  - The slot for writers not on trunk yet (enforced by `work-artifacts-124a-review17-20261115.test.ts`, which fails when
+    a writer module exists without its handle, or a handle exists without its module):
+    - WO-124c (`ag/wo-124bc`) adds to `provenance.ts` only `import { type IcsEvent, writeIcs } from "./ics.ts";` and the
+      `RENDERS` line `ics: (m: { events: IcsEvent[]; now: string }) => [{ filename: "invite.ics", mime: "text/calendar",
+      bytes: new TextEncoder().encode(writeIcs(m.events, { now: m.now })) }]`.
+    - WO-124d (`ag/wo-124d`) adds to `provenance.ts` only `import { type Deck, type DocModel, writeDocx, writePdf,
+      writePptx } from "./docs.ts";` and the `RENDERS` lines for `docx` and `pdf` (a `DocModel`) and `pptx` (a `Deck`).
+    - A writer module never imports `provenance.ts`, and each branch adds to the slot test a line showing its handle's
+      bytes are exactly its writer's output (as the xlsx line does).
 - `proof.ts`
   - `report(checks[], limits[])` returns the report text.
   - `boundClaims(reply, report)` refuses a claim of a check that was not run.
@@ -205,6 +221,10 @@ found in one is a stated limit: it is added here and to the tests, and the code 
 - **D4** (`revoke_scan.ts`, `views`). The revoke scan reads each part's text, and every attribute value except those whose
   local name is in `STRUCTURAL` ("val" only on the elements in `VAL_CONTENT`). It inflates a PDF's Flate streams. It
   compares numbers as numbers.
+- **D7** (`provenance.ts`, `deliver.ts`). A file is delivered only when its exact bytes were recorded for that case by
+  `write()` through one of the `WRITERS` handles. The handles are known by identity and exist only for the writers
+  `provenance.ts` imports; nothing else can make one (review 17 replaced a source-text gate with runtime tests of every
+  probe path: a forged module URL, computed access, an alias, a factory reachable from any export).
 - **D6** (`case.ts`). A case is practice unless it is made with `practice: false`, and that flag cannot change afterwards.
 - **D8** (124e, `_shared/agent/work_tool.ts` `boundWorkReply`, applied last in `career_brain.ts`). **The guarantee:**
   code's status line, built from the check log, ends every reply that delivered a work file. Removing sentences that
@@ -221,3 +241,7 @@ found in one is a stated limit: it is added here and to the tests, and the code 
 - A year range or an "at" time can carry a count ("from 1950 to 2050").
 - Check-claim wording the vocabulary does not hold (other languages, new slang). The D8 status line is the guarantee.
 - Fail-closed over-refusal in documents of words that are not figures ("last quarter", "third-party", "zero-trust").
+- The pre-render source check of `write()` reads the model's values, not its keys: an xlsx defined name (a key) reaches
+  the bytes unchecked there, and only the scan of the rendered bytes refuses a revoked value in it (tested in review 15).
+- Code running in the same process that rewrites built-ins (`Array.prototype`, `crypto`) is out of reach of any check in
+  this module.

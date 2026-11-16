@@ -57,19 +57,16 @@ function revokedCase(values: string[] = [NAME]) {
   kase.addRound(c, { round: 2, text: "take it back", constraints: [{ id: "k2", kind: "hard", text: "do not name them", revokes: "k1" }] });
   return c;
 }
-const memo = (text: string[]) => ({ cells: [{ id: "a", value: 12 }], text });
-// Review 16 (B2) closed the set of writers: only the writer modules mint one, with their own import.meta. These stubs
-// stand in for docs.ts (WO-124d, not on this branch) by naming its URL, which only a test may do. Same renders as before.
-type M = { cells: unknown[]; text: string[] };
-type R = (m: M) => { filename: string; mime: string; bytes: Uint8Array }[];
-const DOCS_META = { url: new URL("../../../supabase/functions/_shared/work/docs.ts", import.meta.url).href };
-const stubWriter = async (kind: "docx" | "pdf", render: R) => (await prov()).mintWriter(DOCS_META, kind, render);
-const docxWriter = (footer = "") => stubWriter("docx",
-  (m) => [{ filename: "memo.docx", mime: DOCX, bytes: docx({}, [...m.text, footer].join(" ")) }],
-);
-const pdfWriter = () => stubWriter("pdf",
-  (m) => [{ filename: "memo.pdf", mime: "application/pdf", bytes: pdf(page(`BT /F1 12 Tf (${m.text.join(" ")}) Tj ET`)) }],
-);
+// Review 17 (B1) closed the set of writers structurally: provenance.ts imports each real writer and exposes fixed handles
+// (WRITERS.xlsx); there is no mint and no factory. The stub docx/pdf writers these tests used (they named docs.ts's URL)
+// are replaced by the real xlsx writer, the only writer on this branch. API rename only: every assertion is as strong.
+type B = { sheets: { name: string; cells: Record<string, { v: string | number }> }[]; charts: never[]; names?: Record<string, string>; expected: Record<string, never> };
+// The memo as a workbook: each text line a cell, plus the number cell. `names` are defined names the writer draws.
+const memo = (text: string[], names?: Record<string, string>): B => ({
+  sheets: [{ name: "Memo", cells: { A1: { v: 12 }, ...Object.fromEntries(text.map((t, i) => [`A${i + 2}`, { v: t }])) } }],
+  charts: [], expected: {}, ...(names ? { names } : {}),
+});
+const xlsxWriter = async () => (await prov()).WRITERS.xlsx;
 function io() {
   const calls: string[] = [];
   return {
@@ -112,7 +109,7 @@ Deno.test("124a review 15 gate: outside files are refused by deliver() whatever 
 Deno.test("124a review 15 gate: a file Trainee wrote for one case is not deliverable in another, nor after one byte changes", async () => {
   const p = await prov();
   const a = revokedCase(), b = revokedCase();
-  const w = await docxWriter();
+  const w = await xlsxWriter();
   const r = await p.write(a, w, memo(["Quarterly memo"]));
   assert(r.ok, "the clean memo is written");
   const f = (r as { files: deliverMod.WorkFile[] }).files[0];
@@ -121,14 +118,14 @@ Deno.test("124a review 15 gate: a file Trainee wrote for one case is not deliver
   const changed = new Uint8Array(f.bytes); changed[changed.length - 1] ^= 1;
   const x2 = io();
   assert(!(await send({ ...f, bytes: changed }, x2, a)).ok && !x2.calls.length, "one byte changed: refused, nothing sent");
-  const forged = Object.freeze({ kind: "docx" as const });
+  const forged = Object.freeze({ kind: "xlsx" as const });
   eq((await p.write(a, forged, memo(["x"]))).ok, false, "an object shaped like a writer is not one");
 });
 
 Deno.test("124a review 15 gate: a Trainee-written file is delivered when clean", async () => {
   const p = await prov();
   const c = revokedCase();
-  for (const w of [await docxWriter(), await pdfWriter()]) {
+  for (const w of [await xlsxWriter()]) {
     const r = await p.write(c, w, memo(["Quarterly memo for the team"]));
     assert(r.ok, `${w.kind}: written`);
     const f = (r as { files: deliverMod.WorkFile[] }).files[0];
@@ -143,10 +140,14 @@ Deno.test("124a review 15 gate: a Trainee-written file is delivered when clean",
 Deno.test("124a review 15 gate: a revoked value in the source model is refused before rendering", async () => {
   const p = await prov();
   const c = revokedCase();
-  let rendered = 0;
-  const w = await stubWriter("docx", (m) => { rendered++; return [{ filename: "m.docx", mime: DOCX, bytes: docx({}, m.text.join(" ")) }]; });
-  const r = await p.write(c, w, memo([`Lead: ${NAME}`]));
-  eq([r.ok, rendered], [false, 0], "refused, and the writer never ran");
+  // The real writer cannot count its runs, so the model is one the writer refuses to render (a sheet name Excel refuses):
+  // had it run first, the result would be "writer failed". The source refusal proves the check came before any render.
+  const w = await xlsxWriter();
+  const unrenderable = { ...memo([`Lead: ${NAME}`]), sheets: [{ name: "Bad/Name", cells: { A1: { v: `Lead: ${NAME}` } } }] };
+  const ctl = await p.write(kase.newCase({ owner: "u1", practice: false, title: "memo", now: 1 }), w, unrenderable);
+  eq([ctl.ok, (ctl as { why: string }).why], [false, "writer failed"], "control: with nothing revoked, the render runs and fails");
+  const r = await p.write(c, w, unrenderable);
+  eq([r.ok, (r as { why: string }).why === "writer failed"], [false, false], "refused, and the writer never ran");
   eq((r as { why: string }).why, "source holds a revoked value", "the reason");
 });
 
@@ -154,12 +155,14 @@ Deno.test("124a review 15 gate: a Trainee-written file holding a revoked value i
   const p = await prov();
   // The writer adds the value itself (not in the model): the scan of the rendered bytes refuses it, and nothing is recorded.
   const c = revokedCase();
-  const r = await p.write(c, await docxWriter(NAME), memo(["Quarterly memo"]));
+  // A defined name is a key the writer draws, not a value the source check reads ("Jordan_Pike" is the name's
+  // separator form, which the scan matches).
+  const r = await p.write(c, await xlsxWriter(), memo(["Quarterly memo"], { Jordan_Pike: "Memo!$A$1" }));
   eq([r.ok, (r as { why: string }).why], [false, "file holds a revoked value"], "refused at write");
   // Written while the value was allowed, revoked afterwards: deliver() scans again and refuses.
   const c2 = kase.newCase({ owner: "u1", practice: false, title: "memo", now: 1 });
   kase.addRound(c2, { round: 1, text: "use the name", constraints: [{ id: "k1", kind: "hard", text: "name the lead", values: [NAME] }] });
-  const r2 = await p.write(c2, await pdfWriter(), memo([`Lead: ${NAME}`]));
+  const r2 = await p.write(c2, await xlsxWriter(), memo([`Lead: ${NAME}`]));
   assert(r2.ok, "written while allowed");
   kase.addRound(c2, { round: 2, text: "take it back", constraints: [{ id: "k2", kind: "hard", text: "do not name them", revokes: "k1" }] });
   const x = io();

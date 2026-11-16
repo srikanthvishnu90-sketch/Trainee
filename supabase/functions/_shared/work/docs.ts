@@ -40,7 +40,7 @@ const INVISIBLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}\u034F]/gu;
 const BLANK = /[\u3164\u2800\u115F\u1160\uFFA0]/gu;
 // Round 7: every space character prints as U+0020 and a line break inside a run as a space, so a hair or thin space cannot
 // join two slots into one figure ("19,\u200A280") in DOCX or PPTX, as the PDF writer already did.
-export const cleanText = (s: string): string => String(s).replace(INVISIBLE, "").replace(BLANK, " ").replace(/[\p{Zs}\t\r\n\u2028\u2029]/gu, " ").replace(/[\u000B\u000C]/g, " ").replace(/\r\n?/g, "\n").replace(XML_BAD, "");
+export const cleanText = (s: string): string => String(s).replace(INVISIBLE, "").replace(BLANK, " ").replace(/[\p{Zs}\t\r\n\u2028\u2029]/gu, " ").replace(/[\u000B\u000C]/g, " ").replace(/[\u0080-\u009F]/g, "").replace(/\r\n?/g, "\n").replace(XML_BAD, "");
 const esc = (s: string): string => P.escXml(cleanText(s));
 // The formats model.formatValue prints; anything else could print text or digits that are not the cell.
 // "General" is not on the list: formatValue would print it at zero decimals (0.4 as "0"), unlike Excel (124d review 2).
@@ -99,10 +99,11 @@ export function typedNumbers(text: string): string[] {
     const okBefore = (before === "" || /(?:^|[\s(\["'“‘])$/u.test(before) || /(?:^|[\s(\["'“‘])[$€£¥₹] ?$/u.test(before)) &&
       // A sign anywhere in the run of prefix characters before the slot ("-(", "- $", "−'") would print a figure the cell
       // does not hold (round 4: the sign sat behind an allowed "$" or "("). Signs: - − – — ‒ + ± － and the word "minus".
-      !/(?:[\p{Pd}+±∓⁻₋−➖─⁃]|\bminus|\bnegative)[\s$€£¥₹(\["'“‘]*$/iu.test(before.normalize("NFKC"));
+      !/(?:[\p{Pd}+±∓⁻₋−➖─⁃˗˖]|\bminus|\bnegative)[\s$€£¥₹(\["'“‘]*$/iu.test(before.normalize("NFKC"));
     let okAfter = after === "" || /^[\s.,;:!?)\]'"”’]/u.test(after);
     // Punctuation straight into a digit or another slot joins figures ("{{ref:a}}.{{ref:b}}", "{{ref:a}}'{{ref:b}}").
-    if (okAfter && /^[.,;:!?)\]'"”’]+[\p{N}{]/u.test(after)) okAfter = false;
+    // Round 9: read after NFKC, so a symbol that carries digits ("㏪" is "11日") joins too.
+    if (okAfter && /^[.,;:!?)\]'"”’]+[\p{N}{]/u.test(after.normalize("NFKC"))) okAfter = false;
     const next = after.replace(/^[\s\u00A0\u202F\u2009]+/, "").normalize("NFKC");
     if (okAfter && next !== after && (/^\{\{/.test(next) || /^\p{N}/u.test(next) || SCALE.test(next))) okAfter = false;
     // Round 6: after closing punctuation too ("({{ref:g}})%", "{{ref:a}}) bn").
@@ -128,6 +129,7 @@ export function typedNumbers(text: string): string[] {
   // symbol) becomes "#", which breaks a date rather than joining one ("Jan 𝟏2019", "Jan 1¸2019", "in 2⁰¹⁹" are refused).
   const norm = [...blank].map((ch) => {
     if (/^[\x00-\x7F]$/.test(ch)) return ch;
+    if (/\p{N}/u.test(ch)) return "#".repeat(ch.length); // round 9: a Roman numeral letter ("Ⅿay") is a number, not a month
     const n = ch.normalize("NFKC");
     if (/^[\x21-\x7E]+$/.test(n) && !/\d/.test(n)) return n[0].repeat(ch.length);
     return "#".repeat(ch.length);
@@ -137,6 +139,8 @@ export function typedNumbers(text: string): string[] {
   for (const [, b] of dateSpans(norm)) if (SCALE_AFTER.test(blank.slice(b).normalize("NFKC"))) out.push(blank.slice(Math.max(0, b - 8), b + 4));
   for (const [a, b] of dateSpans(norm)) blank = blank.slice(0, a) + " ".repeat(b - a) + blank.slice(b);
   for (const m of blank.matchAll(/[\p{N}][\p{N}.,]*/gu)) out.push(m[0]);
+  // Round 9: a character that is not a number but carries digits (㏪, ㋋, ㍘: "11日", "12月", "0点") is a figure too.
+  for (const ch of blank) if (!/\p{N}/u.test(ch) && /\d/.test(ch.normalize("NFKC"))) out.push(ch);
   for (const w of loose(blank.replace(/\p{N}/gu, " "), {})) out.push(w);
   return [...new Set(out)];
 }

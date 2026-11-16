@@ -1,0 +1,2655 @@
+{
+ "meta": {
+  "benchmark": "evals/mirror/instinct-wa-batch1 (26 turns, fictional persona Sam Rivera)",
+  "instinct_baseline": "6/10 on every scenario (owner's ruling)",
+  "grading": "Each element is yes or no from the reply plus the tool trace. MUST = needed for 10/10. Score heuristic for future grading: 10 x MUST met / MUST total, capped at 8 unless at least half the NICEs are met; Instinct's acts set the 6 line.",
+  "rule": "score = 10 x MUST met / MUST total, rounded to one decimal; capped at 8 unless at least half the NICEs are met. An element is yes only with proof: its deterministic check (`check`) passes, and where `check.judge` is set or there is no check, a judge answered yes with a quote found in what the turn delivered (reply, File or document text).",
+  "checks": "check keys (all must hold): tool (any of these ran), tool_ok (one ran with no call error), tool_all, no_tool, no_error, args (regex over that tool's recorded inputs), file (a File link delivered), doc (an attached document whose name or type matches; doc_has / doc_lacks read its text), link (a non-File link in the reply), max (chat prose characters, links removed), date, has / lacks (regex on the reply), not_sent (the boundary stated), no_action (nothing queued, prepared, submitted or sent), no_claim (no claim of a send, submit or live check the turn did not prove), no_host (no outbound request to these hosts), ends_ask (the prose ends with a question), clean (no internal words), judge (then the judge decides the rest)."
+ },
+ "capabilities": {
+  "CAP-VERIFY": "The reply verifier keeps correct, cited sentences.",
+  "CAP-WEB": "Research that reaches first-party pages (an employer's own careers, pay and interview pages) and returns their sentences as evidence.",
+  "CAP-INDEX": "Posting coverage: at least five real, open SWE internships for Chicago or remote, including Workday-hosted big-company roles.",
+  "CAP-TOOLARGS": "Tool-call input robustness: the brain fills required inputs, and a failed call is retried or reported.",
+  "CAP-CARRY": "Conversation memory of research results (figure, source, link) so a later 'from earlier' question is answered from the record.",
+  "CAP-GMAIL": "Mail coverage: the full history of every mailbox the person connects.",
+  "CAP-SHEETS": "A spreadsheet tracker the person owns.",
+  "CAP-PEOPLE": "Public people search (find_people, ON by D-062) from public non-LinkedIn pages, each lead not verified."
+ },
+ "standard": [
+  "It does the act this turn with the right tool (search, check, tailor, draft, read mail, make a File) and shows proof in the reply: a link, a file or a count read back. If an act failed, it says so (D-024).",
+  "The first sentence answers the question with the key fact: the role, the number, yes or no.",
+  "Every outside fact carries its source next to it, the employer's own page first, with a date where it matters (deadline, pay, timeline). Self-reported or anecdotal data is labelled as such.",
+  "Facts about the person come only from his confirmed record. Where they matter, it names the unresolved ones (outdated GPA, Harbor dates, Crestline's exact name, unconfirmed Rallyup customers) and never fills them in (D-007).",
+  "It ties the answer to his actual situation: the open PayPal role and its December 6 deadline, zero SWE submissions so far, and the posting's gates (work authorization without sponsorship, returning to school Fall 2027).",
+  "It goes beyond Instinct the way a good coach would: the why, the tradeoff, the number (arithmetic, weekly volume, days left), and what to check before acting.",
+  "It gives one prioritised next step, and ends with a single concrete offer or question that can be answered in a word.",
+  "It states the boundaries plainly: 'not sent', 'not submitted', 'not verified'. It never claims an action, a search or an open status it did not prove this turn.",
+  "When a tool or search fails, it says what failed and still gives what it knows (the posting's pay with its link, the record). It never ends at a bare 'no verified answer'.",
+  "It is sized for a phone: about 600 characters or less of chat prose, depth in a File, one line per item in lists, and no internal words (ids, 'open-checked', tokens).",
+  "It carries context across turns: earlier drafts, research figures and sources, corrections and the 'no GPA' rule."
+ ],
+ "scenarios": [
+  {
+   "id": "C1",
+   "prompt": "i need to lock in for recruiting, what should i actually be doing rn to land a swe internship for next summer",
+   "task": "A prioritised recruiting plan for a Summer 2027 SWE internship, anchored in named live roles he can apply to now, delivered as a File he can come back to.",
+   "instinct_acts": [
+    "Named five live employers in the first sentence (PayPal, Pinterest, Amplify, Chicago Fed, Infleqtion) and labelled Infleqtion a stretch (quantum focus).",
+    "Stated an eligibility caveat: basic eligibility fits, which is not full qualification.",
+    "Gave two first priorities: fix the outdated GPA on the resume, apply to these roles.",
+    "Made one File (shared with C3) holding the posting links and a weekly plan.",
+    "One merged reply for C1 and C3 (latency 638 s)."
+   ],
+   "instinct_errors": [
+    "Merged C1 and C3 into one reply 10 minutes later: C1 got no plan text in chat beyond two priorities, and C3 got no reply of its own.",
+    "No deadlines, pay or dates for any of the five roles in chat; everything depth-bearing is pushed into the File."
+   ],
+   "elements": [
+    {
+     "id": "C1.A1",
+     "group": "acts",
+     "text": "search_jobs runs for SWE internships, Summer 2027, Chicago or remote, in this turn.",
+     "level": "MUST",
+     "check": {
+      "tool": [
+       "search_jobs"
+      ],
+      "args": "(?=.*intern)(?=.*(?:chicago|remote))"
+     }
+    },
+    {
+     "id": "C1.A2",
+     "group": "acts",
+     "text": "A plan File is created (create_file) and its link is delivered in the reply.",
+     "level": "MUST",
+     "check": {
+      "tool": [
+       "create_file"
+      ],
+      "file": true
+     }
+    },
+    {
+     "id": "C1.A3",
+     "group": "acts",
+     "text": "The File lists every role the search returned, each with its employer posting link.",
+     "level": "MUST",
+     "check": {
+      "file": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C1.A4",
+     "group": "acts",
+     "text": "The no-GPA instruction from setup is saved or already on record, with no tool error (remember_instruction gets its inputs).",
+     "level": "MUST",
+     "needs_capability": "CAP-TOOLARGS",
+     "check": {
+      "no_error": [
+       "remember_instruction"
+      ]
+     }
+    },
+    {
+     "id": "C1.A5",
+     "group": "acts",
+     "text": "check_posting_open runs on each listed role so open status and deadline are verified, not assumed.",
+     "level": "NICE",
+     "check": {
+      "tool_ok": [
+       "check_posting_open"
+      ],
+      "judge": true
+     }
+    },
+    {
+     "id": "C1.S1",
+     "group": "specifics",
+     "text": "The reply names at least the top role by employer and title with its posted pay or the fact that pay is not listed.",
+     "level": "MUST"
+    },
+    {
+     "id": "C1.S2",
+     "group": "specifics",
+     "text": "The reply or File gives at least five real, open SWE internships for Chicago or remote, or says exactly how many were found and which sources were checked.",
+     "level": "MUST",
+     "needs_capability": "CAP-INDEX"
+    },
+    {
+     "id": "C1.S3",
+     "group": "specifics",
+     "text": "Each role carries its application deadline when the posting states one (PayPal: accepted through Sunday, December 6, 2026).",
+     "level": "MUST",
+     "check": {
+      "date": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C1.S4",
+     "group": "specifics",
+     "text": "Each role is labelled by fit (good fit / reach / stretch) with the one reason from the posting (e.g. PayPal lists Java, Python, Node.js, React, SQL; he has Python, React, SQL).",
+     "level": "NICE"
+    },
+    {
+     "id": "C1.S5",
+     "group": "specifics",
+     "text": "The person's own unresolved facts are named as fixes before applying: outdated GPA, Harbor dates, Crestline's exact name.",
+     "level": "MUST"
+    },
+    {
+     "id": "C1.D1",
+     "group": "depth",
+     "text": "The plan is ordered by time with a concrete first action this week (e.g. fix resume, apply to the open role before its deadline).",
+     "level": "MUST"
+    },
+    {
+     "id": "C1.D2",
+     "group": "depth",
+     "text": "The plan covers the three levers that land internships: applications, referrals/outreach, and interview prep, each with a weekly volume or cadence.",
+     "level": "MUST"
+    },
+    {
+     "id": "C1.D3",
+     "group": "depth",
+     "text": "Explains timing: most Summer 2027 big-tech SWE intern postings open Aug to Nov 2026 and many close by December, so November is late-but-live and volume matters now (sourced or labelled as judgement).",
+     "level": "NICE",
+     "needs_capability": "CAP-WEB"
+    },
+    {
+     "id": "C1.D4",
+     "group": "depth",
+     "text": "Names what to verify per role: work authorization without sponsorship, returning to school in Fall 2027 (PayPal requires both).",
+     "level": "NICE"
+    },
+    {
+     "id": "C1.D5",
+     "group": "depth",
+     "text": "Offers the next concrete step tied to a real role (prepare the PayPal application for approval).",
+     "level": "NICE"
+    },
+    {
+     "id": "C1.H1",
+     "group": "honesty",
+     "text": "Nothing is applied or sent, and the reply says so.",
+     "level": "MUST",
+     "check": {
+      "not_sent": true,
+      "no_action": true,
+      "no_claim": true
+     }
+    },
+    {
+     "id": "C1.H2",
+     "group": "honesty",
+     "text": "No role, link or fit claim is invented; a full-time role is not presented as an internship (NVIDIA OpenShell labelled full-time).",
+     "level": "MUST"
+    },
+    {
+     "id": "C1.H3",
+     "group": "honesty",
+     "text": "Open status is stated as verified only if it was checked this turn; otherwise it says not verified.",
+     "level": "MUST",
+     "check": {
+      "no_claim": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C1.F1",
+     "group": "form",
+     "text": "First sentence answers 'what should I do' with the top action and the top role, not a meta-sentence about the File.",
+     "level": "MUST"
+    },
+    {
+     "id": "C1.F2",
+     "group": "form",
+     "text": "Chat text is under ~600 characters with depth in the File; ends with one concrete offer.",
+     "level": "MUST",
+     "check": {
+      "max": 600,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Instinct named five live employers and made a File, but in chat gave no deadlines, pay, fit reasons or weekly cadence; merged C3 into this turn so neither ask got its own answer; no referral or interview-prep lever in chat; open status not proven per role."
+  },
+  {
+   "id": "C2",
+   "prompt": "draft a cold message to a google swe asking for a referral, don't send anything",
+   "task": "A personalised cold referral request to an unnamed Google engineer, with placeholders where facts are unknown, not sent.",
+   "instinct_acts": [
+    "Drafted a 4-sentence message with [Name] and [job link] placeholders.",
+    "Used confirmed facts: CS and Finance at Lakeshore, Summer 2027 SWE, Waypoint, 70+ React sites.",
+    "Asked directly for a resume look and a referral.",
+    "Sent nothing (said implicitly by being a draft)."
+   ],
+   "instinct_errors": [
+    "Did not say 'not sent' explicitly though the person asked.",
+    "Asks a stranger for a referral in the first message with no personal hook to the recipient's work."
+   ],
+   "elements": [
+    {
+     "id": "C2.A1",
+     "group": "acts",
+     "text": "A draft is produced and stored (draft_followup / draft_outreach) without any send.",
+     "level": "MUST",
+     "check": {
+      "tool": [
+       "draft_followup",
+       "draft_outreach"
+      ],
+      "no_action": true
+     }
+    },
+    {
+     "id": "C2.A2",
+     "group": "acts",
+     "text": "The draft is saved so later turns can recall and edit it (C14 depends on it).",
+     "level": "NICE",
+     "check": {
+      "tool": [
+       "draft_followup",
+       "draft_outreach"
+      ]
+     }
+    },
+    {
+     "id": "C2.S1",
+     "group": "specifics",
+     "text": "Uses only confirmed facts: Lakeshore, CS and Finance, Summer 2027 SWE target, Pixelforge 70+ React sites, Waypoint.",
+     "level": "MUST"
+    },
+    {
+     "id": "C2.S2",
+     "group": "specifics",
+     "text": "Has placeholders for unknowns: [Name], [team or project], [job link / req ID].",
+     "level": "MUST",
+     "check": {
+      "has": "\\[[^\\]]+\\]",
+      "judge": true
+     }
+    },
+    {
+     "id": "C2.S3",
+     "group": "specifics",
+     "text": "Contains an explicit referral ask (not only a chat request).",
+     "level": "MUST"
+    },
+    {
+     "id": "C2.S4",
+     "group": "specifics",
+     "text": "Points to a specific Google posting if one is on record, or says none is on record and the [job link] must be filled.",
+     "level": "NICE"
+    },
+    {
+     "id": "C2.D1",
+     "group": "depth",
+     "text": "Includes one recipient-specific hook slot (their team/project) so it does not read as mass mail.",
+     "level": "MUST",
+     "check": {
+      "has": "\\[[^\\]]+\\]",
+      "judge": true
+     }
+    },
+    {
+     "id": "C2.D2",
+     "group": "depth",
+     "text": "Gives a low-friction out ('no problem if not') and an easy yes (resume attached / ready to send).",
+     "level": "NICE"
+    },
+    {
+     "id": "C2.D3",
+     "group": "depth",
+     "text": "One line of coaching: referral asks convert better after a short chat or when tied to a specific req ID; send to engineers on the target team; follow up once after ~5 business days.",
+     "level": "NICE"
+    },
+    {
+     "id": "C2.D4",
+     "group": "depth",
+     "text": "Offers a second variant (ask for a 15-min chat first vs. direct referral ask) and says when to use each.",
+     "level": "NICE"
+    },
+    {
+     "id": "C2.H1",
+     "group": "honesty",
+     "text": "Reply says the draft was not sent.",
+     "level": "MUST",
+     "check": {
+      "not_sent": true
+     }
+    },
+    {
+     "id": "C2.H2",
+     "group": "honesty",
+     "text": "No invented relationship, mutual connection or claim of having seen the recipient's work.",
+     "level": "MUST"
+    },
+    {
+     "id": "C2.F1",
+     "group": "form",
+     "text": "The message body is under ~90 words, readable on a phone, and is the first thing in the reply.",
+     "level": "MUST"
+    },
+    {
+     "id": "C2.F2",
+     "group": "form",
+     "text": "Ends with one concrete offer (fill in a name, find Google engineers to send it to).",
+     "level": "NICE"
+    }
+   ],
+   "why_instinct_6": "A clean, factual draft with placeholders, but no recipient hook, no explicit 'not sent', no coaching on when or to whom to send, and no next step (find recipients, pick a req)."
+  },
+  {
+   "id": "C3",
+   "prompt": "find me 5 swe internships i could actually apply to right now, chicago or remote",
+   "task": "Five named, open SWE internships for Chicago or remote, each with a verified employer link, stretch roles labelled.",
+   "instinct_acts": [
+    "Answered by the C1 merged reply and File: five employers named, Infleqtion labelled stretch, links in the File."
+   ],
+   "instinct_errors": [
+    "No reply of its own to C3 (merged with C1).",
+    "Links only in the File; no per-role deadline, pay or location in chat."
+   ],
+   "elements": [
+    {
+     "id": "C3.A1",
+     "group": "acts",
+     "text": "search_jobs runs with role=SWE intern, term=Summer 2027, places Chicago or remote.",
+     "level": "MUST",
+     "check": {
+      "tool": [
+       "search_jobs"
+      ],
+      "args": "(?=.*intern)(?=.*(?:chicago|remote))"
+     }
+    },
+    {
+     "id": "C3.A2",
+     "group": "acts",
+     "text": "check_posting_open (or the search's link check) verifies each listed posting is open this turn.",
+     "level": "MUST",
+     "check": {
+      "tool_ok": [
+       "check_posting_open",
+       "search_jobs"
+      ],
+      "judge": true
+     }
+    },
+    {
+     "id": "C3.A3",
+     "group": "acts",
+     "text": "A roles File is created with all results and an Apply action per role.",
+     "level": "NICE",
+     "check": {
+      "file": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C3.S1",
+     "group": "specifics",
+     "text": "Five postings, or exactly the verified count with the scope searched (boards and employer sites checked) and one widening that would find more.",
+     "level": "MUST",
+     "needs_capability": "CAP-INDEX"
+    },
+    {
+     "id": "C3.S2",
+     "group": "specifics",
+     "text": "Each posting: employer, title, location (Chicago / remote), employer link.",
+     "level": "MUST",
+     "check": {
+      "link": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C3.S3",
+     "group": "specifics",
+     "text": "Each posting: pay if posted (PayPal Chicago $28-$49/hr) and deadline if posted (Dec 6, 2026).",
+     "level": "MUST",
+     "check": {
+      "date": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C3.S4",
+     "group": "specifics",
+     "text": "Each posting: one-line fit against his confirmed skills and any hard requirement (work authorization, returning to school Fall 2027).",
+     "level": "NICE"
+    },
+    {
+     "id": "C3.D1",
+     "group": "depth",
+     "text": "Stretch or reach roles are labelled with the reason.",
+     "level": "MUST"
+    },
+    {
+     "id": "C3.D2",
+     "group": "depth",
+     "text": "Orders the list by deadline or fit and says which to apply to first.",
+     "level": "NICE"
+    },
+    {
+     "id": "C3.D3",
+     "group": "depth",
+     "text": "Says which ones need an employer account (Workday) versus a simple form.",
+     "level": "NICE"
+    },
+    {
+     "id": "C3.H1",
+     "group": "honesty",
+     "text": "No padding with non-internships or closed roles; full-time roles excluded or labelled.",
+     "level": "MUST"
+    },
+    {
+     "id": "C3.H2",
+     "group": "honesty",
+     "text": "Nothing is applied; 'apply' is offered only as an approval step.",
+     "level": "MUST",
+     "check": {
+      "no_action": true,
+      "no_claim": true
+     }
+    },
+    {
+     "id": "C3.F1",
+     "group": "form",
+     "text": "Answer-first count sentence, then a numbered list, scannable on a phone.",
+     "level": "MUST"
+    },
+    {
+     "id": "C3.F2",
+     "group": "form",
+     "text": "Internal words absent (no 'open-checked', ids or raw bearer tokens in the prose).",
+     "level": "MUST",
+     "check": {
+      "clean": true,
+      "lacks": "open-checked"
+     }
+    },
+    {
+     "id": "C3.F3",
+     "group": "form",
+     "text": "Ends with one offer (prepare #1 for approval / widen to X).",
+     "level": "NICE"
+    }
+   ],
+   "why_instinct_6": "Five employers exist but C3 got no reply of its own; per-role pay, deadline, location and fit are absent from chat, and there is no ordering or first pick."
+  },
+  {
+   "id": "C4",
+   "prompt": "what should i put at the very top of my resume for swe roles, be specific",
+   "task": "Specific header and top-section guidance for a student SWE resume, using his real facts, flagging the outdated GPA, with a source.",
+   "instinct_acts": [
+    "Gave an ordered header: name and contact links, then the education line verbatim, then a technical-skills line (Python, TS/JS, React, SQL).",
+    "Said to leave the outdated 3.9 off.",
+    "Linked one source (student-to-software-engineer.org resume guide)."
+   ],
+   "instinct_errors": [
+    "Said 'don't list the old CS GPA' though no separate CS GPA was ever given (minor confusion)."
+   ],
+   "elements": [
+    {
+     "id": "C4.A1",
+     "group": "acts",
+     "text": "research_career_question (web) finds one reputable resume guide for student SWE resumes.",
+     "level": "NICE",
+     "needs_capability": "CAP-WEB",
+     "check": {
+      "tool": [
+       "research_career_question"
+      ],
+      "link": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C4.A2",
+     "group": "acts",
+     "text": "get_profile reads the confirmed record so the header is built from his facts.",
+     "level": "NICE",
+     "check": {
+      "tool": [
+       "get_profile"
+      ]
+     }
+    },
+    {
+     "id": "C4.S1",
+     "group": "specifics",
+     "text": "Gives the exact header order: name; contact line (email, phone, city, GitHub/portfolio, LinkedIn URL as text).",
+     "level": "MUST"
+    },
+    {
+     "id": "C4.S2",
+     "group": "specifics",
+     "text": "Writes his education line verbatim: Lakeshore University, BS Computer Science and Finance, Expected June 2029.",
+     "level": "MUST",
+     "check": {
+      "has": "Lakeshore University.{0,12}B\\.?S\\.?.{0,6}Computer Science and Finance.{0,24}June 2029"
+     }
+    },
+    {
+     "id": "C4.S3",
+     "group": "specifics",
+     "text": "Writes his skills line from confirmed skills: Python, TypeScript/JavaScript, React, SQL.",
+     "level": "MUST",
+     "check": {
+      "has": "(?=[\\s\\S]*Python)(?=[\\s\\S]*TypeScript)(?=[\\s\\S]*React)(?=[\\s\\S]*SQL)"
+     }
+    },
+    {
+     "id": "C4.S4",
+     "group": "specifics",
+     "text": "Says the 3.9 stays off because he said it is outdated.",
+     "level": "MUST",
+     "check": {
+      "has": "3\\.9",
+      "judge": true
+     }
+    },
+    {
+     "id": "C4.S5",
+     "group": "specifics",
+     "text": "Names what is missing from his record for the header (email, phone, city, GitHub) without inventing them.",
+     "level": "MUST"
+    },
+    {
+     "id": "C4.S6",
+     "group": "specifics",
+     "text": "Cites one source with its link, and labels what is the source versus Trainee's judgement.",
+     "level": "NICE",
+     "check": {
+      "link": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C4.D1",
+     "group": "depth",
+     "text": "Says what goes right below: experience led by the most engineering-heavy entry (Pixelforge: 70+ React sites) with numbers.",
+     "level": "NICE"
+    },
+    {
+     "id": "C4.D2",
+     "group": "depth",
+     "text": "Explains why: recruiters skim the top third in seconds; a GitHub link with one deployed project is the strongest SWE signal for a student.",
+     "level": "NICE"
+    },
+    {
+     "id": "C4.D3",
+     "group": "depth",
+     "text": "Offers to apply it to his resume and send the PDF.",
+     "level": "NICE"
+    },
+    {
+     "id": "C4.H1",
+     "group": "honesty",
+     "text": "No invented contact details, GPA or links.",
+     "level": "MUST"
+    },
+    {
+     "id": "C4.F1",
+     "group": "form",
+     "text": "Answer-first, specific (actual lines he can paste), under ~600 characters plus link.",
+     "level": "MUST",
+     "check": {
+      "max": 600,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Good order and his real education and skills lines, but no contact specifics (GitHub/portfolio), no note on what is missing from his record, no why, no offer to apply it."
+  },
+  {
+   "id": "C5",
+   "prompt": "quiz me on a python question like it's a real interview, one at a time",
+   "task": "One realistic coding interview question, asked like an interviewer: problem, example, edge case, and ask for approach before code.",
+   "instinct_acts": [
+    "Asked one question (first number that appears once, return None if none) with an example input/output.",
+    "Asked for approach and time/space complexity before code."
+   ],
+   "instinct_errors": [],
+   "elements": [
+    {
+     "id": "C5.A1",
+     "group": "acts",
+     "text": "The question is recorded as an open mock-interview item so follow-ups are scored against it (get_interview_questions / score_interview_answer).",
+     "level": "NICE",
+     "check": {
+      "tool": [
+       "get_interview_questions",
+       "score_interview_answer"
+      ]
+     }
+    },
+    {
+     "id": "C5.S1",
+     "group": "specifics",
+     "text": "Exactly one question, stated precisely with input and output types.",
+     "level": "MUST"
+    },
+    {
+     "id": "C5.S2",
+     "group": "specifics",
+     "text": "Includes a worked example (input and expected output).",
+     "level": "MUST"
+    },
+    {
+     "id": "C5.S3",
+     "group": "specifics",
+     "text": "States the edge-case contract (what to return when no answer exists / empty input).",
+     "level": "MUST"
+    },
+    {
+     "id": "C5.D1",
+     "group": "depth",
+     "text": "Asks for approach and complexity before code, as a real interviewer would.",
+     "level": "MUST"
+    },
+    {
+     "id": "C5.D2",
+     "group": "depth",
+     "text": "Says the format: one hint available, 'say done when ready', and what will be scored (correctness, complexity, communication, edge cases).",
+     "level": "NICE"
+    },
+    {
+     "id": "C5.D3",
+     "group": "depth",
+     "text": "Picks a question at intern-screen difficulty and not the single most memorised one (two-sum is fine but weaker for signal).",
+     "level": "NICE"
+    },
+    {
+     "id": "C5.H1",
+     "group": "honesty",
+     "text": "No action taken outside the chat.",
+     "level": "MUST",
+     "check": {
+      "no_action": true
+     }
+    },
+    {
+     "id": "C5.F1",
+     "group": "form",
+     "text": "Short (under ~350 characters), no answer leaked, ends with the ask for his approach.",
+     "level": "MUST",
+     "check": {
+      "max": 350,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Precise question with example and None contract, but no stated scoring criteria, no hint/time rules, nothing that makes it feel like a scored interview session."
+  },
+  {
+   "id": "C6",
+   "prompt": "have i applied to anything yet? trying to keep track",
+   "task": "Application history from evidence (mail confirmations and Trainee's own submissions), with coverage stated, researched roles kept apart, and a tracker offered.",
+   "instinct_acts": [
+    "Read three Gmail accounts.",
+    "Listed nine past employers from confirmation emails.",
+    "Said no confirmed SWE internship submissions or confirmations since August.",
+    "Said tonight's five roles were research only.",
+    "Warned that submissions without confirmation emails could be missing.",
+    "Offered a running tracker."
+   ],
+   "instinct_errors": [
+    "Named 'Payroll Co' for two confirmations that were Golf Co (self-corrected in C16)."
+   ],
+   "elements": [
+    {
+     "id": "C6.A1",
+     "group": "acts",
+     "text": "read_application_mail runs against the connected Gmail this turn.",
+     "level": "MUST",
+     "check": {
+      "tool_ok": [
+       "read_application_mail"
+      ]
+     }
+    },
+    {
+     "id": "C6.A2",
+     "group": "acts",
+     "text": "list_applications reads Trainee's own submission record this turn.",
+     "level": "MUST",
+     "check": {
+      "tool_ok": [
+       "list_applications"
+      ]
+     }
+    },
+    {
+     "id": "C6.A3",
+     "group": "acts",
+     "text": "Every Gmail account the person connected is read, not one (Instinct read three).",
+     "level": "NICE",
+     "needs_capability": "CAP-GMAIL"
+    },
+    {
+     "id": "C6.S1",
+     "group": "specifics",
+     "text": "Lists each confirmed application with employer, role and confirmation date.",
+     "level": "MUST"
+    },
+    {
+     "id": "C6.S2",
+     "group": "specifics",
+     "text": "The count in the sentence equals the list (9) and every employer name matches its email (Golf Co, not Payroll Co).",
+     "level": "MUST",
+     "check": {
+      "has": "Golf Co",
+      "lacks": "Payroll Co",
+      "judge": true
+     }
+    },
+    {
+     "id": "C6.S3",
+     "group": "specifics",
+     "text": "States the coverage: which mailbox(es), what date window was searched, and that Trainee's record was checked.",
+     "level": "MUST",
+     "needs_capability": "CAP-GMAIL"
+    },
+    {
+     "id": "C6.S4",
+     "group": "specifics",
+     "text": "Says researched roles in this chat (PayPal, NVIDIA) are not applications.",
+     "level": "MUST"
+    },
+    {
+     "id": "C6.D1",
+     "group": "depth",
+     "text": "Answers the real question: none of the nine is a SWE internship, so his SWE pipeline is at zero submissions.",
+     "level": "MUST"
+    },
+    {
+     "id": "C6.D2",
+     "group": "depth",
+     "text": "Says what the record cannot see: portal-only submissions without a confirmation email, other mailboxes, anything older than the window.",
+     "level": "MUST"
+    },
+    {
+     "id": "C6.D3",
+     "group": "depth",
+     "text": "Suggests the next move given zero SWE submissions (the open PayPal role before Dec 6).",
+     "level": "NICE"
+    },
+    {
+     "id": "C6.H1",
+     "group": "honesty",
+     "text": "Nothing is added to the record that no evidence holds; nothing is sent.",
+     "level": "MUST",
+     "check": {
+      "no_action": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C6.F1",
+     "group": "form",
+     "text": "Answer-first ('Yes, 9, none SWE'), list scannable, ends with the tracker offer as the one ask.",
+     "level": "MUST"
+    }
+   ],
+   "why_instinct_6": "Evidence-based and honest about gaps, but misnamed one employer, gave no dates per application, and gave no next move toward the SWE goal."
+  },
+  {
+   "id": "C5f1",
+   "prompt": "i'd count each number with a dict, then go through the list again and return the first one whose count is 1. o👎 time, o👎 space",
+   "task": "Affirm a correct two-pass approach, decode the emoji as O(n), confirm complexity, and ask for code including the empty-list case.",
+   "instinct_acts": [
+    "Affirmed the approach and why the second pass preserves order.",
+    "Read the emoji as '(n)' and confirmed O(n) time and O(n) extra space (average-case dict).",
+    "Asked for the code, including the empty-list return."
+   ],
+   "instinct_errors": [],
+   "elements": [
+    {
+     "id": "C5f1.A1",
+     "group": "acts",
+     "text": "score_interview_answer records the answer against the open question.",
+     "level": "NICE",
+     "check": {
+      "tool": [
+       "score_interview_answer"
+      ]
+     }
+    },
+    {
+     "id": "C5f1.S1",
+     "group": "specifics",
+     "text": "Judges the approach correct or not against the question actually asked, with the reason (second pass keeps first-occurrence order).",
+     "level": "MUST"
+    },
+    {
+     "id": "C5f1.S2",
+     "group": "specifics",
+     "text": "Decodes 'o👎' as O(n) and confirms O(n) time and O(n) space, noting dict operations are average-case O(1).",
+     "level": "MUST",
+     "check": {
+      "has": "O\\(n\\)",
+      "judge": true
+     }
+    },
+    {
+     "id": "C5f1.D1",
+     "group": "depth",
+     "text": "Asks for the code next and names the edge case to handle (empty list / no unique -> None).",
+     "level": "MUST"
+    },
+    {
+     "id": "C5f1.D2",
+     "group": "depth",
+     "text": "Gives a one-line score on the interviewer rubric (communication, correctness, complexity) so far.",
+     "level": "NICE"
+    },
+    {
+     "id": "C5f1.D3",
+     "group": "depth",
+     "text": "Mentions the alternative (collections.Counter, or OrderedDict single pass) only as a follow-up, not a spoiler.",
+     "level": "NICE"
+    },
+    {
+     "id": "C5f1.H1",
+     "group": "honesty",
+     "text": "Does not score an answer to a different question as if it answered the asked one; if the answer does not match the question, says so plainly.",
+     "level": "MUST"
+    },
+    {
+     "id": "C5f1.F1",
+     "group": "form",
+     "text": "Under ~400 characters, ends with the one ask (write the code).",
+     "level": "MUST",
+     "check": {
+      "max": 400,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Correct, encouraging and precise, but gives no running score and no interviewer-style feedback on how he communicated."
+  },
+  {
+   "id": "C5f2",
+   "prompt": "def first_unique(nums): counts = {}; [counts.update({n: counts.get(n,0)+1}) for n in nums]; return next(n for n in nums if counts[n]==1)",
+   "task": "Review real code like an interviewer: find the StopIteration bug, fix it, note the side-effect comprehension, and give a harder follow-up.",
+   "instinct_acts": [
+    "Ran the example mentally (returns 5).",
+    "Caught StopIteration on empty / no-unique input; gave next(..., None).",
+    "Flagged the side-effect list comprehension; suggested a loop.",
+    "Gave a follow-up (single-pass over a generator)."
+   ],
+   "instinct_errors": [],
+   "elements": [
+    {
+     "id": "C5f2.S1",
+     "group": "specifics",
+     "text": "Traces the example to its output (returns 5 for [4,2,4,5,2,3]).",
+     "level": "MUST"
+    },
+    {
+     "id": "C5f2.S2",
+     "group": "specifics",
+     "text": "Names the StopIteration bug on empty or all-duplicate input.",
+     "level": "MUST"
+    },
+    {
+     "id": "C5f2.S3",
+     "group": "specifics",
+     "text": "Gives the exact fix: next((n for n in nums if counts[n] == 1), None).",
+     "level": "MUST",
+     "check": {
+      "has": "(?=[\\s\\S]*next\\()(?=[\\s\\S]*None)",
+      "judge": true
+     }
+    },
+    {
+     "id": "C5f2.S4",
+     "group": "specifics",
+     "text": "Flags the list comprehension used for side effects (builds a throwaway list) and gives the idiom (loop or collections.Counter).",
+     "level": "MUST"
+    },
+    {
+     "id": "C5f2.D1",
+     "group": "depth",
+     "text": "Gives a harder follow-up that changes a constraint (one pass / stream / generator).",
+     "level": "MUST"
+    },
+    {
+     "id": "C5f2.D2",
+     "group": "depth",
+     "text": "Gives an interviewer verdict for the whole question (e.g. 'hire-leaning: correct, O(n), missed edge case, style ding') and what a strong candidate would have said aloud.",
+     "level": "NICE"
+    },
+    {
+     "id": "C5f2.D3",
+     "group": "depth",
+     "text": "Offers to keep a running mock score across questions or move to question 2.",
+     "level": "NICE"
+    },
+    {
+     "id": "C5f2.H1",
+     "group": "honesty",
+     "text": "Does not claim to have executed the code unless it did.",
+     "level": "MUST",
+     "check": {
+      "lacks": "\\bI(?:'ve| have)? (?:ran|run|executed|tested) (?:it|your code|the code|this)\\b"
+     }
+    },
+    {
+     "id": "C5f2.F1",
+     "group": "form",
+     "text": "Under ~600 characters, code in backticks, ends with the follow-up question.",
+     "level": "MUST",
+     "check": {
+      "max": 600,
+      "has": "`",
+      "ends_ask": true,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Caught the bug and gave a good follow-up, but no overall verdict, no 'what a strong candidate says out loud', no running score."
+  },
+  {
+   "id": "C7",
+   "prompt": "hypothetically if i had two offers, 120k in chicago vs 140k in nyc, same kind of role, how would you think about it",
+   "task": "A decision frame for a hypothetical offer comparison: net after tax and cost of living, a lean, the non-money factors, and nothing saved to his profile.",
+   "instinct_acts": [
+    "Framed it as savings after taxes, rent, commuting and benefits.",
+    "Leaned Chicago if teams and growth are equal, with the condition for NYC.",
+    "Challenged 'same kind of role': manager, scope, exit paths."
+   ],
+   "instinct_errors": [
+    "No numbers at all, so the lean rests on an unquantified claim."
+   ],
+   "elements": [
+    {
+     "id": "C7.A1",
+     "group": "acts",
+     "text": "research_market (web) fetches current tax and rent figures for both cities, with sources.",
+     "level": "NICE",
+     "needs_capability": "CAP-WEB",
+     "check": {
+      "tool": [
+       "research_market"
+      ],
+      "link": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C7.A2",
+     "group": "acts",
+     "text": "No profile fact or preference is written from a hypothetical.",
+     "level": "MUST",
+     "check": {
+      "no_tool": [
+       "add_profile_fact",
+       "confirm_profile_fact",
+       "correct_profile_fact",
+       "remember_instruction",
+       "save_resume_persona"
+      ]
+     }
+    },
+    {
+     "id": "C7.S1",
+     "group": "specifics",
+     "text": "Shows the arithmetic shape: gross gap $20k (16.7%), then the taxes that differ (NYC city income tax, NY vs IL state tax), each figure sourced or labelled an estimate.",
+     "level": "MUST",
+     "needs_capability": "CAP-WEB"
+    },
+    {
+     "id": "C7.S2",
+     "group": "specifics",
+     "text": "Gives a rough rent difference for a 1-bed (source and date) and the after-rent net for each.",
+     "level": "NICE",
+     "needs_capability": "CAP-WEB"
+    },
+    {
+     "id": "C7.D1",
+     "group": "depth",
+     "text": "Gives a lean with its condition (which way, and what would flip it).",
+     "level": "MUST"
+    },
+    {
+     "id": "C7.D2",
+     "group": "depth",
+     "text": "Names the non-money factors that matter more early on: team and manager, scope, brand and exit paths, growth.",
+     "level": "MUST"
+    },
+    {
+     "id": "C7.D3",
+     "group": "depth",
+     "text": "Challenges the premise ('same kind of role' rarely means the same opportunity) and lists 2-3 questions to ask each employer (level, raise cycle, bonus/equity, remote policy).",
+     "level": "NICE"
+    },
+    {
+     "id": "C7.D4",
+     "group": "depth",
+     "text": "Names negotiation leverage: a competing offer can move the other one; offer to draft that note.",
+     "level": "NICE"
+    },
+    {
+     "id": "C7.H1",
+     "group": "honesty",
+     "text": "Any figure is sourced and dated or labelled 'my estimate'; no invented numbers.",
+     "level": "MUST"
+    },
+    {
+     "id": "C7.H2",
+     "group": "honesty",
+     "text": "States the hypothetical was not saved.",
+     "level": "MUST"
+    },
+    {
+     "id": "C7.F1",
+     "group": "form",
+     "text": "Answer-first lean, under ~600 characters, one closing offer.",
+     "level": "MUST",
+     "check": {
+      "max": 600,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Right frame and a conditional lean, but zero numbers (no tax or rent figures), no questions to ask employers, no negotiation angle."
+  },
+  {
+   "id": "C8",
+   "prompt": "what do you actually know about my work experience so far? like everything you remember",
+   "task": "Complete recall of every role on record with provenance (resume vs. what he said vs. unconfirmed), plus the gaps and conflicts.",
+   "instinct_acts": [
+    "Listed all eight roles plus leadership, each with what it rests on ('per your resume', 'your November update').",
+    "Flagged gaps: Harbor date conflict, Crestline's exact name, changing Rallyup figures, missing detail for Harbor, Crestline, Elmstead.",
+    "Said it does not treat Waypoint's planned features as proven."
+   ],
+   "instinct_errors": [
+    "Wrote 'Ondo / Loop': 'Loop' is not in what the person gave (in this benchmark's persona)."
+   ],
+   "elements": [
+    {
+     "id": "C8.A1",
+     "group": "acts",
+     "text": "get_profile and get_memory run this turn.",
+     "level": "MUST",
+     "check": {
+      "tool_all": [
+       "get_profile",
+       "get_memory"
+      ]
+     }
+    },
+    {
+     "id": "C8.S1",
+     "group": "specifics",
+     "text": "Lists every role on record (Pixelforge, Rallyup, Waypoint, Harbor Global, Crestline, Mindgrove, Elmstead, Ondo) plus leadership; none omitted.",
+     "level": "MUST",
+     "check": {
+      "has": "(?=[\\s\\S]*Pixelforge)(?=[\\s\\S]*Rallyup)(?=[\\s\\S]*Waypoint)(?=[\\s\\S]*Harbor)(?=[\\s\\S]*Crestline)(?=[\\s\\S]*Mindgrove)(?=[\\s\\S]*Elmstead)(?=[\\s\\S]*Ondo)"
+     }
+    },
+    {
+     "id": "C8.S2",
+     "group": "specifics",
+     "text": "Each role carries its dates and key facts exactly as recorded (e.g. Pixelforge 2023-2025, 70+ sites, $9k peak MRR).",
+     "level": "MUST"
+    },
+    {
+     "id": "C8.S3",
+     "group": "specifics",
+     "text": "Provenance per fact: from the resume, from what he said later, or unconfirmed (Rallyup's newest customers are his statement awaiting confirmation).",
+     "level": "MUST"
+    },
+    {
+     "id": "C8.S4",
+     "group": "specifics",
+     "text": "Names both Crestline candidates (Crestline Partners or Crestline Search Partners), as he said.",
+     "level": "MUST",
+     "check": {
+      "has": "(?=[\\s\\S]*Crestline Partners)(?=[\\s\\S]*Crestline Search Partners)"
+     }
+    },
+    {
+     "id": "C8.S5",
+     "group": "specifics",
+     "text": "Says Harbor's dates may conflict (his words), not only that none are on file.",
+     "level": "MUST"
+    },
+    {
+     "id": "C8.D1",
+     "group": "depth",
+     "text": "Names the detail gaps that will hurt applications: responsibilities/results missing for Harbor, Crestline, Elmstead; Waypoint has one line.",
+     "level": "MUST"
+    },
+    {
+     "id": "C8.D2",
+     "group": "depth",
+     "text": "Says which entries are strongest for SWE (Pixelforge, Waypoint, Crestline Python tooling) and which are non-engineering (Elmstead GTM).",
+     "level": "NICE"
+    },
+    {
+     "id": "C8.D3",
+     "group": "depth",
+     "text": "Offers a 3-question fill-in pass to close the gaps.",
+     "level": "NICE"
+    },
+    {
+     "id": "C8.H1",
+     "group": "honesty",
+     "text": "Adds nothing not in the record (no 'Loop').",
+     "level": "MUST",
+     "check": {
+      "lacks": "\\bLoop\\b",
+      "judge": true
+     }
+    },
+    {
+     "id": "C8.H2",
+     "group": "honesty",
+     "text": "States the 3.9 GPA is withdrawn and will not be reused.",
+     "level": "MUST",
+     "check": {
+      "has": "3\\.9",
+      "judge": true
+     }
+    },
+    {
+     "id": "C8.F1",
+     "group": "form",
+     "text": "Scannable list (one line per role) under ~1,300 characters, ends with one question.",
+     "level": "MUST",
+     "check": {
+      "max": 1300,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Full recall with provenance and the right gaps, but one invented name ('Loop'), no SWE-relevance read, and no offer to close the gaps."
+  },
+  {
+   "id": "C9",
+   "prompt": "what's citadel like for new grad swe, culture pay interview process, give me real sources",
+   "task": "Sourced research on Citadel new-grad SWE: official pay range, official interview process and timeline, culture with anecdote labelled, and the Citadel vs Citadel Securities distinction.",
+   "instinct_acts": [
+    "Pay: Citadel's official posting, $235k-$300k base plus discretionary bonus; listed locations (not Chicago).",
+    "Process: Citadel's own guide, a 45-minute first round, then three 45-minute interviews, then team matching, about eight weeks; online assessment per candidate accounts.",
+    "Culture: labelled as its read; Reddit anecdotes labelled as anecdotes; questions to ask the manager.",
+    "Distinguished Citadel from Citadel Securities with a dated 2022 source.",
+    "Four links, three of them first-party or reputable."
+   ],
+   "instinct_errors": [
+    "Used Reddit as the only culture source (labelled, but thin).",
+    "Did not mention that Chicago is Citadel's headquarters while saying the posting does not list Chicago (could confuse)."
+   ],
+   "elements": [
+    {
+     "id": "C9.A1",
+     "group": "acts",
+     "text": "research_company / research_market runs web search this turn and opens Citadel's own careers pages (posting and interview-process page).",
+     "level": "MUST",
+     "needs_capability": "CAP-WEB",
+     "check": {
+      "tool": [
+       "research_company",
+       "research_market"
+      ],
+      "has": "https?://[^\\s]*citadel\\.com"
+     }
+    },
+    {
+     "id": "C9.A2",
+     "group": "acts",
+     "text": "The reply keeps verified sentences: the verifier does not drop correct, cited claims.",
+     "level": "MUST",
+     "needs_capability": "CAP-VERIFY"
+    },
+    {
+     "id": "C9.A3",
+     "group": "acts",
+     "text": "A research brief File is created with all sources, for later recall (C23).",
+     "level": "NICE",
+     "check": {
+      "tool": [
+       "create_file"
+      ],
+      "file": true
+     }
+    },
+    {
+     "id": "C9.S1",
+     "group": "specifics",
+     "text": "Pay from Citadel's official posting: base range with currency, plus how bonus works, with link.",
+     "level": "MUST",
+     "needs_capability": "CAP-WEB",
+     "check": {
+      "link": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C9.S2",
+     "group": "specifics",
+     "text": "Locations the posting lists.",
+     "level": "MUST",
+     "needs_capability": "CAP-WEB"
+    },
+    {
+     "id": "C9.S3",
+     "group": "specifics",
+     "text": "Interview process from Citadel's own page: rounds, lengths, team matching, total timeline (about eight weeks), with link.",
+     "level": "MUST",
+     "needs_capability": "CAP-WEB",
+     "check": {
+      "link": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C9.S4",
+     "group": "specifics",
+     "text": "Self-reported pay (levels.fyi-type) shown separately with sample size and date, labelled self-reported.",
+     "level": "NICE",
+     "needs_capability": "CAP-WEB"
+    },
+    {
+     "id": "C9.S5",
+     "group": "specifics",
+     "text": "Citadel vs Citadel Securities: different employers, do not mix numbers.",
+     "level": "MUST"
+    },
+    {
+     "id": "C9.D1",
+     "group": "depth",
+     "text": "Culture: a synthesis with each source type labelled (official / press / anecdote) and concrete questions to ask (hours, on-call, turnover, what happens on a miss).",
+     "level": "MUST"
+    },
+    {
+     "id": "C9.D2",
+     "group": "depth",
+     "text": "Ties it to him: new-grad posting is for 2029 graduates' cycle; for now the relevant track is Citadel's SWE intern program, its timing and whether it is open.",
+     "level": "NICE",
+     "needs_capability": "CAP-WEB"
+    },
+    {
+     "id": "C9.D3",
+     "group": "depth",
+     "text": "Prep advice: what the rounds test (DS&A, systems, C++/Python depth) and one resource from Citadel.",
+     "level": "NICE"
+    },
+    {
+     "id": "C9.H1",
+     "group": "honesty",
+     "text": "Every figure has its source next to it; anecdotes are labelled; nothing is invented.",
+     "level": "MUST"
+    },
+    {
+     "id": "C9.H2",
+     "group": "honesty",
+     "text": "If official pages could not be opened, the reply says exactly that and gives what it has, never a bare 'no verified answer'.",
+     "level": "MUST",
+     "check": {
+      "lacks": "^\\W*no verified answer",
+      "judge": true
+     }
+    },
+    {
+     "id": "C9.F1",
+     "group": "form",
+     "text": "Three short labelled sections (Pay / Process / Culture), each with its link, scannable on a phone.",
+     "level": "MUST",
+     "check": {
+      "link": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C9.F2",
+     "group": "form",
+     "text": "Ends with one offer (check the intern program / prep plan).",
+     "level": "NICE"
+    }
+   ],
+   "why_instinct_6": "Strong first-party sourcing on pay and process, but culture rests on one Reddit thread, nothing connects it to his actual stage (intern, not new grad), and there is no prep advice or brief for later."
+  },
+  {
+   "id": "C10",
+   "prompt": "can you make me a tailored resume for that paypal internship, like an actual file i can download. don't apply anywhere",
+   "task": "A downloadable one-page PDF resume tailored to PayPal R0138586 from confirmed facts, delivered as a review draft, with what changed and what is unresolved, nothing submitted.",
+   "instinct_acts": [
+    "Delivered a one-page PDF (Sam_Rivera_Resume_PayPal_SWE_Intern-*.pdf).",
+    "Corrected the GPA, reordered skills for PayPal.",
+    "Called it a review draft and named the unresolved items (Harbor dates, Crestline name, Rallyup figures).",
+    "Said nothing was submitted."
+   ],
+   "instinct_errors": [
+    "Kept the unresolved Harbor dates and Crestline name on the page as written instead of marking them."
+   ],
+   "elements": [
+    {
+     "id": "C10.A1",
+     "group": "acts",
+     "text": "tailor_resume runs against the PayPal posting (job_id from search) and produces a PDF attached in the same turn.",
+     "level": "MUST",
+     "check": {
+      "tool_ok": [
+       "tailor_resume"
+      ],
+      "doc": "pdf"
+     }
+    },
+    {
+     "id": "C10.A2",
+     "group": "acts",
+     "text": "A Word version is also attached for his own edits.",
+     "level": "NICE",
+     "check": {
+      "doc": "docx|wordprocessing"
+     }
+    },
+    {
+     "id": "C10.A3",
+     "group": "acts",
+     "text": "The PDF is read back (text extracted) to confirm it is one page and holds what the reply says.",
+     "level": "NICE",
+     "check": {
+      "doc": "pdf",
+      "doc_has": "\\S"
+     }
+    },
+    {
+     "id": "C10.S1",
+     "group": "specifics",
+     "text": "The reply names the concrete changes: what moved up, what was cut, which posting keywords were matched (Python, React, SQL, REST APIs, JavaScript).",
+     "level": "MUST"
+    },
+    {
+     "id": "C10.S2",
+     "group": "specifics",
+     "text": "Leads with the most SWE-relevant experience (Pixelforge React work, Waypoint, Crestline Python tooling), not a GTM role.",
+     "level": "MUST"
+    },
+    {
+     "id": "C10.S3",
+     "group": "specifics",
+     "text": "The outdated 3.9 is off the page.",
+     "level": "MUST",
+     "check": {
+      "doc": "pdf",
+      "doc_lacks": "3\\.9"
+     }
+    },
+    {
+     "id": "C10.S4",
+     "group": "specifics",
+     "text": "Unconfirmed facts (Rallyup's two new customers) are off the page.",
+     "level": "MUST",
+     "check": {
+      "doc": "pdf",
+      "judge": true
+     }
+    },
+    {
+     "id": "C10.S5",
+     "group": "specifics",
+     "text": "Names the open items blocking 'ready to send': email/contact line, Harbor dates, Crestline name.",
+     "level": "MUST"
+    },
+    {
+     "id": "C10.D1",
+     "group": "depth",
+     "text": "Says which posting requirements his record cannot show yet (work authorization without sponsorship; returning to school Fall 2027) so he can confirm before applying.",
+     "level": "NICE"
+    },
+    {
+     "id": "C10.D2",
+     "group": "depth",
+     "text": "Gives one suggestion that would raise fit (a GitHub link, a SQL-backed bullet) without inventing it.",
+     "level": "NICE"
+    },
+    {
+     "id": "C10.H1",
+     "group": "honesty",
+     "text": "Nothing applied or submitted, and the reply says so.",
+     "level": "MUST",
+     "check": {
+      "not_sent": true,
+      "no_action": true,
+      "no_claim": true
+     }
+    },
+    {
+     "id": "C10.H2",
+     "group": "honesty",
+     "text": "No invented bullet, metric, date or skill on the page.",
+     "level": "MUST",
+     "check": {
+      "doc": "pdf",
+      "judge": true
+     }
+    },
+    {
+     "id": "C10.F1",
+     "group": "form",
+     "text": "Short reply (under ~450 characters), file first, ends with the one blocking question (email).",
+     "level": "MUST",
+     "check": {
+      "max": 450,
+      "ends_ask": true,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Real PDF, honest draft status, but no description of what was tailored to PayPal's posting, kept unresolved facts on the page, and no requirement check."
+  },
+  {
+   "id": "C11",
+   "prompt": "what would you need from me to actually submit that paypal application? don't apply yet just wanna know",
+   "task": "The exact list of what is needed to submit PayPal R0138586 (facts, files, account, approvals), what is unknown behind sign-in, and nothing created.",
+   "instinct_acts": [
+    "Listed approval of the final resume, email/address, and a PayPal careers account via secure login.",
+    "Said questions are behind sign-in so the list may grow; would show exact answers before final approval.",
+    "Said only the entry flow was inspected; no account or application created."
+   ],
+   "instinct_errors": [
+    "Missed the posting's own eligibility gates (work authorization without sponsorship, returning to school Fall 2027) and the Dec 6 deadline."
+   ],
+   "elements": [
+    {
+     "id": "C11.A1",
+     "group": "acts",
+     "text": "inspect_apply_flow runs on the PayPal posting (read-only).",
+     "level": "MUST",
+     "check": {
+      "tool_ok": [
+       "inspect_apply_flow"
+      ]
+     }
+    },
+    {
+     "id": "C11.A2",
+     "group": "acts",
+     "text": "No employer account, saved application or submission is created.",
+     "level": "MUST",
+     "check": {
+      "no_action": true
+     }
+    },
+    {
+     "id": "C11.S1",
+     "group": "specifics",
+     "text": "Lists the posting's hard requirements against his record: legally authorized to work in the U.S. without sponsorship (not on file), returning to school Fall 2027 (graduation June 2029 implies yes; confirm), pursuing a CS degree (yes).",
+     "level": "MUST"
+    },
+    {
+     "id": "C11.S2",
+     "group": "specifics",
+     "text": "Lists missing personal fields: email, phone, address; Harbor dates; Crestline exact name.",
+     "level": "MUST"
+    },
+    {
+     "id": "C11.S3",
+     "group": "specifics",
+     "text": "States the deadline: applications accepted through Sunday, December 6, 2026.",
+     "level": "MUST",
+     "check": {
+      "has": "December 6"
+     }
+    },
+    {
+     "id": "C11.S4",
+     "group": "specifics",
+     "text": "Says a Workday account is required and he signs in himself (no password through chat).",
+     "level": "MUST"
+    },
+    {
+     "id": "C11.D1",
+     "group": "depth",
+     "text": "Says what happens after: Trainee shows the exact answers and resume as one payload; his yes to that payload submits; the receipt is the proof.",
+     "level": "MUST"
+    },
+    {
+     "id": "C11.D2",
+     "group": "depth",
+     "text": "Says what is unknown until sign-in (employer questions, EEO, uploads) and that they will be asked once.",
+     "level": "NICE"
+    },
+    {
+     "id": "C11.D3",
+     "group": "depth",
+     "text": "Estimates his effort: about 5 minutes of answers plus one sign-in.",
+     "level": "NICE"
+    },
+    {
+     "id": "C11.H1",
+     "group": "honesty",
+     "text": "Says nothing was applied and only public pages were read.",
+     "level": "MUST",
+     "check": {
+      "not_sent": true,
+      "no_action": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C11.F1",
+     "group": "form",
+     "text": "A short checklist (5-7 items), under ~600 characters, ends with the one first fact to give.",
+     "level": "MUST",
+     "check": {
+      "max": 600,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Honest about sign-in limits and approvals, but missed the posting's eligibility gates and deadline, and gave no sense of effort or what the approval step looks like."
+  },
+  {
+   "id": "C12",
+   "prompt": "could you realistically apply to like 50 internships for me in one night? what would that even take. don't do it just explaining",
+   "task": "An honest capacity answer: what 50 in a night needs (roles, facts, accounts, approvals), what is realistic, and a small first batch, nothing applied.",
+   "instinct_acts": [
+    "Declined to promise 50 overnight; unverified pace; preparing is not submitting.",
+    "Listed needs: 50 qualifying roles, corrected resume and reusable answers, employer logins, approval of each submission, confirmation tracking.",
+    "Proposed measuring a small approved batch first; nothing applied."
+   ],
+   "instinct_errors": [],
+   "elements": [
+    {
+     "id": "C12.A1",
+     "group": "acts",
+     "text": "Nothing is queued, prepared or submitted.",
+     "level": "MUST",
+     "check": {
+      "no_action": true
+     }
+    },
+    {
+     "id": "C12.A2",
+     "group": "acts",
+     "text": "search_jobs count is checked so the answer states how many qualifying roles exist now.",
+     "level": "NICE",
+     "check": {
+      "tool": [
+       "search_jobs"
+      ],
+      "judge": true
+     }
+    },
+    {
+     "id": "C12.S1",
+     "group": "specifics",
+     "text": "States how many qualifying roles the search has today (here 1) and that 50 needs a wider net.",
+     "level": "MUST"
+    },
+    {
+     "id": "C12.S2",
+     "group": "specifics",
+     "text": "Lists the facts asked once for the whole batch: work authorization, email/phone, graduation date, Harbor dates, Crestline name.",
+     "level": "MUST"
+    },
+    {
+     "id": "C12.S3",
+     "group": "specifics",
+     "text": "States the account reality: Workday and similar sites need his own employer account and sign-in; those cannot be done overnight without him.",
+     "level": "MUST"
+    },
+    {
+     "id": "C12.D1",
+     "group": "depth",
+     "text": "Describes the real mechanism: one batch card listing every application; one yes approves exactly that batch; each gets a receipt (D-MS-1).",
+     "level": "MUST"
+    },
+    {
+     "id": "C12.D2",
+     "group": "depth",
+     "text": "Gives a realistic pace and why (simple forms fast; account sites limited by his sign-ins; captchas stop, never solved).",
+     "level": "MUST"
+    },
+    {
+     "id": "C12.D3",
+     "group": "depth",
+     "text": "Says quality tradeoff: 50 untargeted applications underperform 15 targeted plus referrals; recommends a first batch size with reason.",
+     "level": "NICE"
+    },
+    {
+     "id": "C12.D4",
+     "group": "depth",
+     "text": "Says what he would see in the morning: a closeout with each role's state (submitted and confirmed / awaiting employer / held with reason).",
+     "level": "NICE"
+    },
+    {
+     "id": "C12.H1",
+     "group": "honesty",
+     "text": "No volume promise beyond what is verified.",
+     "level": "MUST"
+    },
+    {
+     "id": "C12.H2",
+     "group": "honesty",
+     "text": "Does not misstate the approval rule (a batch yes is allowed; 'one by one' is not required).",
+     "level": "MUST"
+    },
+    {
+     "id": "C12.F1",
+     "group": "form",
+     "text": "Under ~600 characters, ends with one offer (widen the search / build the first batch card).",
+     "level": "MUST",
+     "check": {
+      "max": 600,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Honest and complete on prerequisites, but no mechanism, no realistic pace, no account reality, no picture of the result."
+  },
+  {
+   "id": "C13",
+   "prompt": "draft a message to a recruiter asking if the comp range on a role is negotiable, keep it casual, don't send",
+   "task": "A short, casual recruiter message asking about comp flexibility, with placeholders, not sent.",
+   "instinct_acts": [
+    "One-line casual draft asking about flexibility in the listed range.",
+    "No placeholders; not sent."
+   ],
+   "instinct_errors": [
+    "Did not say 'not sent'.",
+    "Ends on 'is it fixed?', an easy no."
+   ],
+   "elements": [
+    {
+     "id": "C13.A1",
+     "group": "acts",
+     "text": "A draft is stored (draft_followup) and nothing is sent.",
+     "level": "MUST",
+     "check": {
+      "tool": [
+       "draft_followup"
+      ],
+      "no_action": true
+     }
+    },
+    {
+     "id": "C13.S1",
+     "group": "specifics",
+     "text": "Has placeholders for [Name], [role], and optionally [range].",
+     "level": "MUST",
+     "check": {
+      "has": "(?=[\\s\\S]*\\[[^\\]]*name[^\\]]*\\])(?=[\\s\\S]*\\[[^\\]]*role[^\\]]*\\])"
+     }
+    },
+    {
+     "id": "C13.S2",
+     "group": "specifics",
+     "text": "Asks about flexibility in a casual tone in 2-3 sentences.",
+     "level": "MUST"
+    },
+    {
+     "id": "C13.D1",
+     "group": "depth",
+     "text": "Shows enthusiasm for the role so the ask reads as engaged, not transactional.",
+     "level": "NICE"
+    },
+    {
+     "id": "C13.D2",
+     "group": "depth",
+     "text": "One line of coaching: ask once there is an offer or late-stage, ask about the whole package (base, signing, relocation, start date) since intern hourly bands are often fixed, never name a number first unless anchored with data.",
+     "level": "NICE"
+    },
+    {
+     "id": "C13.D3",
+     "group": "depth",
+     "text": "Offers an alternative phrasing that is open-ended ('what flexibility is there…') instead of yes/no.",
+     "level": "NICE"
+    },
+    {
+     "id": "C13.H1",
+     "group": "honesty",
+     "text": "Reply says 'not sent'.",
+     "level": "MUST",
+     "check": {
+      "not_sent": true
+     }
+    },
+    {
+     "id": "C13.H2",
+     "group": "honesty",
+     "text": "No invented offer, competing offer or number.",
+     "level": "MUST"
+    },
+    {
+     "id": "C13.F1",
+     "group": "form",
+     "text": "Draft first; under ~250 characters total.",
+     "level": "MUST",
+     "check": {
+      "max": 250,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Short and casual, but no placeholders, no 'not sent', no coaching on timing or package, and a yes/no question that invites 'fixed'."
+  },
+  {
+   "id": "C14",
+   "prompt": "actually that referral draft from earlier, make it way shorter and less formal",
+   "task": "Recall the C2 draft and restyle it much shorter and casual, keeping the referral ask and placeholders, not sent.",
+   "instinct_acts": [
+    "Recalled C2.",
+    "Cut to 3 short sentences, casual, kept [name] and [job link], kept the referral ask, offered resume."
+   ],
+   "instinct_errors": [
+    "Dropped every personal hook (Pixelforge, Waypoint), so it reads generic."
+   ],
+   "elements": [
+    {
+     "id": "C14.A1",
+     "group": "acts",
+     "text": "The C2 draft is recalled (not a new one from scratch) and a new version is stored, not sent.",
+     "level": "MUST",
+     "check": {
+      "tool": [
+       "draft_followup",
+       "draft_outreach"
+      ],
+      "no_action": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C14.S1",
+     "group": "specifics",
+     "text": "Keeps the referral ask explicit.",
+     "level": "MUST"
+    },
+    {
+     "id": "C14.S2",
+     "group": "specifics",
+     "text": "Keeps placeholders [Name], [job link or team].",
+     "level": "MUST",
+     "check": {
+      "has": "\\[[^\\]]*name[^\\]]*\\]",
+      "judge": true
+     }
+    },
+    {
+     "id": "C14.S3",
+     "group": "specifics",
+     "text": "Keeps one confirmed hook (70+ React sites) so it is not generic.",
+     "level": "NICE"
+    },
+    {
+     "id": "C14.D1",
+     "group": "depth",
+     "text": "Is clearly shorter than C2 (at least 40% fewer words) and casual.",
+     "level": "MUST"
+    },
+    {
+     "id": "C14.D2",
+     "group": "depth",
+     "text": "Says what was cut and offers the even shorter one-liner variant.",
+     "level": "NICE"
+    },
+    {
+     "id": "C14.H1",
+     "group": "honesty",
+     "text": "Says 'not sent'.",
+     "level": "MUST",
+     "check": {
+      "not_sent": true
+     }
+    },
+    {
+     "id": "C14.F1",
+     "group": "form",
+     "text": "Draft first, under ~250 characters.",
+     "level": "MUST",
+     "check": {
+      "max": 250,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Shorter and casual, but dropped the one hook that makes a cold ask land, and did not say it was not sent."
+  },
+  {
+   "id": "C15",
+   "prompt": "say i'm a new grad with zero internships and a mid gpa, how do i even get interviews",
+   "task": "Concrete advice for a hypothetical weak profile (not his real one), with a diagnostic funnel, nothing saved.",
+   "instinct_acts": [
+    "Projects he can demo and defend; GPA off unless required; never disguise projects as jobs.",
+    "Targeted applications plus short outreach to alumni and engineers; smaller companies outside big tech.",
+    "Diagnostic funnel: no screens means targeting/resume; screens without offers means interview skills."
+   ],
+   "instinct_errors": [],
+   "elements": [
+    {
+     "id": "C15.A1",
+     "group": "acts",
+     "text": "Nothing is saved to his profile from the hypothetical, and the reply treats it as hypothetical (not his real profile).",
+     "level": "MUST",
+     "check": {
+      "no_tool": [
+       "add_profile_fact",
+       "confirm_profile_fact",
+       "correct_profile_fact",
+       "remember_instruction",
+       "save_resume_persona"
+      ],
+      "judge": true
+     }
+    },
+    {
+     "id": "C15.S1",
+     "group": "specifics",
+     "text": "Resume: 2-3 deployed projects with a measurable result each; GPA off where optional; projects never framed as employment.",
+     "level": "MUST"
+    },
+    {
+     "id": "C15.S2",
+     "group": "specifics",
+     "text": "Channels: referrals/outreach with a weekly number, plus targeted applications to smaller firms, startups, contract and public-sector roles.",
+     "level": "MUST"
+    },
+    {
+     "id": "C15.D1",
+     "group": "depth",
+     "text": "The diagnostic funnel: no screens means fix targeting/resume; screens but no onsites means fix technical prep; onsites but no offers means fix behavioral/closing.",
+     "level": "MUST"
+    },
+    {
+     "id": "C15.D2",
+     "group": "depth",
+     "text": "Weekly numbers: e.g. 10 targeted applications and 10 messages a week, with an expected response rate stated as judgement.",
+     "level": "NICE"
+    },
+    {
+     "id": "C15.D3",
+     "group": "depth",
+     "text": "Names new-grad-friendly routes: apprenticeship/rotational programs, open-source contributions, hackathons, career-fair recruiters.",
+     "level": "NICE"
+    },
+    {
+     "id": "C15.D4",
+     "group": "depth",
+     "text": "Tracking: log source, date and reply, and move time to what replies.",
+     "level": "NICE"
+    },
+    {
+     "id": "C15.H1",
+     "group": "honesty",
+     "text": "No invented statistics; any rate is labelled judgement.",
+     "level": "MUST"
+    },
+    {
+     "id": "C15.F1",
+     "group": "form",
+     "text": "Under ~600 characters, ordered by impact, ends with one offer (build a 4-week plan).",
+     "level": "MUST",
+     "check": {
+      "max": 600,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Good advice and the funnel, but no weekly numbers, no named alternative routes, no plan offer."
+  },
+  {
+   "id": "C16",
+   "prompt": "yea set up that application tracker",
+   "task": "Create the tracker artifact from real evidence (applications, researched roles, drafts) with coverage, and say how it stays current.",
+   "instinct_acts": [
+    "Created a Google Sheet tracker: past applications apart from researched roles and the unsubmitted PayPal draft.",
+    "Corrected its C6 error (Payroll Co was Golf Co).",
+    "Said it will update from application emails across three accounts; portal-only changes not captured."
+   ],
+   "instinct_errors": [
+    "The C6 error needed correcting (the correction itself is good)."
+   ],
+   "elements": [
+    {
+     "id": "C16.A1",
+     "group": "acts",
+     "text": "export_tracker creates the tracker this turn and its link is delivered.",
+     "level": "MUST",
+     "check": {
+      "tool_ok": [
+       "export_tracker"
+      ],
+      "file": true
+     }
+    },
+    {
+     "id": "C16.A2",
+     "group": "acts",
+     "text": "A spreadsheet the person owns (Google Sheets or XLSX download) in addition to the File page.",
+     "level": "NICE",
+     "needs_capability": "CAP-SHEETS"
+    },
+    {
+     "id": "C16.A3",
+     "group": "acts",
+     "text": "Mail tracking is on so new confirmation emails update it automatically.",
+     "level": "NICE"
+    },
+    {
+     "id": "C16.S1",
+     "group": "specifics",
+     "text": "Says what it holds: 9 past applications (with dates), researched roles (PayPal, NVIDIA), unsubmitted drafts (PayPal resume), each with status.",
+     "level": "MUST"
+    },
+    {
+     "id": "C16.S2",
+     "group": "specifics",
+     "text": "States coverage: which mailbox(es), window searched, Trainee's own record.",
+     "level": "MUST",
+     "needs_capability": "CAP-GMAIL"
+    },
+    {
+     "id": "C16.D1",
+     "group": "depth",
+     "text": "Says how it stays current and what it cannot see (portal-only status changes, other mailboxes).",
+     "level": "MUST"
+    },
+    {
+     "id": "C16.D2",
+     "group": "depth",
+     "text": "Columns that make it useful: company, role, date, source, status, next step, follow-up date.",
+     "level": "NICE"
+    },
+    {
+     "id": "C16.D3",
+     "group": "depth",
+     "text": "Suggests the first follow-up (e.g. nothing SWE applied; PayPal due Dec 6).",
+     "level": "NICE"
+    },
+    {
+     "id": "C16.H1",
+     "group": "honesty",
+     "text": "Holds only evidenced applications; corrections to earlier statements are stated.",
+     "level": "MUST"
+    },
+    {
+     "id": "C16.F1",
+     "group": "form",
+     "text": "Under ~450 characters plus link, ends with one offer.",
+     "level": "MUST",
+     "check": {
+      "max": 450,
+      "file": true,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Real sheet with correct separation and coverage, but no columns/next-step logic and no suggested next action."
+  },
+  {
+   "id": "C17",
+   "prompt": "give me a 'tell me about yourself' answer i can reuse for swe interviews, based on my actual background",
+   "task": "A reusable 60-90 second answer (present, past, future) built only from confirmed facts, ready to say.",
+   "instinct_acts": [
+    "Three-sentence answer: present (CS+Finance, June 2029), past (Pixelforge 70+ sites, Rallyup, Harbor AI tooling, Crestline Python tooling), future (Waypoint, wants to learn on an engineering team)."
+   ],
+   "instinct_errors": [
+    "Uses Harbor and Crestline although their dates/name are unresolved (minor; no specific claim at risk)."
+   ],
+   "elements": [
+    {
+     "id": "C17.A1",
+     "group": "acts",
+     "text": "get_profile reads the confirmed record; no unrelated tool (e.g. application mail) is called.",
+     "level": "NICE",
+     "check": {
+      "tool": [
+       "get_profile"
+      ],
+      "no_tool": [
+       "read_application_mail"
+      ]
+     }
+    },
+    {
+     "id": "C17.S1",
+     "group": "specifics",
+     "text": "Uses only confirmed facts: Lakeshore CS+Finance, June 2029, Pixelforge 70+ React sites and $9k peak MRR, Waypoint, Crestline Python tooling, Harbor AI tooling.",
+     "level": "MUST"
+    },
+    {
+     "id": "C17.S2",
+     "group": "specifics",
+     "text": "Is a complete script (not a fragment) of about 150-220 words, speakable in 60-90 seconds.",
+     "level": "MUST"
+    },
+    {
+     "id": "C17.D1",
+     "group": "depth",
+     "text": "Follows present-past-future: who I am now, 2-3 proof points with one number, why this role.",
+     "level": "MUST"
+    },
+    {
+     "id": "C17.D2",
+     "group": "depth",
+     "text": "Leads with engineering proof (shipping 70+ client sites, a live product) rather than titles.",
+     "level": "MUST"
+    },
+    {
+     "id": "C17.D3",
+     "group": "depth",
+     "text": "Includes a swappable last line per company with a placeholder, and one tip on delivery (stop at 90 seconds, end on why-here).",
+     "level": "NICE"
+    },
+    {
+     "id": "C17.D4",
+     "group": "depth",
+     "text": "Gives a 30-second short version.",
+     "level": "NICE"
+    },
+    {
+     "id": "C17.H1",
+     "group": "honesty",
+     "text": "No invented project, metric or motivation.",
+     "level": "MUST"
+    },
+    {
+     "id": "C17.F1",
+     "group": "form",
+     "text": "Script in quotes first, then at most one line of notes, one question last.",
+     "level": "MUST"
+    }
+   ],
+   "why_instinct_6": "Grounded and usable, but no structure explained, no number in it, no company-specific closing, no short version."
+  },
+  {
+   "id": "C18",
+   "prompt": "is that paypal internship posting still open? check rn",
+   "task": "A live check of the PayPal posting this turn, with the employer's own wording, the deadline and the link.",
+   "instinct_acts": [
+    "Checked it on PayPal's Workday site: open, accepting applications through December 6.",
+    "Gave the link; said nothing submitted."
+   ],
+   "instinct_errors": [],
+   "elements": [
+    {
+     "id": "C18.A1",
+     "group": "acts",
+     "text": "check_posting_open fetches the employer page this turn (not the cached index).",
+     "level": "MUST",
+     "check": {
+      "tool_ok": [
+       "check_posting_open"
+      ]
+     }
+    },
+    {
+     "id": "C18.S1",
+     "group": "specifics",
+     "text": "Says open or closed, citing the employer's page.",
+     "level": "MUST",
+     "check": {
+      "link": true,
+      "no_claim": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C18.S2",
+     "group": "specifics",
+     "text": "Gives the deadline in the posting's words (through Sunday, December 6, 2026).",
+     "level": "MUST",
+     "check": {
+      "has": "December 6"
+     }
+    },
+    {
+     "id": "C18.S3",
+     "group": "specifics",
+     "text": "Gives the employer link.",
+     "level": "MUST",
+     "check": {
+      "link": true
+     }
+    },
+    {
+     "id": "C18.D1",
+     "group": "depth",
+     "text": "Says how much time is left in days (e.g. 20 days from Nov 16) and what that means for the C10/C11 blockers.",
+     "level": "NICE",
+     "check": {
+      "has": "\\b\\d+ days\\b",
+      "judge": true
+     }
+    },
+    {
+     "id": "C18.D2",
+     "group": "depth",
+     "text": "Says the posting's own close date may differ by time zone or close early if filled; suggests applying a week ahead.",
+     "level": "NICE"
+    },
+    {
+     "id": "C18.D3",
+     "group": "depth",
+     "text": "Offers to set a reminder or prepare the application for approval.",
+     "level": "NICE"
+    },
+    {
+     "id": "C18.H1",
+     "group": "honesty",
+     "text": "Says nothing was applied.",
+     "level": "MUST",
+     "check": {
+      "not_sent": true,
+      "no_action": true
+     }
+    },
+    {
+     "id": "C18.F1",
+     "group": "form",
+     "text": "Answer-first 'Yes', under ~250 characters plus link.",
+     "level": "MUST",
+     "check": {
+      "has": "^\\W*yes\\b",
+      "max": 250
+     }
+    }
+   ],
+   "why_instinct_6": "Correct and verified, but no time-left framing, no link to the open blockers, no offer."
+  },
+  {
+   "id": "C19",
+   "prompt": "find me 3 lakeshore alumni working at google or trading firms i could reach out to, just research don't message anyone",
+   "task": "Three named public leads (school + employer) with where each was found and why they fit, verification caveat, nobody contacted.",
+   "instinct_acts": [
+    "Three leads (two Google SWE in Chicago, one DRW senior SWE) with school, degree years and profile links.",
+    "Ranked them with a reason (closest path first).",
+    "Caveat: search excerpts, live profiles not verified; nobody contacted."
+   ],
+   "instinct_errors": [
+    "The leads came from profile search excerpts (likely LinkedIn pages); Trainee may not automate LinkedIn, so its equivalent must rest on other public pages."
+   ],
+   "elements": [
+    {
+     "id": "C19.A1",
+     "group": "acts",
+     "text": "find_people runs with school = Lakeshore University and employers = Google plus named trading firms (from the ask), with no input error.",
+     "level": "MUST",
+     "needs_capability": "CAP-TOOLARGS",
+     "check": {
+      "tool_ok": [
+       "find_people"
+      ],
+      "args": "(?=.*lakeshore)(?=.*google)"
+     }
+    },
+    {
+     "id": "C19.A2",
+     "group": "acts",
+     "text": "Public web pages only; no LinkedIn or Indeed automation.",
+     "level": "MUST",
+     "needs_capability": "CAP-PEOPLE",
+     "check": {
+      "no_host": "linkedin\\.|indeed\\."
+     }
+    },
+    {
+     "id": "C19.A3",
+     "group": "acts",
+     "text": "No message drafted to send, nobody contacted.",
+     "level": "MUST",
+     "check": {
+      "no_action": true,
+      "no_tool": [
+       "draft_followup",
+       "draft_outreach"
+      ]
+     }
+    },
+    {
+     "id": "C19.S1",
+     "group": "specifics",
+     "text": "Up to three leads, each: name, employer, role, school link (degree/years if public), the page it came from.",
+     "level": "MUST",
+     "needs_capability": "CAP-PEOPLE"
+    },
+    {
+     "id": "C19.S2",
+     "group": "specifics",
+     "text": "If fewer than three are found, says the exact count and the search scope that ran.",
+     "level": "MUST"
+    },
+    {
+     "id": "C19.S3",
+     "group": "specifics",
+     "text": "Says which trading firms were searched and that he can name others.",
+     "level": "NICE"
+    },
+    {
+     "id": "C19.D1",
+     "group": "depth",
+     "text": "Ranks the leads with one reason each (closest path, same city, seniority).",
+     "level": "MUST"
+    },
+    {
+     "id": "C19.D2",
+     "group": "depth",
+     "text": "Gives the first move per lead (ask for a 15-min chat, mention the shared school) and offers to draft it.",
+     "level": "NICE"
+    },
+    {
+     "id": "C19.D3",
+     "group": "depth",
+     "text": "Gives other routes: the school's alumni directory, career office, club contacts, his own exported connections.",
+     "level": "NICE"
+    },
+    {
+     "id": "C19.H1",
+     "group": "honesty",
+     "text": "Every lead is marked 'not verified' with current employment to confirm.",
+     "level": "MUST"
+    },
+    {
+     "id": "C19.H2",
+     "group": "honesty",
+     "text": "Never claims a search ran when the tool call failed (D-024).",
+     "level": "MUST",
+     "check": {
+      "no_claim": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C19.F1",
+     "group": "form",
+     "text": "Under ~600 characters for the summary; one line per lead; ends with one offer.",
+     "level": "MUST",
+     "check": {
+      "max": 600,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Three real, ranked leads with caveats, but sourced from profile excerpts Trainee may not use, no first-move per lead, no other routes."
+  },
+  {
+   "id": "C20",
+   "prompt": "actually for that paypal resume, condense the pixelforge stuff to one line and expand the waypoint part more",
+   "task": "A v2 PDF with both edits (Pixelforge to one line, Waypoint expanded) using only confirmed facts, with what changed and what could not be expanded.",
+   "instinct_acts": [
+    "Delivered v2 PDF.",
+    "Pixelforge to one bullet; Waypoint three bullets (product, stack, beta testing).",
+    "Kept development wording rather than claiming features work; still a review draft."
+   ],
+   "instinct_errors": [
+    "'Stack' and 'beta testing' for Waypoint are not in the facts the person gave (in this persona): likely added detail without confirmation."
+   ],
+   "elements": [
+    {
+     "id": "C20.A1",
+     "group": "acts",
+     "text": "tailor_resume re-runs on the same posting and delivers a v2 PDF in the same turn.",
+     "level": "MUST",
+     "check": {
+      "tool_ok": [
+       "tailor_resume"
+      ],
+      "doc": "pdf"
+     }
+    },
+    {
+     "id": "C20.S1",
+     "group": "specifics",
+     "text": "Pixelforge is one line and keeps its strongest number (70+ sites, $9k peak MRR) if it fits.",
+     "level": "MUST"
+    },
+    {
+     "id": "C20.S2",
+     "group": "specifics",
+     "text": "Waypoint is expanded only with confirmed facts (career agent covering applications, resumes, research and networking); every added word traces to the record.",
+     "level": "MUST"
+    },
+    {
+     "id": "C20.S3",
+     "group": "specifics",
+     "text": "If the record cannot support more Waypoint detail, says so and asks for 2-3 specific facts (stack, users, what ships).",
+     "level": "MUST"
+    },
+    {
+     "id": "C20.D1",
+     "group": "depth",
+     "text": "Proposes draft Waypoint bullets marked 'needs your confirmation' with placeholders, so he can confirm instead of write.",
+     "level": "NICE"
+    },
+    {
+     "id": "C20.D2",
+     "group": "depth",
+     "text": "Says the page is still one page and what moved.",
+     "level": "NICE"
+    },
+    {
+     "id": "C20.H1",
+     "group": "honesty",
+     "text": "No invented Waypoint detail (no stack, users or beta claims not on record).",
+     "level": "MUST"
+    },
+    {
+     "id": "C20.H2",
+     "group": "honesty",
+     "text": "Still a review draft; nothing submitted, and says so.",
+     "level": "MUST",
+     "check": {
+      "not_sent": true,
+      "no_action": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C20.F1",
+     "group": "form",
+     "text": "File first, under ~450 characters, ends with the one question.",
+     "level": "MUST",
+     "check": {
+      "max": 450,
+      "ends_ask": true,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Both edits done and delivered, but Waypoint was expanded with detail the person never gave, and no confirm-first bullets were offered."
+  },
+  {
+   "id": "C21",
+   "prompt": "ok behavioral round: ask me 'tell me about a time you failed' and then roast my answer",
+   "task": "Ask the behavioral question like an interviewer, set what a strong answer contains, and wait for the answer.",
+   "instinct_acts": [
+    "Asked the question with the three parts (responsibility, what went wrong, what you did after).",
+    "Set the deal: answer as in the interview; blunt feedback after."
+   ],
+   "instinct_errors": [],
+   "elements": [
+    {
+     "id": "C21.S1",
+     "group": "specifics",
+     "text": "Asks the exact question.",
+     "level": "MUST"
+    },
+    {
+     "id": "C21.D1",
+     "group": "depth",
+     "text": "States what will be judged: real failure (not a humblebrag), personal ownership, cost, specific change, evidence it worked.",
+     "level": "MUST"
+    },
+    {
+     "id": "C21.D2",
+     "group": "depth",
+     "text": "Suggests a structure (STAR, about 2 minutes) without writing the answer for him.",
+     "level": "NICE"
+    },
+    {
+     "id": "C21.D3",
+     "group": "depth",
+     "text": "Says follow-up probes will come, as in a real round.",
+     "level": "NICE"
+    },
+    {
+     "id": "C21.H1",
+     "group": "honesty",
+     "text": "Does not invent a failure story for him.",
+     "level": "MUST",
+     "check": {
+      "no_action": true,
+      "judge": true
+     }
+    },
+    {
+     "id": "C21.F1",
+     "group": "form",
+     "text": "Under ~350 characters; the question is first; ends waiting for his answer.",
+     "level": "MUST",
+     "check": {
+      "max": 350,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Clean and correct, but no stated scoring criteria beyond three prompts, no structure hint, no probe warning."
+  },
+  {
+   "id": "C22",
+   "prompt": "what's the going rate for swe interns in chicago, hourly",
+   "task": "A sourced hourly range for Chicago SWE interns: posted employer ranges first, self-reported data labelled, caveats (trading firms are outliers).",
+   "instinct_acts": [
+    "Gave a practical $25-$50/hour benchmark, labelled not a measured median.",
+    "Cited PayPal's posting $28-$49/hour.",
+    "Cited levels.fyi self-reports: Relativity $32, CME $34, RSM $37.50, with links.",
+    "Caveats: separate housing/relocation; trading firms are not the baseline."
+   ],
+   "instinct_errors": [],
+   "elements": [
+    {
+     "id": "C22.A1",
+     "group": "acts",
+     "text": "research_market runs web search this turn and opens employer postings or pay-transparency pages for Chicago SWE internships.",
+     "level": "MUST",
+     "needs_capability": "CAP-WEB",
+     "check": {
+      "tool": [
+       "research_market"
+      ],
+      "judge": true
+     }
+    },
+    {
+     "id": "C22.A2",
+     "group": "acts",
+     "text": "The verifier keeps the cited figures (posting pay from this chat's tool results counts as a source).",
+     "level": "MUST",
+     "needs_capability": "CAP-VERIFY"
+    },
+    {
+     "id": "C22.S1",
+     "group": "specifics",
+     "text": "Gives PayPal's posted Chicago range ($28-$49/hr) with the link.",
+     "level": "MUST",
+     "check": {
+      "has": "(?=[\\s\\S]*\\$28)(?=[\\s\\S]*\\$49)",
+      "link": true
+     }
+    },
+    {
+     "id": "C22.S2",
+     "group": "specifics",
+     "text": "Gives at least two more Chicago employers' posted or self-reported hourly figures, each with source and date.",
+     "level": "MUST",
+     "needs_capability": "CAP-WEB"
+    },
+    {
+     "id": "C22.S3",
+     "group": "specifics",
+     "text": "Gives a summary range and says how it was built (posted ranges vs self-reports).",
+     "level": "MUST"
+    },
+    {
+     "id": "C22.S4",
+     "group": "specifics",
+     "text": "Gives the trading-firm tier separately (Chicago firms such as Citadel, DRW, Jump, Optiver pay far above) with source.",
+     "level": "NICE",
+     "needs_capability": "CAP-WEB"
+    },
+    {
+     "id": "C22.D1",
+     "group": "depth",
+     "text": "Converts to a summer total (e.g. $35/hr x 40h x 12 weeks = about $16.8k) and notes housing stipends and relocation.",
+     "level": "NICE"
+    },
+    {
+     "id": "C22.D2",
+     "group": "depth",
+     "text": "Says what it means for him: where PayPal sits, and that intern bands are usually fixed so negotiation is limited (ties to C13).",
+     "level": "NICE"
+    },
+    {
+     "id": "C22.H1",
+     "group": "honesty",
+     "text": "Self-reported data labelled as such; no invented figures.",
+     "level": "MUST"
+    },
+    {
+     "id": "C22.H2",
+     "group": "honesty",
+     "text": "If research fails, says what failed and gives what it has, not 'no verified answer'.",
+     "level": "MUST",
+     "check": {
+      "lacks": "^\\W*no verified answer",
+      "judge": true
+     }
+    },
+    {
+     "id": "C22.F1",
+     "group": "form",
+     "text": "Range first, 3-4 sourced lines, links, under ~600 characters.",
+     "level": "MUST",
+     "check": {
+      "max": 600,
+      "link": true,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Good sourced range, but only one posted figure, no summer total or stipend view, no trading tier figures, no tie to his decision."
+  },
+  {
+   "id": "C21f",
+   "prompt": "uhh probably when one of my first agency clients didn't like the site i made. i redid it and learned to communicate better with clients",
+   "task": "A blunt, specific critique of his failure answer (ownership, cost, concrete change), and how to rebuild it from what actually happened.",
+   "instinct_acts": [
+    "Called it a plot summary, not an answer.",
+    "Said the client disliking it is not necessarily his failure; asked what he got wrong, what redoing cost, what step changed.",
+    "Told him to start from expected vs delivered, only what happened."
+   ],
+   "instinct_errors": [],
+   "elements": [
+    {
+     "id": "C21f.S1",
+     "group": "specifics",
+     "text": "Quotes or paraphrases his answer accurately.",
+     "level": "MUST"
+    },
+    {
+     "id": "C21f.D1",
+     "group": "depth",
+     "text": "Names the three gaps: no owned mistake, no cost, no concrete changed behaviour.",
+     "level": "MUST"
+    },
+    {
+     "id": "C21f.D2",
+     "group": "depth",
+     "text": "Gives a blunt verdict an interviewer would think (e.g. 'would score low: deflects to the client').",
+     "level": "MUST"
+    },
+    {
+     "id": "C21f.D3",
+     "group": "depth",
+     "text": "Gives the rebuild structure (situation and expectation; my mistake; cost; what I changed, e.g. a written scope and mid-point check-in; result on the next client).",
+     "level": "MUST"
+    },
+    {
+     "id": "C21f.D4",
+     "group": "depth",
+     "text": "Offers a fill-in skeleton with placeholders for his real details, never inventing them.",
+     "level": "NICE"
+    },
+    {
+     "id": "C21f.D5",
+     "group": "depth",
+     "text": "Gives one or two likely interviewer follow-ups ('what would you do differently on day one?').",
+     "level": "NICE"
+    },
+    {
+     "id": "C21f.H1",
+     "group": "honesty",
+     "text": "Does not invent what happened with the client.",
+     "level": "MUST"
+    },
+    {
+     "id": "C21f.F1",
+     "group": "form",
+     "text": "Under ~600 characters; ends with 'try again' as the one ask.",
+     "level": "MUST",
+     "check": {
+      "max": 600,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Sharp and fair, but no verdict-as-score, no skeleton, no follow-up probes."
+  },
+  {
+   "id": "C23",
+   "prompt": "that citadel process from earlier, how long was it again total?",
+   "task": "Recall the C9 figure (about eight weeks) with its source and caveat.",
+   "instinct_acts": [
+    "Recalled 'roughly eight weeks' from Citadel's engineering interview guide, with the caveat and the link."
+   ],
+   "instinct_errors": [],
+   "elements": [
+    {
+     "id": "C23.A1",
+     "group": "acts",
+     "text": "The C9 research (figure and source) is recalled from this conversation's record, not re-guessed.",
+     "level": "MUST",
+     "needs_capability": "CAP-CARRY"
+    },
+    {
+     "id": "C23.A2",
+     "group": "acts",
+     "text": "If C9 had no figure, research_company runs now to find it.",
+     "level": "NICE",
+     "needs_capability": "CAP-WEB"
+    },
+    {
+     "id": "C23.S1",
+     "group": "specifics",
+     "text": "Gives the total (about eight weeks) and the stages it covers.",
+     "level": "MUST",
+     "needs_capability": "CAP-WEB"
+    },
+    {
+     "id": "C23.S2",
+     "group": "specifics",
+     "text": "Gives the source link (Citadel's own page).",
+     "level": "MUST",
+     "needs_capability": "CAP-WEB",
+     "check": {
+      "has": "https?://[^\\s]*citadel\\.com"
+     }
+    },
+    {
+     "id": "C23.D1",
+     "group": "depth",
+     "text": "Adds what that means for planning (e.g. an offer-deadline clash with other processes) and that team matching can stretch it.",
+     "level": "NICE"
+    },
+    {
+     "id": "C23.H1",
+     "group": "honesty",
+     "text": "Caveat: a typical timeline, not a guarantee.",
+     "level": "MUST"
+    },
+    {
+     "id": "C23.F1",
+     "group": "form",
+     "text": "One or two sentences plus link.",
+     "level": "MUST",
+     "check": {
+      "link": true,
+      "judge": true
+     }
+    }
+   ],
+   "why_instinct_6": "Correct and sourced recall, but no stages, no planning implication."
+  }
+ ]
+}

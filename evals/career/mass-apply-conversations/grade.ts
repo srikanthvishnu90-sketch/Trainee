@@ -15,6 +15,8 @@ export interface Snapshot {
   wanted: { company: string; title: string; url: string; posting_key: string }[];
   jobs: { company: string; url: string; job_id: string; payload_hash: string; approval_hash: string; payload_hash_now: string; state: string; confirmation_id: string | null; resume_name?: string | null }[];
   questions: { label: string; company: string | null; state: string; job_ids?: string[] }[];
+  // D-094: each batch File the person was sent (career_watch_kv), by id: the applications it lists, numbered as the card numbers them.
+  files?: { id: string; items: { n: number; prepared_id: string; payload_hash: string; employer: string; role?: string; url?: string }[] }[];
 }
 export interface Result { id: string; level: "MUST" | "NICE"; pass: boolean | null; why: string }
 
@@ -61,6 +63,14 @@ export function cardItems(card: string[]): { n: number; text: string }[] {
   return items;
 }
 const lastCard = (x: Snapshot, before: number) => { const c = cardsBefore(x, before); return c.length ? c[c.length - 1] : null; };
+// Architect amendment (D-094): a card shown as a summary plus a File (the card message's meta names the File) shows the batch the
+// File lists: its applications are the File's, not the few the summary names. Every other card is read as before.
+export function fileOfLastCard(x: Snapshot, before: number) {
+  const pos = replyPositions(x), end = before < x.scripted.length ? pos[x.scripted[before]] : x.thread.length;
+  const last = x.thread.slice(0, end).filter(isCard).at(-1);
+  const id = last?.meta?.file_id;
+  return id ? (x.files ?? []).find((f) => f.id === id) ?? null : null;
+}
 const yesTurn = (s: Scenario) => { const i = s.turns.findIndex((t) => /^yes\b/i.test(t.trim())); return i < 0 ? s.turns.length : i; };
 const postingOf = (p: Posting[], company: string, text = "") => p.filter((q) => norm(q.company) === norm(company)).sort((a, b) => (norm(text).includes(norm(b.title)) ? 1 : 0) - (norm(text).includes(norm(a.title)) ? 1 : 0))[0] ?? null;
 const wantedPosting = (p: Posting[], w: Snapshot["wanted"][number]) => p.find((q) => q.job_id === w.posting_key || q.url === w.url) ?? null;
@@ -93,8 +103,8 @@ export const FNS: Record<string, Fn> = {
   card_shown: (x, a) => {
     const c = lastCard(x, a.before);
     if (!c) return [false, `no card before turn ${a.before}`];
-    const n = cardItems(c).length;
-    return [a.items == null ? n > 0 : n === a.items, `card of ${n} item(s) in ${c.length} message(s)`];
+    const file = fileOfLastCard(x, a.before), n = file ? file.items.length : cardItems(c).length;
+    return [a.items == null ? n > 0 : n === a.items, `card of ${n} item(s) in ${c.length} message(s)${file ? `, listed in its File ${file.id}` : ""}`];
   },
   card_fields: (x, a, s, p) => {
     const c = lastCard(x, yesTurn(s));

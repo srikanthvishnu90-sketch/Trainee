@@ -262,13 +262,17 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
         // them on one card, in pages, with one Approve.
         const fits = Array.isArray(ready) ? ready.filter((r: any) => { const one = cardFor([r]); return one !== null && "take" in one; }).length : 0;
         const partial = !stillAsking && c && "take" in c && c.take.length < fits;
-        // D-094: a batch that does not fit one card text (or spans the parts of a request) is ONE card: a short summary plus the
-        // File of every application, the yes bound to that File's hash (career_apply_card_push_batch_for). When the File cannot
-        // be made or pushed, a one-request batch is shown as before (paged); a batch of several parts is told it is ready.
+        // D-094: a batch that does not fit one text (it would need pages) or spans the parts of a request is ONE card: a short
+        // summary plus the File of every application, the yes bound to that File's hash (career_apply_card_push_batch_for). A
+        // batch that fits one text is shown inline exactly as before. When the File cannot be made or pushed, a one-request
+        // batch is shown as before (paged); a batch of several parts is told it is ready.
         let fileFailed = false;
+        const fitting = c && "take" in c ? (ready as any[]).filter((r: any) => { const one = cardFor([r]); return one !== null && "take" in one; }) : [];
+        const whole = partial ? batchFor(fitting) : null;
+        const oneText = !!whole && !("tooLong" in whole) && whole.take.length === fitting.length && !whole.skipped.length && whole.parts.length < 2 && whole.text.length <= CARD_HARD_LIMIT;
         if (heldForBatch) push = "held_for_batch";
-        else if (!stillAsking && d.batchFile && c && "take" in c && (partial || multi)) {
-          const all = (ready as any[]).filter((r: any) => { const one = cardFor([r]); return one !== null && "take" in one; });
+        else if (!stillAsking && d.batchFile && c && "take" in c && ((partial && !oneText) || multi)) {
+          const all = fitting;
           const file = await d.batchFile(user, all).catch(() => null);
           const text = file ? batchSummaryText(all, file.url) : null;
           const pushed = file && text && text.length <= CARD_HARD_LIMIT ? await d.rpc("career_apply_card_push_batch_for", { p_user: user, p_request: id,

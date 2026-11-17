@@ -53,3 +53,14 @@ Deno.test("score: 10 x MUSTs, capped at 8 under half the NICEs; ungraded left ou
   assertEquals(score([r("MUST", true), r("MUST", false), r("NICE", true)]).score, 5);
   assertEquals(score([r("MUST", true), r("NICE", true), r("NICE", null)]), { score: 10, must: "1/1", nice: "1/1", ungraded: 1 });
 });
+Deno.test("architect amendment (D-094): a summary card's items are its File's", () => {
+  const summary = "40 applications are ready. Nothing has been sent.\n\n1. Lumen — Data Analyst\n2. Orbit\nand 38 more.\n\nEvery one of the 40: https://file.e2e.test?t=v1.x\n\nReply \"yes\" to send all 40.";
+  const items = Array.from({ length: 40 }, (_, i) => ({ n: i + 1, prepared_id: `p${i}`, payload_hash: `h${i}`, employer: `E${i}` }));
+  const x = base({ thread: [{ content: "40 queued", meta: { intent: "career_apply_queue" } }, { content: summary, meta: { intent: "career_apply_card", card_id: "c1", file_id: "0123456789" } }, { content: "40 approved exactly as shown.", meta: { intent: "career_apply_card_answer" } }],
+    replies: ["40 queued", "40 approved exactly as shown."], files: [{ id: "0123456789", items }] });
+  assertEquals(FNS.card_shown(x, { before: 1, items: 40 }, S, [])[0], true);
+  assertEquals(FNS.card_shown(x, { before: 1, items: 2 }, S, [])[0], false);
+  assertEquals(FNS.card_summary(x, { max_messages: 4 }, S, [])[0], true);
+  // No File named on the card: read from the card's own lines, as before.
+  assertEquals(FNS.card_shown(base(), { before: 1, items: 3 }, S, [])[0], true);
+});

@@ -49,6 +49,9 @@ export async function snapshotOf(x: TaskTrace): Promise<Snapshot> {
     wanted: (await j(x.pg, `select json_agg(json_build_object('company', company, 'title', title, 'url', url, 'posting_key', posting_key)) from public.career_apply_wanted where user_id = '${u}'`)) ?? [],
     jobs,
     questions: (await j(x.pg, `select json_agg(json_build_object('label', label, 'company', company, 'state', state) order by created_at) from public.career_apply_questions where user_id = '${u}'`)) ?? [],
+    // D-094: the batch Files (a summary card's full list), as stored.
+    files: (((await j(x.pg, `select json_agg(json_build_object('id', value->>'id', 'items', value->'data'->'batch'->'items')) from public.career_watch_kv where user_id = '${u}' and key like 'tf:file:%' and value->'data' ? 'batch'`)) ?? []) as any[])
+      .map((f) => ({ id: String(f.id), items: (f.items ?? []).map((i: any) => ({ n: i.n, prepared_id: i.prepared_id, payload_hash: i.payload_hash, employer: i.employer, role: i.role, url: i.url })) })),
   };
 }
 
@@ -84,7 +87,7 @@ export function scorecard(r: Awaited<ReturnType<typeof runConversations>>): stri
   if (scale) {
     const s = scale.snapshot, card = s.thread.filter((m) => m.meta?.intent === "career_apply_card" || /applications? (?:is|are) ready/.test(m.content));
     L.push("", "## Scale (MA14)", "", `- ask to card (preparation, stub world): ${((s.wallMs[0] ?? 0) / 1000).toFixed(1)} s; yes turn with sends: ${((s.wallMs[1] ?? 0) / 1000).toFixed(1)} s`,
-      `- card messages: ${card.length}, longest ${Math.max(0, ...card.map((m) => m.content.length))} characters`,
+      `- card messages: ${card.length}, longest ${Math.max(0, ...card.map((m) => m.content.length))} characters${card.some((m) => m.meta?.file_id) ? `; its File lists ${(s.files ?? []).find((f) => f.id === card.find((m) => m.meta?.file_id)?.meta?.file_id)?.items.length ?? 0}` : ""}`,
       `- approved ${s.jobs.length}, reached the employer ${s.atsPosts.length}, distinct postings sent ${new Set(s.atsPosts.map((p) => `${p.board}/${p.job}`)).size}`);
   }
   return L.join("\n") + "\n";

@@ -26,6 +26,8 @@ on:
     paths:
       - .github/workflows/brain-eval.yml
       - evals/career/**
+      # D-091: the owner's subscription sittings are evidence, never a reason to run a paid eval.
+      - '!evals/career/subscription/**'
       - supabase/functions/_shared/**
       - supabase/functions/agent-chat/career_brain.ts
       - supabase/functions/agent-chat/career_staged.ts

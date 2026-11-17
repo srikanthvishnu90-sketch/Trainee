@@ -13,7 +13,7 @@ import { FAMILY_TITLE, familyAskOf, type FamilyMakeDeps } from "../_shared/file_
 import type { FileService } from "../_shared/file_service.ts";
 import { careerSystemPrompt, MIRROR_RULES, shapeRulesFor } from "../_shared/agent/prompt.ts";
 import { approvalRulesText } from "../_shared/agent/approval_rules.ts";
-import { withContracts } from "../_shared/agent/task_contracts.ts";
+import { pipelineContracts, withContracts } from "../_shared/agent/task_contracts.ts";
 import { personDay } from "../_shared/agent/person_day.ts";
 import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing } from "../_shared/agent/memory.ts";
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
@@ -22,7 +22,7 @@ import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research
 import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed, type ResearchCheck } from "../_shared/agent/research/market.ts";
 import { bare, keepSupported, personQuestion, recordCheck, splitSentences } from "../_shared/agent/research/support.ts";
 import { confirmedRow, factRows } from "../_shared/agent/memory.ts";
-import { contractBlock, contractsFor, evidenceTurn, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
+import { evidenceTurn, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
 import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
@@ -223,9 +223,9 @@ export async function agentTurn(o: {
   const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult; a?: AdviceResult } = {};
   const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores, restoreAsk: o.restoreAsk ?? null, cardPending: !!o.cardPending };
   // REPLY PIPELINE (PIPELINE.on; docs/architect/specs/REPLY-PIPELINE.md): the evidence ledger starts with the person's confirmed record
-  // and what it lacks; each tool result adds its units (loop.ts). The draft cites them; the task contract is stated up front.
+  // and what it lacks; each tool result adds its units (loop.ts). The draft cites them. The task contract is never read from the
+  // message (review rv4): it comes back in the run note of the tool whose result the reply reports (task_contracts.ts withContracts).
   const ledger = PIPELINE.on && !hypo ? new Ledger(o.now) : null;
-  const contracts = PIPELINE.on ? contractsFor(null, o.message) : [];
   if (ledger) {
     const pf = (o.stores as any)?.profile ?? {}, contact = { ...(pf.basics ?? {}), ...(pf.resume_header?.confirmed_at ? pf.resume_header : {}) };
     // (only what the person confirmed: the same rows the prompt's "Confirmed facts (usable in applications)" shows, D-007)
@@ -243,7 +243,7 @@ export async function agentTurn(o: {
     process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts,
       planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !appHypo && offered.has("read_application_mail"), noneClaim: !appHypo, record: () => (ctx.turn as any)?.record, posting: meant.length > 0 && offered.has("get_posting"), shownPay,
       marketRate: !hypo && marketRateAskOf(o.message) && offered.has("research_market"), review: practiceAnswer || !!roast ? o.message : null, familyFile: !hypo && offered.has(FAMILY_FILE_TOOL) ? familyAskOf(o.message) : null }),
-    system: careerSystemPrompt(localDay(o.now, o.tz)) + (ledger ? `\n\n${LEDGER_RULE}\n${ledger.block()}\n${contractBlock(contracts)}` : "") + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + approvalRulesText() + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
+    system: careerSystemPrompt(localDay(o.now, o.tz)) + (ledger ? `\n\n${LEDGER_RULE}\n${ledger.block()}` : "") + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + approvalRulesText() + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
     // ADVERSARIAL ROUND 2: an attached file's name and text are not the person's words: no tool reads them as said.
@@ -308,7 +308,7 @@ export async function agentTurn(o: {
     const l0 = replyLength(o.message, o.history);
     const repair = async (x: { system: string; user: string }) => { const res = await o.model({ system: x.system, messages: [{ role: "user", content: [{ type: "text", text: x.user }] }], tools: [], max_tokens: 500, tool_choice: { type: "none" } } as any); return ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim(); };
     const names = [...new Set((o.history ?? []).filter((m: any) => typeof m?.content === "string").flatMap((m: any) => (m.content as string).match(/(?<![\p{L}])\p{Lu}[\p{L}&'-]{2,}/gu) ?? []))];
-    piped = await runReplyPipeline(result.reply, ledger!, { judge: o.market?.judge ?? null, repair, own: [...(result.codeLines ?? [])], onRecord, ask: o.message, contracts, names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
+    piped = await runReplyPipeline(result.reply, ledger!, { judge: o.market?.judge ?? null, repair, own: [...(result.codeLines ?? [])], onRecord, ask: o.message, contracts: pipelineContracts((ctx.turn as any)?.contracts), names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
     // Live-12 review (item 2): a link stays only when a ledger unit, a tool result or a File made this turn gave it (after the draft and
     // after the repair alike: this runs on what the pipeline returns).
     result = { ...result, reply: stripUnseenLinks(piped.text, [...(result.linksSeen ?? []), ...(result.fileLinks ?? []), ...shownBefore(o.history), ...ledger!.units.map((u) => u.url).filter((u): u is string => !!u)]) };

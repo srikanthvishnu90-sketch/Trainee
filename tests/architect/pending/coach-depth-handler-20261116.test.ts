@@ -13,11 +13,17 @@ const script: Record<string, Step[]> = { C18: [{ tool: "check_posting_open", inp
 
 Deno.test({ name: "CH-1 the benchmark through the real handler: no contract from the message; C18's open check returns its contract", sanitizeOps: false, sanitizeResources: false, ignore: canRun() !== null && canRun() !== "FAIL", fn: async () => {
   if (canRun() === "FAIL") throw new Error("needs Postgres 16 in CI");
-  const { seen, close } = await runConversation(script);
+  // Review rv4: a contract is chosen by the tool's result, so C18's open check must READ the posting: the Greenhouse posting API
+  // answers with this posting (a check that does not finish, "unknown", carries no contract; CU-6).
+  const serve = (req: Request) => new URL(req.url).hostname === "boards-api.greenhouse.io" && new URL(req.url).pathname === "/v1/boards/paypalwa1/jobs/9101"
+    ? Response.json({ id: 9101, title: "Software Engineer Intern", absolute_url: PAYPAL.url, location: { name: "San Jose, CA" }, updated_at: "2026-11-10T00:00:00Z" }) : null;
+  const { seen, close } = await runConversation(script, { serve });
   try {
     const brain = TURNS.filter((t) => seen[t.id] && !seen[t.id].code);
     ok(brain.length >= 20, `turns that reached the brain: ${brain.map((t) => t.id).join(",")}`);
     for (const t of brain) ok(!/TASK CONTRACT/.test(seen[t.id].system), `${t.id}: a contract in the prompt`);
+    // Review rv4: trunk's reply pipeline read contracts from the message too ("THIS REPLY MUST: ..."); none is in any prompt.
+    for (const t of brain) ok(!/THIS REPLY MUST/.test(seen[t.id].system), `${t.id}: a message-read contract (contractsFor) in the prompt`);
     const c18 = seen.C18;
     ok(c18 && !c18.code && c18.tools.includes("check_posting_open"), `C18 offered: ${c18?.tools.join(",")}`);
     const call = c18.calls.find((c) => c.name === "check_posting_open");

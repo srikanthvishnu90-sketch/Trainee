@@ -159,6 +159,18 @@ function STRICT_INIT() {
   }
   NoSocket.CONNECTING = 0; NoSocket.OPEN = 1; NoSocket.CLOSING = 2; NoSocket.CLOSED = 3;
   window.WebSocket = NoSocket;
+  // A board's own resume upload is answered inside the browser (SIMULATED_UPLOADS), so its body never goes over the wire and the
+  // browser fires no upload progress for it. Greenhouse's job-boards upload shows the file only once its upload reached 100%
+  // (strict runs 43276162667 and CI 44021741347: 19 'Attach' rows, progress bar left at 0%). For those same addresses only, the
+  // upload's own progress events are dispatched when the simulated answer arrives. Nothing is sent either way.
+  const SIM = /^https:\/\/(?:grnhse-prod-jben-[a-z0-9-]+\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com|workable-application-form\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com|simulated-upload\.invalid|app\.breezy\.hr\/api\/portal\/[A-Za-z0-9_-]+\/upload)/;
+  const open0 = XMLHttpRequest.prototype.open, send0 = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (m, u) { try { this.__strictSim = String(m).toUpperCase() === "POST" && SIM.test(new URL(u, location.href).href); } catch { this.__strictSim = false; } return open0.apply(this, arguments); };
+  XMLHttpRequest.prototype.send = function (body) {
+    if (this.__strictSim) { const x = this, n = (body && (body.size || body.length)) || 1; let done = false;
+      x.addEventListener("readystatechange", () => { if (!done && x.readyState >= 2) { done = true; for (const t of ["loadstart", "progress", "load", "loadend"]) x.upload.dispatchEvent(new ProgressEvent(t, { lengthComputable: true, loaded: n, total: n })); } }); }
+    return send0.apply(this, arguments);
+  };
 }
 // The bench's own guard on every request the page makes (the second wall after strictStop; the third is STRICT_INIT): every
 // request but GET/HEAD/OPTIONS is aborted in the browser, except a GraphQL read and the board's own resume upload answered

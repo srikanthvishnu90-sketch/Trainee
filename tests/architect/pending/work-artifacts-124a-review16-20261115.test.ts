@@ -18,6 +18,7 @@ const dec = (b: Uint8Array) => new TextDecoder("latin1").decode(b);
 const NAME = "Jordan Pike";
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const WORK = new URL("../../../supabase/functions/_shared/work/", import.meta.url);
+const DOCS_META = { url: new URL("docs.ts", WORK).href }; // review 18 note 2: was undefined, so that attempt threw before minting
 type P = Awaited<ReturnType<typeof prov>>;
 // The real xlsx writer (the only writer on this branch).
 // deno-lint-ignore no-explicit-any

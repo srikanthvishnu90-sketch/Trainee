@@ -141,9 +141,15 @@ code and tested.
       `RENDERS` line `ics: (m: { events: IcsEvent[]; now: string }) => [{ filename: "invite.ics", mime: "text/calendar",
       bytes: new TextEncoder().encode(writeIcs(m.events, { now: m.now })) }]`.
     - WO-124d (`ag/wo-124d`) adds to `provenance.ts` only `import { type Deck, type DocModel, writeDocx, writePdf,
-      writePptx } from "./docs.ts";` and the `RENDERS` lines for `docx` and `pdf` (a `DocModel`) and `pptx` (a `Deck`).
+      writePptx } from "./docs.ts";`, the `DOCX` and `PPTX` mime constants, and the `RENDERS` lines for `docx` and `pdf`
+      (a `DocModel`) and `pptx` (a `Deck`); it also restores the docx and pdf cases of the review-15 "delivered when clean" test.
     - A writer module never imports `provenance.ts`, and each branch adds to the slot test a line showing its handle's
       bytes are exactly its writer's output (as the xlsx line does).
+  - The source check reads only plain data (review 18): strings, numbers, booleans, null, arrays and plain objects. Any
+    other leaf or object (BigInt, a Number or String wrapper, Date, RegExp, Map, Set, Error) is "model is not plain data",
+    because a writer prints it through template text while the check would read it as empty. Model keys are not read by
+    the source check; this is safe only while no writer puts a key into a STRUCTURAL attribute or a folded ICS line
+    (today the only keys drawn are xlsx defined names, written to a scanned attribute).
 - `proof.ts`
   - `report(checks[], limits[])` returns the report text.
   - `boundClaims(reply, report)` refuses a claim of a check that was not run.

@@ -18,6 +18,8 @@
 //        [{ filename: "invite.ics", mime: "text/calendar", bytes: new TextEncoder().encode(writeIcs(m.events, { now: m.now })) }],
 //  - WO-124d (ag/wo-124d) adds, in this file only:
 //      import { type Deck, type DocModel, writeDocx, writePdf, writePptx } from "./docs.ts";
+//      const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+//      const PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 //      and in RENDERS:  docx: (m: DocModel) => [{ filename: "memo.docx", mime: DOCX, bytes: writeDocx(m) }],
 //                       pptx: (m: Deck) => [{ filename: "deck.pptx", mime: PPTX, bytes: writePptx(m) }],
 //                       pdf: (m: DocModel) => [{ filename: "memo.pdf", mime: "application/pdf", bytes: writePdf(m) }],
@@ -81,7 +83,12 @@ function sourceText(m: unknown): string | null {
     const { v, leave } = stack.pop()!;
     if (leave) { open.delete(leave); done.add(leave); continue; }
     if (typeof v === "string" || typeof v === "number") out.push(String(v));
-    else if (v && typeof v === "object") {
+    else if (v === null || v === undefined || typeof v === "boolean") continue;
+    else if (typeof v !== "object") return null; // bigint, symbol, function: not plain data (review 18 B1)
+    else {
+      // Only arrays and plain objects are read; any other object (a Number/String wrapper, Date, RegExp, Map, Set, Error)
+      // would print through a writer's template text while this check reads it as empty, so it is not plain data.
+      if (!Array.isArray(v) && Object.getPrototypeOf(v) !== Object.prototype) return null;
       if (open.has(v)) return null;
       if (done.has(v)) continue;
       open.add(v);

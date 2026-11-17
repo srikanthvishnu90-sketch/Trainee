@@ -489,7 +489,7 @@ async function fillChoice(page, d, value, multi) {
     const loc = page.locator(sel(d.q, i)).first();
     // A drawn choice's tagged option (its shown words, see EXTRACT) is clicked as a person clicks it; check() would retarget
     // the click onto the hidden input, which such a board ignores. An option already chosen is not clicked again.
-    if (d.kind !== "buttons" && !d.drawn) await loc.check({ force: true });
+    if (d.kind !== "buttons" && !d.drawn) await checkOption(page, loc);
     else if (d.kind === "buttons" || !(await page.evaluate(STATE, [d]).then((x) => (x[0].picked || []).includes(String(i))).catch(() => false))) {
       if (d.drawn) {
         // The board may draw its own layer over the option's words (strict run 42780366348: a 20 s actionability wait). The
@@ -510,8 +510,16 @@ async function fillChoice(page, d, value, multi) {
   const want = idx.map(String).sort().join(","), got = (s.picked || []).slice().sort().join(",");
   return got === want ? { ok: true } : { ok: false, reason: "readback_mismatch" };
 }
+// A radio or tick box is checked as before; when the page swallows that click on its input ("Clicking the checkbox did not change
+// its state": a styled option whose input sits under the board's own decoration, answered run of 2026-11-16, 8 postings on
+// Teamtailor, Ashby, Lever and Recruitee) that same tagged input is clicked in the page (its own click and change events). Never any
+// other element; what it holds is read back by the caller as always.
+async function checkOption(page, loc) {
+  try { await loc.check({ force: true, timeout: 3000 }); return; } catch (e) { if (!/did not change its state/.test(String(e && e.message))) throw e; }
+  await loc.evaluate((e) => { if ((e.type === "radio" || e.type === "checkbox") && !e.checked) e.click(); }).catch(() => {});
+}
 async function fillCheckbox(page, d) {
-  await page.locator(sel(d.q)).first().check({ force: true });
+  await checkOption(page, page.locator(sel(d.q)).first());
   return (await stateOf(page, d)).filled ? { ok: true } : { ok: false, reason: "readback_mismatch" };
 }
 async function fillFile(page, d, path) {
@@ -659,6 +667,34 @@ async function menuSelected(page, d, ctl0) {
   await input.press("Escape").catch(() => {});
   return held;
 }
+// The listboxes shown before a box is opened are marked; after, the one new listbox (exactly one) is marked as this box's list.
+function LB_BEFORE() { for (const e of document.querySelectorAll("[data-upmore-lb-before], [data-upmore-lb-new]")) { e.removeAttribute("data-upmore-lb-before"); e.removeAttribute("data-upmore-lb-new"); }
+  for (const e of document.querySelectorAll('[role="listbox"]')) if (e.offsetWidth || e.offsetHeight) e.setAttribute("data-upmore-lb-before", "1"); }
+// Opens a dropdown: the listboxes already shown are marked first (floatingList), then the question's own tagged box is clicked.
+async function openCombo(page, input) {
+  await page.evaluate(LB_BEFORE).catch(() => {});
+  await input.click();
+}
+async function floatingList(page) {
+  return page.evaluate(() => { const fresh = [...document.querySelectorAll('[role="listbox"]:not([data-upmore-lb-before])')].filter((e) => (e.offsetWidth || e.offsetHeight) && e.querySelector('[role="option"]'));
+    if (fresh.length !== 1) return false; fresh[0].setAttribute("data-upmore-lb-new", "1"); return true; }).catch(() => false);
+}
+// A dropdown's own options, read by opening it and closing it again with nothing chosen: what a question handed back to the person
+// offers, in the page's words (a box whose options only show once opened). Read only; [] when none can be read.
+async function comboOptions(page, d) {
+  const input = page.locator(sel(d.q)).first();
+  const ctl = (await input.getAttribute("aria-controls").catch(() => null)) || (await input.getAttribute("aria-owns").catch(() => null));
+  const shell = input.locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select__container") or @data-combobox or contains(@class,"ashby-application-form-field-entry")][1]');
+  if (await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => true)) return [];
+  const read = async (loc) => (await loc.allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
+  try {
+    await openCombo(page, input);
+    await page.waitForTimeout(200);
+    let list = ctl ? await read(page.locator(`[id="${ctl.replace(/"/g, "")}"] [role="option"]:visible`)) : await read(shell.locator('[role="option"]:visible'));
+    if (!list.length && !ctl && (await floatingList(page))) list = await read(page.locator('[role="listbox"][data-upmore-lb-new] [role="option"]:visible'));
+    return list.slice(0, 60);
+  } catch { return []; } finally { await input.press("Escape").catch(() => {}); }
+}
 async function fillCombo(page, d, value, pick, phone, country) {
   const input = page.locator(sel(d.q)).first();
   // Only this dropdown's own options: its aria-controls list, else the options inside its own shell. A phone widget's country
@@ -668,11 +704,16 @@ async function fillCombo(page, d, value, pick, phone, country) {
   // Ashby's place box draws its list in a floating layer outside the field (strict benchmark run 42739040932): only that
   // box's own result rows (Ashby's autocomplete class, under a listbox) are read, never any other list on the page.
   const ashPlaces = !ctl && (await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => false));
+  // A list the board draws in a floating layer outside the field once this box is opened (Ashby's own dropdowns; strict answered
+  // run of 2026-11-16: "How did you hear about iwoca": options_not_readable): only a listbox that was not shown before the click and
+  // is the only such one, never any other list on the page (floatingList).
+  let float = false;
   const opts = () => (ctl ? page.locator(`[id="${ctl.replace(/"/g, "")}"] [role="option"]:visible`)
     : ashPlaces ? page.locator('[role="listbox"] [role="option"][class*="ashby-application-form-input-autocomplete-"]:visible')
+    : float ? page.locator('[role="listbox"][data-upmore-lb-new] [role="option"]:visible')
     : shell.locator('[role="option"]:visible'));
-  const optionsNow = async () => (await opts().allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
-  await input.click();
+  const optionsNow = async () => { let l = (await opts().allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); if (!l.length && !ctl && !ashPlaces && !float && (float = await floatingList(page))) l = (await opts().allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); return l; };
+  await openCombo(page, input);
   let list = await optionsNow();
   if (!list.length) { await page.waitForTimeout(120); list = await optionsNow(); }
   // A country picker lists every country: the confirmed name is typed so the site's own filter narrows it before matching.
@@ -755,6 +796,28 @@ function decide(d, ctx) {
   const sameLabel = ctx.labelNames && ctx.labelNames.get(labelKey(d));
   const standard = (sameLabel || []).filter((n) => BOARD_STANDARD.test(n));
   const boardOwn = standard.length === 1 && BOARD_STANDARD.test(String(d.name || ""));
+  // A box and a choice under one label (Ashby's "Phone" over the number box and a texting-consent Yes/No; strict answered run of
+  // 2026-11-16: 2 of 20 Ashby postings stopped label_on_form_twice once the consent was answered): an approved answer that is exactly
+  // one of the choice's own options is that choice's answer, and the box takes its confirmed fact as when nothing was answered. Any
+  // other pairing (two boxes, two choices, an answer that is no option of the choice) stays as below.
+  const twins = ctx.labelQs && ctx.labelQs.get(labelKey(d));
+  if (twins && twins.length === 2 && !boardOwn) {
+    const ans = answerFor(d.label, answers);
+    const choice = twins.filter((x) => ["radio", "buttons", "select"].includes(x.kind) && Array.isArray(x.options)), box = twins.filter((x) => ["text", "textarea"].includes(x.kind));
+    // The other way round (the apply VM carries contact facts as approved answers under their labels): an approved "Phone" that is
+    // a phone number and no option of the choice is the box's; the choice has no approved answer (asked when required, else blank).
+    const fitsBox = (v) => { const k = factKey(d.label); return k === "phone" ? String(v).replace(/\D/g, "").length >= 7 && !/[a-z]{3}/i.test(String(v)) : k === "email" ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v).trim()) : false; };
+    if (!blank(ans) && choice.length === 1 && box.length === 1 && matchOption(choice[0].options.map((o) => o.label), ans).error && fitsBox(ans)) {
+      if (d.q === box[0].q) return { status: "fill", value: String(ans), source: "answer" };
+      if (d.q === choice[0].q) return d.required ? { status: "ask", reason: "no_confirmed_answer" } : { status: "skip", reason: "optional_left_blank" };
+    }
+    if (!blank(ans) && choice.length === 1 && box.length === 1 && !matchOption(choice[0].options.map((o) => o.label), ans).error) {
+      if (d.q === choice[0].q) return { status: "fill", value: String(ans), source: "answer" };
+      // The choice's answer is never the box's fact (factsFrom would read an approved "Phone" answer as the phone).
+      const f0 = factValue(d.label, facts || {}), f = !blank(f0) && String(f0).trim() !== String(ans).trim() ? f0 : undefined;
+      if (d.q === box[0].q) return !blank(f) ? { status: "fill", value: String(f), source: "fact" } : d.required ? { status: "ask", reason: "no_confirmed_answer" } : { status: "skip", reason: "optional_left_blank" };
+    }
+  }
   if (ctx.labelCount && (ctx.labelCount.get(labelKey(d)) || 0) > 1 && !boardOwn && standard.length === 1 && blank(answerFor(d.label, answers))) return { status: "ask", reason: "no_confirmed_answer" };
   if (ctx.labelCount && (ctx.labelCount.get(labelKey(d)) || 0) > 1 && !boardOwn) {
     if (!blank(answerFor(d.label, answers))) return { status: "ask", reason: "label_on_form_twice" };
@@ -849,6 +912,7 @@ async function fillForm(page, ctx0) {
     ctx.labelCount = labelCounts(qs);
     ctx.labelKinds = labelKinds(qs);
     ctx.labelNames = labelNames(qs);
+    ctx.labelQs = new Map(); for (const x of qs) if (x.kind !== "file") { const k = labelKey(x); if (!ctx.labelQs.has(k)) ctx.labelQs.set(k, []); ctx.labelQs.get(k).push(x); }
     ctx.siblings = qs.map((x) => x.label);
     const fresh = qs.filter((d) => !handled.has(`${d.label}|${d.kind}|${d.name}`));
     if (!fresh.length) break;
@@ -862,6 +926,8 @@ async function fillForm(page, ctx0) {
       entry.source = dec.source;
       if (before.filled && d.kind !== "file" && dec.status !== "fill") { entry.status = "prefilled"; continue; }
       if (dec.status === "skip") { entry.status = "skipped"; entry.reason = dec.reason; continue; }
+      // A dropdown whose options only show once opened is read for them (comboOptions), so the question goes back with what it offers.
+      if (dec.status === "ask" && d.kind === "combobox" && !d.options && !d.phoneCountry && !d.place) { const o = await comboOptions(page, d); if (o.length) d.options = o.map((label, i) => ({ i, label })); }
       if (dec.status === "ask") { entry.status = "needs_user"; entry.reason = dec.reason; needsUser.push({ label: d.label, reason: dec.reason, kind: d.kind, ...(d.options ? { options: d.options.map((o) => o.label).slice(0, 40) } : {}) }); continue; }
       let r;
       // Once the board has re-rendered (below), a question read before it is looked up again first, not waited on.

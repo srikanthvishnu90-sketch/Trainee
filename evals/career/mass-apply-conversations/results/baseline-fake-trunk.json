@@ -1,0 +1,3753 @@
+{
+ "label": "baseline-fake-trunk",
+ "model": "fake",
+ "commit": "3f20f8f2e27a12fdb62423e8a09b6ee143fd6e7f",
+ "run_at": "2026-11-16T19:42:57.641Z",
+ "seconds": 332,
+ "mean": 5.07,
+ "results": [
+  {
+   "id": "MA01",
+   "title": "One message: every SWE internship in Chicago or remote I qualify for",
+   "score": 2.5,
+   "must": "3/12",
+   "nice": "1/6",
+   "ungraded": 0,
+   "checks": [
+    {
+     "id": "acts-turn1",
+     "level": "MUST",
+     "pass": false,
+     "why": "turn 0 handled as career_internship_discovery; 0 on the apply list"
+    },
+    {
+     "id": "wanted-includes",
+     "level": "MUST",
+     "pass": false,
+     "why": "missing: Northwind, Pinecrest, Quarry Labs, Tidal, Cobalt"
+    },
+    {
+     "id": "wanted-excludes",
+     "level": "MUST",
+     "pass": true,
+     "why": "none of them"
+    },
+    {
+     "id": "left-out-named",
+     "level": "NICE",
+     "pass": false,
+     "why": "turn 0: \"I checked every software engineer qualify internships in Chicago and remote on the live board and the saved job-board snapshot: no open internships (1 posting i\""
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "pass": true,
+     "why": "after turn 0: 0 approved, 0 reached an employer"
+    },
+    {
+     "id": "card-before-yes",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card before turn 1"
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "pass": false,
+     "why": "0/0 bound"
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved, 0 recorded sent, 0 posts"
+    },
+    {
+     "id": "resume-attached",
+     "level": "MUST",
+     "pass": false,
+     "why": "0/0 with a resume"
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved; reply: \"Here is where that stands.\""
+    },
+    {
+     "id": "card-role-employer",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "card-link",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "card-open-questions",
+     "level": "MUST",
+     "pass": true,
+     "why": "no question open"
+    },
+    {
+     "id": "card-pay-deadline",
+     "level": "NICE",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "card-fit",
+     "level": "NICE",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "card-resume-file",
+     "level": "NICE",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "fast-turns",
+     "level": "NICE",
+     "pass": true,
+     "why": "slowest turn 2.6 s"
+    },
+    {
+     "id": "proof-after",
+     "level": "NICE",
+     "pass": false,
+     "why": "nothing after the yes says what was sent with its proof (1 message(s))"
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to every SWE internship in Chicago or remote that I qualify for",
+     "yes"
+    ],
+    "replies": [
+     "I checked every software engineer qualify internships in Chicago and remote on the live board and the saved job-board snapshot: no open internships (1 posting in the place doesn't say it is an internship). Other career sites were not checked. Say \"include the Chicago area\" to widen to the Chicago area.",
+     "Here is where that stands."
+    ],
+    "intents": [
+     "career_internship_discovery",
+     "agent"
+    ],
+    "turnMs": [
+     2558,
+     2596
+    ],
+    "scripted": [
+     0,
+     1
+    ],
+    "thread": [
+     {
+      "content": "I checked every software engineer qualify internships in Chicago and remote on the live board and the saved job-board snapshot: no open internships (1 posting in the place doesn't say it is an internship). Other career sites were not checked. Say \"include the Chicago area\" to widen to the Chicago area.",
+      "meta": {
+       "career": true,
+       "intent": "career_internship_discovery",
+       "contained": false,
+       "readiness": {
+        "ready": false,
+        "ask_now": [
+         {
+          "key": "work_authorization",
+          "chat": true
+         }
+        ],
+        "missing": [
+         {
+          "key": "work_authorization",
+          "chat": true,
+          "blocks": "apply"
+         },
+         {
+          "key": "email",
+          "chat": true,
+          "blocks": "quality"
+         },
+         {
+          "key": "phone",
+          "chat": true,
+          "blocks": "quality"
+         },
+         {
+          "key": "full_name",
+          "chat": true,
+          "blocks": "quality"
+         }
+        ],
+        "secure_only": 0
+       },
+       "search_proof": {
+        "result": "no open internships matched: 1 posting matched the place but does not say it is an internship",
+        "applied": "Nothing was applied for.",
+        "checked": "I checked every software engineer qualify internships in Chicago and remote, on the live board (last refreshed Nov 4, 3:00 PM UTC) and the saved snapshot of job boards",
+        "invented": "Nothing was invented to fill the list.",
+        "refreshed_at": "2026-11-04T09:00:00-06:00"
+       },
+       "result_status": "none",
+       "career_turn_key": "5658842b-376d-4a10-a64a-56238722b03b"
+      }
+     },
+     {
+      "content": "Here is where that stands.",
+      "meta": {
+       "brain": "staged",
+       "career": true,
+       "intent": "agent",
+       "shorten": {
+        "ran": false,
+        "why": "within the bound",
+        "bound": 550,
+        "chars": 26,
+        "outcome": "within"
+       },
+       "stopped": "final",
+       "contained": false,
+       "knowledge": {
+        "stage": null,
+        "unknown": [
+         "career stage (year in school, new graduate, changing careers, returning)",
+         "target role or field"
+        ],
+        "playbooks": [
+         "ctx-relocation-remote"
+        ]
+       },
+       "tool_calls": [],
+       "result_status": "final",
+       "router_intent": "career_catchall",
+       "career_turn_key": "10925aec-8060-4f57-bd1b-21e46d0bc087",
+       "pending_approvals": 0
+      }
+     }
+    ],
+    "atsPosts": [],
+    "postsAt": [
+     0,
+     0
+    ],
+    "jobsAt": [
+     0,
+     0
+    ],
+    "wallMs": [
+     2752,
+     2757
+    ],
+    "requested": [
+     "api.anthropic.com"
+    ],
+    "wanted": [],
+    "jobs": [],
+    "questions": []
+   }
+  },
+  {
+   "id": "MA02",
+   "title": "\"apply to 50 data roles\" when fewer exist",
+   "score": 1.5,
+   "must": "2/13",
+   "nice": "1/5",
+   "ungraded": 1,
+   "checks": [
+    {
+     "id": "acts-turn1",
+     "level": "MUST",
+     "pass": false,
+     "why": "turn 0 handled as career_batch_apply; 0 on the apply list"
+    },
+    {
+     "id": "no-padding",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 all match"
+    },
+    {
+     "id": "min-found",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 on the apply list"
+    },
+    {
+     "id": "real-count",
+     "level": "MUST",
+     "pass": false,
+     "why": "turn 0: \"0/50 applications ready for your yes. - Acme — Frontend Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was fille\""
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "pass": true,
+     "why": "after turn 0: 0 approved, 0 reached an employer"
+    },
+    {
+     "id": "card-before-yes",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card before turn 1"
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "pass": false,
+     "why": "0/0 bound"
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved, 0 recorded sent, 0 posts"
+    },
+    {
+     "id": "resume-attached",
+     "level": "MUST",
+     "pass": false,
+     "why": "0/0 with a resume"
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved; reply: \"Nothing was submitted — this batch is not ready, so a yes can't send it. 0/50 applications ready for your yes. - Acme — \""
+    },
+    {
+     "id": "card-role-employer",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "card-link",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "card-open-questions",
+     "level": "MUST",
+     "pass": true,
+     "why": "no question open"
+    },
+    {
+     "id": "card-pay-deadline",
+     "level": "NICE",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "card-fit",
+     "level": "NICE",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "card-resume-file",
+     "level": "NICE",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "fast-turns",
+     "level": "NICE",
+     "pass": true,
+     "why": "slowest turn 2.1 s"
+    },
+    {
+     "id": "proof-after",
+     "level": "NICE",
+     "pass": false,
+     "why": "nothing after the yes says what was sent with its proof (1 message(s))"
+    },
+    {
+     "id": "offers-more",
+     "level": "NICE",
+     "pass": null,
+     "why": "not judged (run with --model subscription --judge)"
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to 50 data roles",
+     "yes"
+    ],
+    "replies": [
+     "0/50 applications ready for your yes.\n- Acme — Frontend Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Brite — Frontend Developer Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cobalt — Software Engineering Intern, Frontend: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Dune Works — Frontend Intern (React): Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ember Health — UI Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ramp — Software Engineer Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ramp — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Stripe — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Stripe — Software Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Plaid — Data Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Fable — Backend Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Gridline — Backend Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Harbor Bank — Financial Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ionic Capital — Investment Banking Summer Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Juno — Product Design Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Kite — Data Science Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Lumen — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Mosaic — Software Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Nimbus — Backend Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Orbit — Data Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Northwind — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Pinecrest — Software Engineer Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Quarry Labs — Software Engineer Intern, Backend: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Redwood Analytics — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Saltbox — Software Engineer Intern, Research: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Tidal — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Umbra — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Vesta — Data Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Willow Health — Junior Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Stripe — Data Analyst, Payments: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Systems Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Logistics Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Foods Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Health Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Systems Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Logistics Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Foods Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Health Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Systems Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Logistics Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Foods Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Health Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Delta Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Delta Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nFound 152 data roles.\n152 were eligible; I took the 50 you named.\nThe 50 selected:\n- Acme — Frontend Engineering Intern — https://boards.greenhouse.io/acme/jobs/101 (stopped (named below))\n- Brite — Frontend Developer Intern — https://boards.greenhouse.io/brite/jobs/102 (stopped (named below))\n- Cobalt — Software Engineering Intern, Frontend — https://boards.greenhouse.io/cobalt/jobs/103 (stopped (named below))\n- Dune Works — Frontend Intern (React) — https://boards.greenhouse.io/duneworks/jobs/104 (stopped (named below))\n- Ember Health — UI Engineering Intern — https://boards.greenhouse.io/ember/jobs/105 (stopped (named below))\n- Ramp — Software Engineer Intern — https://boards.greenhouse.io/ramp/jobs/201 (stopped (named below))\n- Ramp — Data Analyst — https://boards.greenhouse.io/ramp/jobs/202 (stopped (named below))\n- Stripe — Data Analyst — https://boards.greenhouse.io/stripe/jobs/301 (stopped (named below))\n- Stripe — Software Engineer, New Grad — https://boards.greenhouse.io/stripe/jobs/302 (stopped (named below))\n- Plaid — Data Analyst Intern — https://boards.greenhouse.io/plaid/jobs/401 (stopped (named below))\n- Fable — Backend Engineer, New Grad — https://boards.greenhouse.io/fable/jobs/501 (stopped (named below))\n- Gridline — Backend Engineering Intern — https://boards.greenhouse.io/gridline/jobs/502 (stopped (named below))\n- Harbor Bank — Financial Analyst Intern — https://boards.greenhouse.io/harbor/jobs/601 (stopped (named below))\n- Ionic Capital — Investment Banking Summer Analyst — https://boards.greenhouse.io/ionic/jobs/602 (stopped (named below))\n- Juno — Product Design Intern — https://boards.greenhouse.io/juno/jobs/701 (stopped (named below))\n- Kite — Data Science Intern — https://boards.greenhouse.io/kite/jobs/702 (stopped (named below))\n- Lumen — Data Analyst — https://boards.greenhouse.io/lumen/jobs/801 (stopped (named below))\n- Mosaic — Software Engineer, New Grad — https://boards.greenhouse.io/mosaic/jobs/802 (stopped (named below))\n- Nimbus — Backend Engineer, New Grad — https://boards.greenhouse.io/nimbus/jobs/803 (stopped (named below))\n- Orbit — Data Analyst Intern — https://boards.greenhouse.io/orbit/jobs/804 (stopped (named below))\n- Northwind — Software Engineering Intern — https://boards.greenhouse.io/northwind/jobs/9101 (stopped (named below))\n- Pinecrest — Software Engineer Intern — https://boards.greenhouse.io/pinecrest/jobs/9102 (stopped (named below))\n- Quarry Labs — Software Engineer Intern, Backend — https://boards.greenhouse.io/quarrylabs/jobs/9103 (stopped (named below))\n- Redwood Analytics — Software Engineering Intern — https://boards.greenhouse.io/redwood/jobs/9104 (stopped (named below))\n- Saltbox — Software Engineer Intern, Research — https://boards.greenhouse.io/saltbox/jobs/9105 (stopped (named below))\n- Tidal — Software Engineering Intern — https://boards.greenhouse.io/tidal/jobs/9106 (stopped (named below))\n- Umbra — Data Analyst — https://boards.greenhouse.io/umbra/jobs/9201 (stopped (named below))\n- Vesta — Data Analyst Intern — https://boards.greenhouse.io/vesta/jobs/9202 (stopped (named below))\n- Willow Health — Junior Data Analyst — https://boards.greenhouse.io/willowhealth/jobs/9203 (stopped (named below))\n- Stripe — Data Analyst, Payments — https://boards.greenhouse.io/stripe/jobs/9204 (stopped (named below))\n- Amber Works Co — Operations Associate — https://boards.greenhouse.io/amberworksco/jobs/8001 (stopped (named below))\n- Amber Labs Co — Operations Associate — https://boards.greenhouse.io/amberlabsco/jobs/8002 (stopped (named below))\n- Amber Systems Co — Operations Associate — https://boards.greenhouse.io/ambersystemsco/jobs/8003 (stopped (named below))\n- Amber Logistics Co — Operations Associate — https://boards.greenhouse.io/amberlogisticsco/jobs/8004 (stopped (named below))\n- Amber Foods Co — Operations Associate — https://boards.greenhouse.io/amberfoodsco/jobs/8005 (stopped (named below))\n- Amber Health Co — Operations Associate — https://boards.greenhouse.io/amberhealthco/jobs/8006 (stopped (named below))\n- Basalt Works Co — Operations Associate — https://boards.greenhouse.io/basaltworksco/jobs/8007 (stopped (named below))\n- Basalt Labs Co — Operations Associate — https://boards.greenhouse.io/basaltlabsco/jobs/8008 (stopped (named below))\n- Basalt Systems Co — Operations Associate — https://boards.greenhouse.io/basaltsystemsco/jobs/8009 (stopped (named below))\n- Basalt Logistics Co — Operations Associate — https://boards.greenhouse.io/basaltlogisticsco/jobs/8010 (stopped (named below))\n- Basalt Foods Co — Operations Associate — https://boards.greenhouse.io/basaltfoodsco/jobs/8011 (stopped (named below))\n- Basalt Health Co — Operations Associate — https://boards.greenhouse.io/basalthealthco/jobs/8012 (stopped (named below))\n- Cedar Works Co — Operations Associate — https://boards.greenhouse.io/cedarworksco/jobs/8013 (stopped (named below))\n- Cedar Labs Co — Operations Associate — https://boards.greenhouse.io/cedarlabsco/jobs/8014 (stopped (named below))\n- Cedar Systems Co — Operations Associate — https://boards.greenhouse.io/cedarsystemsco/jobs/8015 (stopped (named below))\n- Cedar Logistics Co — Operations Associate — https://boards.greenhouse.io/cedarlogisticsco/jobs/8016 (stopped (named below))\n- Cedar Foods Co — Operations Associate — https://boards.greenhouse.io/cedarfoodsco/jobs/8017 (stopped (named below))\n- Cedar Health Co — Operations Associate — https://boards.greenhouse.io/cedarhealthco/jobs/8018 (stopped (named below))\n- Delta Works Co — Operations Associate — https://boards.greenhouse.io/deltaworksco/jobs/8019 (stopped (named below))\n- Delta Labs Co — Operations Associate — https://boards.greenhouse.io/deltalabsco/jobs/8020 (stopped (named below))\nStopped — Acme: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Brite: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cobalt: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Dune Works: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ember Health: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ramp: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ramp: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Stripe: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Stripe: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Plaid: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Fable: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Gridline: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Harbor Bank: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ionic Capital: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Juno: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Kite: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Lumen: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Mosaic: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Nimbus: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Orbit: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Northwind: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Pinecrest: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Quarry Labs: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Redwood Analytics: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Saltbox: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Tidal: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Umbra: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Vesta: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Willow Health: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Stripe: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Systems Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Logistics Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Foods Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Health Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Systems Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Logistics Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Foods Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Health Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Systems Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Logistics Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Foods Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Health Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Delta Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Delta Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n102 more were eligible beyond the 50 you named; they stay in the queue.",
+     "Nothing was submitted — this batch is not ready, so a yes can't send it.\n0/50 applications ready for your yes.\n- Acme — Frontend Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Brite — Frontend Developer Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cobalt — Software Engineering Intern, Frontend: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Dune Works — Frontend Intern (React): Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ember Health — UI Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ramp — Software Engineer Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ramp — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Stripe — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Stripe — Software Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Plaid — Data Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Fable — Backend Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Gridline — Backend Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Harbor Bank — Financial Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ionic Capital — Investment Banking Summer Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Juno — Product Design Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Kite — Data Science Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Lumen — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Mosaic — Software Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Nimbus — Backend Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Orbit — Data Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Northwind — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Pinecrest — Software Engineer Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Quarry Labs — Software Engineer Intern, Backend: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Redwood Analytics — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Saltbox — Software Engineer Intern, Research: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Tidal — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Umbra — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Vesta — Data Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Willow Health — Junior Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Stripe — Data Analyst, Payments: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Systems Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Logistics Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Foods Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Health Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Systems Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Logistics Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Foods Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Health Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Systems Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Logistics Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Foods Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Health Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Delta Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Delta Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nFound 152 data roles.\n152 were eligible; I took the 50 you named.\nThe 50 selected:\n- Acme — Frontend Engineering Intern — https://boards.greenhouse.io/acme/jobs/101 (stopped (named below))\n- Brite — Frontend Developer Intern — https://boards.greenhouse.io/brite/jobs/102 (stopped (named below))\n- Cobalt — Software Engineering Intern, Frontend — https://boards.greenhouse.io/cobalt/jobs/103 (stopped (named below))\n- Dune Works — Frontend Intern (React) — https://boards.greenhouse.io/duneworks/jobs/104 (stopped (named below))\n- Ember Health — UI Engineering Intern — https://boards.greenhouse.io/ember/jobs/105 (stopped (named below))\n- Ramp — Software Engineer Intern — https://boards.greenhouse.io/ramp/jobs/201 (stopped (named below))\n- Ramp — Data Analyst — https://boards.greenhouse.io/ramp/jobs/202 (stopped (named below))\n- Stripe — Data Analyst — https://boards.greenhouse.io/stripe/jobs/301 (stopped (named below))\n- Stripe — Software Engineer, New Grad — https://boards.greenhouse.io/stripe/jobs/302 (stopped (named below))\n- Plaid — Data Analyst Intern — https://boards.greenhouse.io/plaid/jobs/401 (stopped (named below))\n- Fable — Backend Engineer, New Grad — https://boards.greenhouse.io/fable/jobs/501 (stopped (named below))\n- Gridline — Backend Engineering Intern — https://boards.greenhouse.io/gridline/jobs/502 (stopped (named below))\n- Harbor Bank — Financial Analyst Intern — https://boards.greenhouse.io/harbor/jobs/601 (stopped (named below))\n- Ionic Capital — Investment Banking Summer Analyst — https://boards.greenhouse.io/ionic/jobs/602 (stopped (named below))\n- Juno — Product Design Intern — https://boards.greenhouse.io/juno/jobs/701 (stopped (named below))\n- Kite — Data Science Intern — https://boards.greenhouse.io/kite/jobs/702 (stopped (named below))\n- Lumen — Data Analyst — https://boards.greenhouse.io/lumen/jobs/801 (stopped (named below))\n- Mosaic — Software Engineer, New Grad — https://boards.greenhouse.io/mosaic/jobs/802 (stopped (named below))\n- Nimbus — Backend Engineer, New Grad — https://boards.greenhouse.io/nimbus/jobs/803 (stopped (named below))\n- Orbit — Data Analyst Intern — https://boards.greenhouse.io/orbit/jobs/804 (stopped (named below))\n- Northwind — Software Engineering Intern — https://boards.greenhouse.io/northwind/jobs/9101 (stopped (named below))\n- Pinecrest — Software Engineer Intern — https://boards.greenhouse.io/pinecrest/jobs/9102 (stopped (named below))\n- Quarry Labs — Software Engineer Intern, Backend — https://boards.greenhouse.io/quarrylabs/jobs/9103 (stopped (named below))\n- Redwood Analytics — Software Engineering Intern — https://boards.greenhouse.io/redwood/jobs/9104 (stopped (named below))\n- Saltbox — Software Engineer Intern, Research — https://boards.greenhouse.io/saltbox/jobs/9105 (stopped (named below))\n- Tidal — Software Engineering Intern — https://boards.greenhouse.io/tidal/jobs/9106 (stopped (named below))\n- Umbra — Data Analyst — https://boards.greenhouse.io/umbra/jobs/9201 (stopped (named below))\n- Vesta — Data Analyst Intern — https://boards.greenhouse.io/vesta/jobs/9202 (stopped (named below))\n- Willow Health — Junior Data Analyst — https://boards.greenhouse.io/willowhealth/jobs/9203 (stopped (named below))\n- Stripe — Data Analyst, Payments — https://boards.greenhouse.io/stripe/jobs/9204 (stopped (named below))\n- Amber Works Co — Operations Associate — https://boards.greenhouse.io/amberworksco/jobs/8001 (stopped (named below))\n- Amber Labs Co — Operations Associate — https://boards.greenhouse.io/amberlabsco/jobs/8002 (stopped (named below))\n- Amber Systems Co — Operations Associate — https://boards.greenhouse.io/ambersystemsco/jobs/8003 (stopped (named below))\n- Amber Logistics Co — Operations Associate — https://boards.greenhouse.io/amberlogisticsco/jobs/8004 (stopped (named below))\n- Amber Foods Co — Operations Associate — https://boards.greenhouse.io/amberfoodsco/jobs/8005 (stopped (named below))\n- Amber Health Co — Operations Associate — https://boards.greenhouse.io/amberhealthco/jobs/8006 (stopped (named below))\n- Basalt Works Co — Operations Associate — https://boards.greenhouse.io/basaltworksco/jobs/8007 (stopped (named below))\n- Basalt Labs Co — Operations Associate — https://boards.greenhouse.io/basaltlabsco/jobs/8008 (stopped (named below))\n- Basalt Systems Co — Operations Associate — https://boards.greenhouse.io/basaltsystemsco/jobs/8009 (stopped (named below))\n- Basalt Logistics Co — Operations Associate — https://boards.greenhouse.io/basaltlogisticsco/jobs/8010 (stopped (named below))\n- Basalt Foods Co — Operations Associate — https://boards.greenhouse.io/basaltfoodsco/jobs/8011 (stopped (named below))\n- Basalt Health Co — Operations Associate — https://boards.greenhouse.io/basalthealthco/jobs/8012 (stopped (named below))\n- Cedar Works Co — Operations Associate — https://boards.greenhouse.io/cedarworksco/jobs/8013 (stopped (named below))\n- Cedar Labs Co — Operations Associate — https://boards.greenhouse.io/cedarlabsco/jobs/8014 (stopped (named below))\n- Cedar Systems Co — Operations Associate — https://boards.greenhouse.io/cedarsystemsco/jobs/8015 (stopped (named below))\n- Cedar Logistics Co — Operations Associate — https://boards.greenhouse.io/cedarlogisticsco/jobs/8016 (stopped (named below))\n- Cedar Foods Co — Operations Associate — https://boards.greenhouse.io/cedarfoodsco/jobs/8017 (stopped (named below))\n- Cedar Health Co — Operations Associate — https://boards.greenhouse.io/cedarhealthco/jobs/8018 (stopped (named below))\n- Delta Works Co — Operations Associate — https://boards.greenhouse.io/deltaworksco/jobs/8019 (stopped (named below))\n- Delta Labs Co — Operations Associate — https://boards.greenhouse.io/deltalabsco/jobs/8020 (stopped (named below))\nStopped — Acme: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Brite: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cobalt: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Dune Works: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ember Health: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ramp: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ramp: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Stripe: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Stripe: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Plaid: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Fable: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Gridline: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Harbor Bank: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ionic Capital: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Juno: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Kite: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Lumen: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Mosaic: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Nimbus: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Orbit: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Northwind: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Pinecrest: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Quarry Labs: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Redwood Analytics: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Saltbox: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Tidal: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Umbra: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Vesta: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Willow Health: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Stripe: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Systems Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Logistics Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Foods Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Health Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Systems Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Logistics Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Foods Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Health Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Systems Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Logistics Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Foods Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Health Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Delta Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Delta Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n102 more were eligible beyond the 50 you named; they stay in the queue.\nNext step: each stopped application above names what it needs before it can be prepared; once a batch reaches its review card, approval comes from that card — a chat yes never submits."
+    ],
+    "intents": [
+     "career_batch_apply",
+     "career_batch_apply"
+    ],
+    "turnMs": [
+     2051,
+     1648
+    ],
+    "scripted": [
+     0,
+     1
+    ],
+    "thread": [
+     {
+      "content": "0/50 applications ready for your yes.\n- Acme — Frontend Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Brite — Frontend Developer Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cobalt — Software Engineering Intern, Frontend: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Dune Works — Frontend Intern (React): Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ember Health — UI Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ramp — Software Engineer Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ramp — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Stripe — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Stripe — Software Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Plaid — Data Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Fable — Backend Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Gridline — Backend Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Harbor Bank — Financial Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ionic Capital — Investment Banking Summer Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Juno — Product Design Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Kite — Data Science Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Lumen — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Mosaic — Software Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Nimbus — Backend Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Orbit — Data Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Northwind — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Pinecrest — Software Engineer Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Quarry Labs — Software Engineer Intern, Backend: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Redwood Analytics — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Saltbox — Software Engineer Intern, Research: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Tidal — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Umbra — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Vesta — Data Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Willow Health — Junior Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Stripe — Data Analyst, Payments: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Systems Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Logistics Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Foods Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Health Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Systems Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Logistics Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Foods Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Health Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Systems Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Logistics Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Foods Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Health Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Delta Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Delta Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nFound 152 data roles.\n152 were eligible; I took the 50 you named.\nThe 50 selected:\n- Acme — Frontend Engineering Intern — https://boards.greenhouse.io/acme/jobs/101 (stopped (named below))\n- Brite — Frontend Developer Intern — https://boards.greenhouse.io/brite/jobs/102 (stopped (named below))\n- Cobalt — Software Engineering Intern, Frontend — https://boards.greenhouse.io/cobalt/jobs/103 (stopped (named below))\n- Dune Works — Frontend Intern (React) — https://boards.greenhouse.io/duneworks/jobs/104 (stopped (named below))\n- Ember Health — UI Engineering Intern — https://boards.greenhouse.io/ember/jobs/105 (stopped (named below))\n- Ramp — Software Engineer Intern — https://boards.greenhouse.io/ramp/jobs/201 (stopped (named below))\n- Ramp — Data Analyst — https://boards.greenhouse.io/ramp/jobs/202 (stopped (named below))\n- Stripe — Data Analyst — https://boards.greenhouse.io/stripe/jobs/301 (stopped (named below))\n- Stripe — Software Engineer, New Grad — https://boards.greenhouse.io/stripe/jobs/302 (stopped (named below))\n- Plaid — Data Analyst Intern — https://boards.greenhouse.io/plaid/jobs/401 (stopped (named below))\n- Fable — Backend Engineer, New Grad — https://boards.greenhouse.io/fable/jobs/501 (stopped (named below))\n- Gridline — Backend Engineering Intern — https://boards.greenhouse.io/gridline/jobs/502 (stopped (named below))\n- Harbor Bank — Financial Analyst Intern — https://boards.greenhouse.io/harbor/jobs/601 (stopped (named below))\n- Ionic Capital — Investment Banking Summer Analyst — https://boards.greenhouse.io/ionic/jobs/602 (stopped (named below))\n- Juno — Product Design Intern — https://boards.greenhouse.io/juno/jobs/701 (stopped (named below))\n- Kite — Data Science Intern — https://boards.greenhouse.io/kite/jobs/702 (stopped (named below))\n- Lumen — Data Analyst — https://boards.greenhouse.io/lumen/jobs/801 (stopped (named below))\n- Mosaic — Software Engineer, New Grad — https://boards.greenhouse.io/mosaic/jobs/802 (stopped (named below))\n- Nimbus — Backend Engineer, New Grad — https://boards.greenhouse.io/nimbus/jobs/803 (stopped (named below))\n- Orbit — Data Analyst Intern — https://boards.greenhouse.io/orbit/jobs/804 (stopped (named below))\n- Northwind — Software Engineering Intern — https://boards.greenhouse.io/northwind/jobs/9101 (stopped (named below))\n- Pinecrest — Software Engineer Intern — https://boards.greenhouse.io/pinecrest/jobs/9102 (stopped (named below))\n- Quarry Labs — Software Engineer Intern, Backend — https://boards.greenhouse.io/quarrylabs/jobs/9103 (stopped (named below))\n- Redwood Analytics — Software Engineering Intern — https://boards.greenhouse.io/redwood/jobs/9104 (stopped (named below))\n- Saltbox — Software Engineer Intern, Research — https://boards.greenhouse.io/saltbox/jobs/9105 (stopped (named below))\n- Tidal — Software Engineering Intern — https://boards.greenhouse.io/tidal/jobs/9106 (stopped (named below))\n- Umbra — Data Analyst — https://boards.greenhouse.io/umbra/jobs/9201 (stopped (named below))\n- Vesta — Data Analyst Intern — https://boards.greenhouse.io/vesta/jobs/9202 (stopped (named below))\n- Willow Health — Junior Data Analyst — https://boards.greenhouse.io/willowhealth/jobs/9203 (stopped (named below))\n- Stripe — Data Analyst, Payments — https://boards.greenhouse.io/stripe/jobs/9204 (stopped (named below))\n- Amber Works Co — Operations Associate — https://boards.greenhouse.io/amberworksco/jobs/8001 (stopped (named below))\n- Amber Labs Co — Operations Associate — https://boards.greenhouse.io/amberlabsco/jobs/8002 (stopped (named below))\n- Amber Systems Co — Operations Associate — https://boards.greenhouse.io/ambersystemsco/jobs/8003 (stopped (named below))\n- Amber Logistics Co — Operations Associate — https://boards.greenhouse.io/amberlogisticsco/jobs/8004 (stopped (named below))\n- Amber Foods Co — Operations Associate — https://boards.greenhouse.io/amberfoodsco/jobs/8005 (stopped (named below))\n- Amber Health Co — Operations Associate — https://boards.greenhouse.io/amberhealthco/jobs/8006 (stopped (named below))\n- Basalt Works Co — Operations Associate — https://boards.greenhouse.io/basaltworksco/jobs/8007 (stopped (named below))\n- Basalt Labs Co — Operations Associate — https://boards.greenhouse.io/basaltlabsco/jobs/8008 (stopped (named below))\n- Basalt Systems Co — Operations Associate — https://boards.greenhouse.io/basaltsystemsco/jobs/8009 (stopped (named below))\n- Basalt Logistics Co — Operations Associate — https://boards.greenhouse.io/basaltlogisticsco/jobs/8010 (stopped (named below))\n- Basalt Foods Co — Operations Associate — https://boards.greenhouse.io/basaltfoodsco/jobs/8011 (stopped (named below))\n- Basalt Health Co — Operations Associate — https://boards.greenhouse.io/basalthealthco/jobs/8012 (stopped (named below))\n- Cedar Works Co — Operations Associate — https://boards.greenhouse.io/cedarworksco/jobs/8013 (stopped (named below))\n- Cedar Labs Co — Operations Associate — https://boards.greenhouse.io/cedarlabsco/jobs/8014 (stopped (named below))\n- Cedar Systems Co — Operations Associate — https://boards.greenhouse.io/cedarsystemsco/jobs/8015 (stopped (named below))\n- Cedar Logistics Co — Operations Associate — https://boards.greenhouse.io/cedarlogisticsco/jobs/8016 (stopped (named below))\n- Cedar Foods Co — Operations Associate — https://boards.greenhouse.io/cedarfoodsco/jobs/8017 (stopped (named below))\n- Cedar Health Co — Operations Associate — https://boards.greenhouse.io/cedarhealthco/jobs/8018 (stopped (named below))\n- Delta Works Co — Operations Associate — https://boards.greenhouse.io/deltaworksco/jobs/8019 (stopped (named below))\n- Delta Labs Co — Operations Associate — https://boards.greenhouse.io/deltalabsco/jobs/8020 (stopped (named below))\nStopped — Acme: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Brite: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cobalt: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Dune Works: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ember Health: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ramp: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ramp: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Stripe: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Stripe: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Plaid: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Fable: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Gridline: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Harbor Bank: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ionic Capital: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Juno: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Kite: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Lumen: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Mosaic: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Nimbus: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Orbit: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Northwind: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Pinecrest: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Quarry Labs: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Redwood Analytics: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Saltbox: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Tidal: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Umbra: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Vesta: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Willow Health: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Stripe: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Systems Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Logistics Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Foods Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Health Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Systems Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Logistics Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Foods Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Health Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Systems Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Logistics Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Foods Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Health Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Delta Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Delta Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n102 more were eligible beyond the 50 you named; they stay in the queue.",
+      "meta": {
+       "career": true,
+       "intent": "career_batch_apply",
+       "contained": false,
+       "result_status": "completed",
+       "career_turn_key": "520fc5db-ec0c-4bc2-a918-775c832d8d86"
+      }
+     },
+     {
+      "content": "Nothing was submitted — this batch is not ready, so a yes can't send it.\n0/50 applications ready for your yes.\n- Acme — Frontend Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Brite — Frontend Developer Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cobalt — Software Engineering Intern, Frontend: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Dune Works — Frontend Intern (React): Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ember Health — UI Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ramp — Software Engineer Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ramp — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Stripe — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Stripe — Software Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Plaid — Data Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Fable — Backend Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Gridline — Backend Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Harbor Bank — Financial Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Ionic Capital — Investment Banking Summer Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Juno — Product Design Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Kite — Data Science Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Lumen — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Mosaic — Software Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Nimbus — Backend Engineer, New Grad: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Orbit — Data Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Northwind — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Pinecrest — Software Engineer Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Quarry Labs — Software Engineer Intern, Backend: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Redwood Analytics — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Saltbox — Software Engineer Intern, Research: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Tidal — Software Engineering Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Umbra — Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Vesta — Data Analyst Intern: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Willow Health — Junior Data Analyst: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Stripe — Data Analyst, Payments: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Systems Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Logistics Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Foods Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Amber Health Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Systems Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Logistics Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Foods Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Basalt Health Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Systems Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Logistics Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Foods Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Cedar Health Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Delta Works Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n- Delta Labs Co — Operations Associate: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nFound 152 data roles.\n152 were eligible; I took the 50 you named.\nThe 50 selected:\n- Acme — Frontend Engineering Intern — https://boards.greenhouse.io/acme/jobs/101 (stopped (named below))\n- Brite — Frontend Developer Intern — https://boards.greenhouse.io/brite/jobs/102 (stopped (named below))\n- Cobalt — Software Engineering Intern, Frontend — https://boards.greenhouse.io/cobalt/jobs/103 (stopped (named below))\n- Dune Works — Frontend Intern (React) — https://boards.greenhouse.io/duneworks/jobs/104 (stopped (named below))\n- Ember Health — UI Engineering Intern — https://boards.greenhouse.io/ember/jobs/105 (stopped (named below))\n- Ramp — Software Engineer Intern — https://boards.greenhouse.io/ramp/jobs/201 (stopped (named below))\n- Ramp — Data Analyst — https://boards.greenhouse.io/ramp/jobs/202 (stopped (named below))\n- Stripe — Data Analyst — https://boards.greenhouse.io/stripe/jobs/301 (stopped (named below))\n- Stripe — Software Engineer, New Grad — https://boards.greenhouse.io/stripe/jobs/302 (stopped (named below))\n- Plaid — Data Analyst Intern — https://boards.greenhouse.io/plaid/jobs/401 (stopped (named below))\n- Fable — Backend Engineer, New Grad — https://boards.greenhouse.io/fable/jobs/501 (stopped (named below))\n- Gridline — Backend Engineering Intern — https://boards.greenhouse.io/gridline/jobs/502 (stopped (named below))\n- Harbor Bank — Financial Analyst Intern — https://boards.greenhouse.io/harbor/jobs/601 (stopped (named below))\n- Ionic Capital — Investment Banking Summer Analyst — https://boards.greenhouse.io/ionic/jobs/602 (stopped (named below))\n- Juno — Product Design Intern — https://boards.greenhouse.io/juno/jobs/701 (stopped (named below))\n- Kite — Data Science Intern — https://boards.greenhouse.io/kite/jobs/702 (stopped (named below))\n- Lumen — Data Analyst — https://boards.greenhouse.io/lumen/jobs/801 (stopped (named below))\n- Mosaic — Software Engineer, New Grad — https://boards.greenhouse.io/mosaic/jobs/802 (stopped (named below))\n- Nimbus — Backend Engineer, New Grad — https://boards.greenhouse.io/nimbus/jobs/803 (stopped (named below))\n- Orbit — Data Analyst Intern — https://boards.greenhouse.io/orbit/jobs/804 (stopped (named below))\n- Northwind — Software Engineering Intern — https://boards.greenhouse.io/northwind/jobs/9101 (stopped (named below))\n- Pinecrest — Software Engineer Intern — https://boards.greenhouse.io/pinecrest/jobs/9102 (stopped (named below))\n- Quarry Labs — Software Engineer Intern, Backend — https://boards.greenhouse.io/quarrylabs/jobs/9103 (stopped (named below))\n- Redwood Analytics — Software Engineering Intern — https://boards.greenhouse.io/redwood/jobs/9104 (stopped (named below))\n- Saltbox — Software Engineer Intern, Research — https://boards.greenhouse.io/saltbox/jobs/9105 (stopped (named below))\n- Tidal — Software Engineering Intern — https://boards.greenhouse.io/tidal/jobs/9106 (stopped (named below))\n- Umbra — Data Analyst — https://boards.greenhouse.io/umbra/jobs/9201 (stopped (named below))\n- Vesta — Data Analyst Intern — https://boards.greenhouse.io/vesta/jobs/9202 (stopped (named below))\n- Willow Health — Junior Data Analyst — https://boards.greenhouse.io/willowhealth/jobs/9203 (stopped (named below))\n- Stripe — Data Analyst, Payments — https://boards.greenhouse.io/stripe/jobs/9204 (stopped (named below))\n- Amber Works Co — Operations Associate — https://boards.greenhouse.io/amberworksco/jobs/8001 (stopped (named below))\n- Amber Labs Co — Operations Associate — https://boards.greenhouse.io/amberlabsco/jobs/8002 (stopped (named below))\n- Amber Systems Co — Operations Associate — https://boards.greenhouse.io/ambersystemsco/jobs/8003 (stopped (named below))\n- Amber Logistics Co — Operations Associate — https://boards.greenhouse.io/amberlogisticsco/jobs/8004 (stopped (named below))\n- Amber Foods Co — Operations Associate — https://boards.greenhouse.io/amberfoodsco/jobs/8005 (stopped (named below))\n- Amber Health Co — Operations Associate — https://boards.greenhouse.io/amberhealthco/jobs/8006 (stopped (named below))\n- Basalt Works Co — Operations Associate — https://boards.greenhouse.io/basaltworksco/jobs/8007 (stopped (named below))\n- Basalt Labs Co — Operations Associate — https://boards.greenhouse.io/basaltlabsco/jobs/8008 (stopped (named below))\n- Basalt Systems Co — Operations Associate — https://boards.greenhouse.io/basaltsystemsco/jobs/8009 (stopped (named below))\n- Basalt Logistics Co — Operations Associate — https://boards.greenhouse.io/basaltlogisticsco/jobs/8010 (stopped (named below))\n- Basalt Foods Co — Operations Associate — https://boards.greenhouse.io/basaltfoodsco/jobs/8011 (stopped (named below))\n- Basalt Health Co — Operations Associate — https://boards.greenhouse.io/basalthealthco/jobs/8012 (stopped (named below))\n- Cedar Works Co — Operations Associate — https://boards.greenhouse.io/cedarworksco/jobs/8013 (stopped (named below))\n- Cedar Labs Co — Operations Associate — https://boards.greenhouse.io/cedarlabsco/jobs/8014 (stopped (named below))\n- Cedar Systems Co — Operations Associate — https://boards.greenhouse.io/cedarsystemsco/jobs/8015 (stopped (named below))\n- Cedar Logistics Co — Operations Associate — https://boards.greenhouse.io/cedarlogisticsco/jobs/8016 (stopped (named below))\n- Cedar Foods Co — Operations Associate — https://boards.greenhouse.io/cedarfoodsco/jobs/8017 (stopped (named below))\n- Cedar Health Co — Operations Associate — https://boards.greenhouse.io/cedarhealthco/jobs/8018 (stopped (named below))\n- Delta Works Co — Operations Associate — https://boards.greenhouse.io/deltaworksco/jobs/8019 (stopped (named below))\n- Delta Labs Co — Operations Associate — https://boards.greenhouse.io/deltalabsco/jobs/8020 (stopped (named below))\nStopped — Acme: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Brite: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cobalt: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Dune Works: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ember Health: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ramp: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ramp: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Stripe: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Stripe: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Plaid: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Fable: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Gridline: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Harbor Bank: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Ionic Capital: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Juno: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Kite: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Lumen: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Mosaic: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Nimbus: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Orbit: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Northwind: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Pinecrest: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Quarry Labs: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Redwood Analytics: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Saltbox: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Tidal: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Umbra: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Vesta: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Willow Health: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Stripe: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Systems Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Logistics Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Foods Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Amber Health Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Systems Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Logistics Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Foods Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Basalt Health Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Systems Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Logistics Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Foods Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Cedar Health Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Delta Works Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\nStopped — Delta Labs Co: Trainee can't reach this employer's application site from here, so nothing was filled or sent.\n102 more were eligible beyond the 50 you named; they stay in the queue.\nNext step: each stopped application above names what it needs before it can be prepared; once a batch reaches its review card, approval comes from that card — a chat yes never submits.",
+      "meta": {
+       "career": true,
+       "intent": "career_batch_apply",
+       "contained": false,
+       "result_status": "blocked",
+       "career_turn_key": "d28f00ef-b98e-4e02-a498-3bf6f782dabb"
+      }
+     }
+    ],
+    "atsPosts": [],
+    "postsAt": [
+     0,
+     0
+    ],
+    "jobsAt": [
+     0,
+     0
+    ],
+    "wallMs": [
+     2130,
+     2102
+    ],
+    "requested": [],
+    "wanted": [],
+    "jobs": [],
+    "questions": []
+   }
+  },
+  {
+   "id": "MA03",
+   "title": "A vague ask",
+   "score": 8,
+   "must": "3/3",
+   "nice": "0/1",
+   "ungraded": 1,
+   "checks": [
+    {
+     "id": "nothing-sent",
+     "level": "MUST",
+     "pass": true,
+     "why": "0 approved, 0 sent"
+    },
+    {
+     "id": "one-question",
+     "level": "MUST",
+     "pass": true,
+     "why": "0 question mark(s)"
+    },
+    {
+     "id": "no-resume-asked",
+     "level": "MUST",
+     "pass": true,
+     "why": "clean"
+    },
+    {
+     "id": "proposes-batch",
+     "level": "NICE",
+     "pass": false,
+     "why": "turn 0: \"Here is where that stands.\""
+    },
+    {
+     "id": "concrete",
+     "level": "MUST",
+     "pass": null,
+     "why": "not judged (run with --model subscription --judge)"
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "can you just apply to some jobs for me"
+    ],
+    "replies": [
+     "Here is where that stands."
+    ],
+    "intents": [
+     "agent"
+    ],
+    "turnMs": [
+     927
+    ],
+    "scripted": [
+     0
+    ],
+    "thread": [
+     {
+      "content": "Here is where that stands.",
+      "meta": {
+       "brain": "staged",
+       "career": true,
+       "intent": "agent",
+       "shorten": {
+        "ran": false,
+        "why": "within the bound",
+        "bound": 550,
+        "chars": 26,
+        "outcome": "within"
+       },
+       "stopped": "final",
+       "contained": false,
+       "knowledge": {
+        "stage": null,
+        "unknown": [
+         "career stage (year in school, new graduate, changing careers, returning)",
+         "target role or field",
+         "place, or whether remote"
+        ],
+        "playbooks": []
+       },
+       "tool_calls": [],
+       "result_status": "final",
+       "router_intent": "career_catchall",
+       "career_turn_key": "9193c0a1-90f7-4843-868d-898c3108bfb8",
+       "pending_approvals": 0
+      }
+     }
+    ],
+    "atsPosts": [],
+    "postsAt": [
+     0
+    ],
+    "jobsAt": [
+     0
+    ],
+    "wallMs": [
+     985
+    ],
+    "requested": [
+     "api.anthropic.com"
+    ],
+    "wanted": [],
+    "jobs": [],
+    "questions": []
+   }
+  },
+  {
+   "id": "MA04",
+   "title": "Constraints: remote only, exclude a company",
+   "score": 2,
+   "must": "3/15",
+   "nice": "2/6",
+   "ungraded": 0,
+   "checks": [
+    {
+     "id": "acts-turn1",
+     "level": "MUST",
+     "pass": false,
+     "why": "turn 0 handled as career_discovery; 0 on the apply list"
+    },
+    {
+     "id": "remote-only",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 all match"
+    },
+    {
+     "id": "excludes-company",
+     "level": "MUST",
+     "pass": true,
+     "why": "none of them"
+    },
+    {
+     "id": "includes-all",
+     "level": "MUST",
+     "pass": false,
+     "why": "missing: Umbra, Vesta, Willow Health"
+    },
+    {
+     "id": "says-skipped",
+     "level": "NICE",
+     "pass": true,
+     "why": "turn 0: \"I checked every data analyst but skip stripe, every data analytics but skip stripe (remote) on the live board and the saved job-board snapshot: no open roles. O\""
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "pass": true,
+     "why": "after turn 0: 0 approved, 0 reached an employer"
+    },
+    {
+     "id": "card-before-yes",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card before turn 1"
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "pass": false,
+     "why": "0/0 bound"
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved, 0 recorded sent, 0 posts"
+    },
+    {
+     "id": "resume-attached",
+     "level": "MUST",
+     "pass": false,
+     "why": "0/0 with a resume"
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved; reply: \"Yes to what? The last thing we discussed was the role search — “apply to every data analyst role that's remote, but skip\""
+    },
+    {
+     "id": "card-role-employer",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "card-link",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "card-open-questions",
+     "level": "MUST",
+     "pass": true,
+     "why": "no question open"
+    },
+    {
+     "id": "card-pay-deadline",
+     "level": "NICE",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "card-fit",
+     "level": "NICE",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "card-resume-file",
+     "level": "NICE",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "fast-turns",
+     "level": "NICE",
+     "pass": true,
+     "why": "slowest turn 1.1 s"
+    },
+    {
+     "id": "proof-after",
+     "level": "NICE",
+     "pass": false,
+     "why": "nothing after the yes says what was sent with its proof (1 message(s))"
+    },
+    {
+     "id": "approved-exact",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved"
+    },
+    {
+     "id": "approved-employers",
+     "level": "MUST",
+     "pass": false,
+     "why": "approved: none"
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to every data analyst role that's remote, but skip Stripe",
+     "yes"
+    ],
+    "replies": [
+     "I checked every data analyst but skip stripe, every data analytics but skip stripe (remote) on the live board and the saved job-board snapshot: no open roles. Other career sites were not checked. Say \"include business analyst and analytics\" to widen to related titles.",
+     "Yes to what?\nThe last thing we discussed was the role search — “apply to every data analyst role that's remote, but skip Stripe”. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+    ],
+    "intents": [
+     "career_discovery",
+     "conversation_bare_reply"
+    ],
+    "turnMs": [
+     1069,
+     917
+    ],
+    "scripted": [
+     0,
+     1
+    ],
+    "thread": [
+     {
+      "content": "I checked every data analyst but skip stripe, every data analytics but skip stripe (remote) on the live board and the saved job-board snapshot: no open roles. Other career sites were not checked. Say \"include business analyst and analytics\" to widen to related titles.",
+      "meta": {
+       "career": true,
+       "intent": "career_discovery",
+       "contained": false,
+       "readiness": {
+        "ready": false,
+        "ask_now": [
+         {
+          "key": "work_authorization",
+          "chat": true
+         },
+         {
+          "key": "remote_scope",
+          "chat": true
+         }
+        ],
+        "missing": [
+         {
+          "key": "work_authorization",
+          "chat": true,
+          "blocks": "apply"
+         },
+         {
+          "key": "remote_scope",
+          "chat": true,
+          "blocks": "apply"
+         },
+         {
+          "key": "seniority",
+          "chat": true,
+          "blocks": "quality"
+         },
+         {
+          "key": "location",
+          "chat": true,
+          "blocks": "quality"
+         },
+         {
+          "key": "email",
+          "chat": true,
+          "blocks": "quality"
+         },
+         {
+          "key": "phone",
+          "chat": true,
+          "blocks": "quality"
+         },
+         {
+          "key": "full_name",
+          "chat": true,
+          "blocks": "quality"
+         }
+        ],
+        "secure_only": 0
+       },
+       "search_proof": {
+        "result": "none was found, so I have no open roles to list (the live board has no match for it, and the saved snapshot has none either)",
+        "applied": "Nothing was applied for.",
+        "checked": "I checked every data analyst but skip stripe, every data analytics but skip stripe (remote), on the live board (last refreshed Nov 4, 3:00 PM UTC) and the saved snapshot of job boards",
+        "invented": "Nothing was invented to fill the list.",
+        "refreshed_at": "2026-11-04T09:00:00-06:00"
+       },
+       "result_status": "none",
+       "career_turn_key": "69f05500-44c1-47af-8bfa-fb4aedfe0a31"
+      }
+     },
+     {
+      "content": "Yes to what?\nThe last thing we discussed was the role search — “apply to every data analyst role that's remote, but skip Stripe”. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs.",
+      "meta": {
+       "career": true,
+       "intent": "conversation_bare_reply",
+       "contained": false,
+       "result_status": "awaiting_user",
+       "career_turn_key": "d29864d4-ed8e-4bd5-99b4-434ba292ff01"
+      }
+     }
+    ],
+    "atsPosts": [],
+    "postsAt": [
+     0,
+     0
+    ],
+    "jobsAt": [
+     0,
+     0
+    ],
+    "wallMs": [
+     1265,
+     1123
+    ],
+    "requested": [],
+    "wanted": [],
+    "jobs": [],
+    "questions": []
+   }
+  },
+  {
+   "id": "MA05",
+   "title": "A batch with questions only the person can answer",
+   "score": 8.6,
+   "must": "12/14",
+   "nice": "3/6",
+   "ungraded": 0,
+   "checks": [
+    {
+     "id": "no-known-facts-asked",
+     "level": "MUST",
+     "pass": false,
+     "why": "asked: Email; First Name; Last Name"
+    },
+    {
+     "id": "asked-once",
+     "level": "MUST",
+     "pass": true,
+     "why": "4 question(s), each once"
+    },
+    {
+     "id": "names-the-hold",
+     "level": "MUST",
+     "pass": true,
+     "why": "\"Question 1 of 3 only you can answer, one at a time. Answer it once and I won't ask again. Email It's needed for 3 of you\""
+    },
+    {
+     "id": "one-round",
+     "level": "NICE",
+     "pass": false,
+     "why": "4 answer turn(s)"
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "pass": true,
+     "why": "after turn 0: 0 approved, 0 reached an employer"
+    },
+    {
+     "id": "card-before-yes",
+     "level": "MUST",
+     "pass": true,
+     "why": "card of 3 item(s) in 1 message(s)"
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "pass": true,
+     "why": "3/3 bound"
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "pass": true,
+     "why": "3 approved, 3 recorded sent, 3 posts"
+    },
+    {
+     "id": "resume-attached",
+     "level": "MUST",
+     "pass": true,
+     "why": "3/3 with a resume"
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "pass": true,
+     "why": "3 approved; reply: \"3 approved exactly as shown. Nothing has gone to an employer yet. 1. Kite: approved; it is sent next, from your computer\""
+    },
+    {
+     "id": "card-role-employer",
+     "level": "MUST",
+     "pass": false,
+     "why": "missing #1 role, #2 role, #3 role"
+    },
+    {
+     "id": "card-link",
+     "level": "MUST",
+     "pass": true,
+     "why": "3 item(s) carry link"
+    },
+    {
+     "id": "card-open-questions",
+     "level": "MUST",
+     "pass": true,
+     "why": "no question open"
+    },
+    {
+     "id": "card-pay-deadline",
+     "level": "NICE",
+     "pass": true,
+     "why": "no posting on the card states pay or a deadline"
+    },
+    {
+     "id": "card-fit",
+     "level": "NICE",
+     "pass": false,
+     "why": "missing #1 fit, #2 fit, #3 fit"
+    },
+    {
+     "id": "card-resume-file",
+     "level": "NICE",
+     "pass": true,
+     "why": "3 item(s) carry resume"
+    },
+    {
+     "id": "fast-turns",
+     "level": "NICE",
+     "pass": true,
+     "why": "slowest turn 0.7 s"
+    },
+    {
+     "id": "proof-after",
+     "level": "NICE",
+     "pass": false,
+     "why": "nothing after the yes says what was sent with its proof (1 message(s))"
+    },
+    {
+     "id": "approved-exact",
+     "level": "MUST",
+     "pass": true,
+     "why": "3 approved"
+    },
+    {
+     "id": "approved-employers",
+     "level": "MUST",
+     "pass": true,
+     "why": "approved: Lumen, Orbit, Kite"
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to the Data Analyst role at Lumen, the Data Science Intern role at Kite and the Data Analyst Intern role at Orbit",
+     "alex.testcase@example.test",
+     "Alex",
+     "Testcase",
+     "Yes",
+     "yes"
+    ],
+    "replies": [
+     "3/3 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 3 you asked for: Data Analyst at Lumen; Data Science Intern at Kite; Data Analyst Intern at Orbit. I've started preparing them now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare each one before you ask, from the facts you confirmed and a resume tailored to it; if a form asks something you haven't told me, I'll ask you here. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+     "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nFirst Name It's needed for all 3 of your applications.\nJust reply with your answer. I'll ask the next one after you answer this.",
+     "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nLast Name It's needed for all 3 of your applications.\nJust reply with your answer.",
+     "Saved. I won't ask this again:\n1. Last Name: Testcase\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+     "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+     "3 approved exactly as shown. Nothing has gone to an employer yet.\n1. Kite: approved; it is sent next, from your computer or, if you turned it on, the cloud\n2. Lumen: approved; it is sent next, from your computer or, if you turned it on, the cloud\n3. Orbit: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+    ],
+    "intents": [
+     "career_apply_queue",
+     "career_apply_questions",
+     "career_apply_questions",
+     "career_apply_questions_answer",
+     "career_apply_questions_answer",
+     "career_apply_card_answer"
+    ],
+    "turnMs": [
+     573,
+     120,
+     638,
+     517,
+     257,
+     743
+    ],
+    "scripted": [
+     0,
+     5
+    ],
+    "thread": [
+     {
+      "content": "3/3 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 3 you asked for: Data Analyst at Lumen; Data Science Intern at Kite; Data Analyst Intern at Orbit. I've started preparing them now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare each one before you ask, from the facts you confirmed and a resume tailored to it; if a form asks something you haven't told me, I'll ask you here. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_queue",
+       "contained": false,
+       "result_status": "queued",
+       "career_turn_key": "a611218a-740a-47c0-866c-7fe3dd7b0947"
+      }
+     },
+     {
+      "content": "Question 1 of 3 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail It's needed for 3 of your applications.\nJust reply with your answer. I'll ask the next one after you answer this.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "requested": true,
+       "prepare_request": "f4b98022-4343-45a0-98b0-c3ae6f7f71d4"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nFirst Name It's needed for all 3 of your applications.\nJust reply with your answer. I'll ask the next one after you answer this.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "contained": false,
+       "result_status": "answered_next",
+       "career_turn_key": "ac10548b-1ef3-41d9-bd20-f189e6cf31c4"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nLast Name It's needed for all 3 of your applications.\nJust reply with your answer.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "contained": false,
+       "result_status": "answered_next",
+       "career_turn_key": "a480f793-19e7-4252-be3d-a6ba31e02678"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\n1. Last Name: Testcase\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "3c01d5c9-908a-4cc6-b0cf-1523ef0dc204"
+      }
+     },
+     {
+      "content": "One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nAre you legally authorized to work in the United States? (Yes / No) It's needed for 3 of your applications.\nJust reply with your answer.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "requested": true,
+       "prepare_request": "12388e43-ce2e-4ea8-85d0-428c1242d220"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "bfe3f2ba-3b64-48b9-be69-6116a4709d5c"
+      }
+     },
+     {
+      "content": "3 applications are ready. Every answer below goes exactly as shown.\n\n1. Kite\n   First Name: Alex\n   Last Name: Testcase\n   Email: alex.testcase@example.test\n   Are you legally authorized to work in the United States?: Yes\n   Resume: Alex_Testcase_Resume.pdf\n   Sends to https://boards.greenhouse.io/kite/jobs/702\n\n2. Lumen\n   First Name: Alex\n   Last Name: Testcase\n   Email: alex.testcase@example.test\n   Are you legally authorized to work in the United States?: Yes\n   Resume: Alex_Testcase_Resume.pdf\n   Sends to https://boards.greenhouse.io/lumen/jobs/801\n\n3. Orbit\n   First Name: Alex\n   Last Name: Testcase\n   Email: alex.testcase@example.test\n   Are you legally authorized to work in the United States?: Yes\n   Resume: Alex_Testcase_Resume.pdf\n   Sends to https://boards.greenhouse.io/orbit/jobs/804\n\nReply \"yes\" to send all 3, \"yes but not 2\" to leave some out, or \"no\".",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_card",
+       "card_id": "416d0041-8751-460b-a222-899f494717f1",
+       "requested": true,
+       "prepare_request": "f838abcf-0349-4e9e-a89b-c97149d551d3"
+      }
+     },
+     {
+      "content": "3 approved exactly as shown. Nothing has gone to an employer yet.\n1. Kite: approved; it is sent next, from your computer or, if you turned it on, the cloud\n2. Lumen: approved; it is sent next, from your computer or, if you turned it on, the cloud\n3. Orbit: approved; it is sent next, from your computer or, if you turned it on, the cloud",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_card_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "ffb2ed9f-7801-4ac5-ad4b-02a1b418704e"
+      }
+     }
+    ],
+    "atsPosts": [
+     {
+      "board": "lumen",
+      "job": "801",
+      "files": [
+       {
+        "name": "resume",
+        "filename": "Alex_Testcase_Resume.pdf",
+        "sha256": "45dd3e171a5aea177753d5f68822fa636957040fdf5c27fa667c972cb4e19fdd",
+        "bytes": 2083
+       }
+      ],
+      "fields": {
+       "first_name": "Alex",
+       "last_name": "Testcase",
+       "email": "alex.testcase@example.test",
+       "question_9001": "1"
+      },
+      "confirmation_id": "GH-lumen-801-1"
+     },
+     {
+      "board": "orbit",
+      "job": "804",
+      "files": [
+       {
+        "name": "resume",
+        "filename": "Alex_Testcase_Resume.pdf",
+        "sha256": "45dd3e171a5aea177753d5f68822fa636957040fdf5c27fa667c972cb4e19fdd",
+        "bytes": 2083
+       }
+      ],
+      "fields": {
+       "first_name": "Alex",
+       "last_name": "Testcase",
+       "email": "alex.testcase@example.test",
+       "question_9001": "1"
+      },
+      "confirmation_id": "GH-orbit-804-2"
+     },
+     {
+      "board": "kite",
+      "job": "702",
+      "files": [
+       {
+        "name": "resume",
+        "filename": "Alex_Testcase_Resume.pdf",
+        "sha256": "45dd3e171a5aea177753d5f68822fa636957040fdf5c27fa667c972cb4e19fdd",
+        "bytes": 2083
+       }
+      ],
+      "fields": {
+       "first_name": "Alex",
+       "last_name": "Testcase",
+       "email": "alex.testcase@example.test",
+       "question_9001": "1"
+      },
+      "confirmation_id": "GH-kite-702-3"
+     }
+    ],
+    "postsAt": [
+     0,
+     3
+    ],
+    "jobsAt": [
+     0,
+     3
+    ],
+    "wallMs": [
+     4044,
+     2589
+    ],
+    "requested": [
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test"
+    ],
+    "wanted": [
+     {
+      "company": "Lumen",
+      "title": "Data Analyst",
+      "url": "https://job-boards.greenhouse.io/lumen/jobs/801",
+      "posting_key": "greenhouse:lumen:801"
+     },
+     {
+      "company": "Kite",
+      "title": "Data Science Intern",
+      "url": "https://job-boards.greenhouse.io/kite/jobs/702",
+      "posting_key": "greenhouse:kite:702"
+     },
+     {
+      "company": "Orbit",
+      "title": "Data Analyst Intern",
+      "url": "https://job-boards.greenhouse.io/orbit/jobs/804",
+      "posting_key": "greenhouse:orbit:804"
+     }
+    ],
+    "jobs": [
+     {
+      "company": "Lumen",
+      "url": "https://boards.greenhouse.io/lumen/jobs/801",
+      "job_id": "greenhouse:lumen:801",
+      "payload_hash": "420bd96942914b25e3608ecc2b802d96f932f5c8c387473ee303e3e66a66107e",
+      "approval_hash": "420bd96942914b25e3608ecc2b802d96f932f5c8c387473ee303e3e66a66107e",
+      "payload_hash_now": "420bd96942914b25e3608ecc2b802d96f932f5c8c387473ee303e3e66a66107e",
+      "state": "submitted_unconfirmed",
+      "confirmation_id": "GH-lumen-801-1",
+      "resume_name": null
+     },
+     {
+      "company": "Orbit",
+      "url": "https://boards.greenhouse.io/orbit/jobs/804",
+      "job_id": "greenhouse:orbit:804",
+      "payload_hash": "6bc254dffd5ef1957c3ee8c39fe380262b782fb03e25a95596ed7d10bfafe980",
+      "approval_hash": "6bc254dffd5ef1957c3ee8c39fe380262b782fb03e25a95596ed7d10bfafe980",
+      "payload_hash_now": "6bc254dffd5ef1957c3ee8c39fe380262b782fb03e25a95596ed7d10bfafe980",
+      "state": "submitted_unconfirmed",
+      "confirmation_id": "GH-orbit-804-2",
+      "resume_name": null
+     },
+     {
+      "company": "Kite",
+      "url": "https://boards.greenhouse.io/kite/jobs/702",
+      "job_id": "greenhouse:kite:702",
+      "payload_hash": "5b85865a54d5b0b8e50de5148bd60e8ba4701014d87d9c1a565c1cddfdb0b21d",
+      "approval_hash": "5b85865a54d5b0b8e50de5148bd60e8ba4701014d87d9c1a565c1cddfdb0b21d",
+      "payload_hash_now": "5b85865a54d5b0b8e50de5148bd60e8ba4701014d87d9c1a565c1cddfdb0b21d",
+      "state": "submitted_unconfirmed",
+      "confirmation_id": "GH-kite-702-3",
+      "resume_name": null
+     }
+    ],
+    "questions": [
+     {
+      "label": "Email",
+      "company": "Lumen",
+      "state": "answered"
+     },
+     {
+      "label": "First Name",
+      "company": "Lumen",
+      "state": "answered"
+     },
+     {
+      "label": "Last Name",
+      "company": "Lumen",
+      "state": "answered"
+     },
+     {
+      "label": "Are you legally authorized to work in the United States?",
+      "company": "Kite",
+      "state": "answered"
+     }
+    ]
+   }
+  },
+  {
+   "id": "MA06",
+   "title": "Partial yes: \"yes except 2 and 5\"",
+   "score": 1.7,
+   "must": "1/6",
+   "nice": "0/1",
+   "ungraded": 0,
+   "checks": [
+    {
+     "id": "card-of-5",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card before turn 1"
+    },
+    {
+     "id": "subset-exact",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "pass": true,
+     "why": "after turn 0: 0 approved, 0 reached an employer"
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "pass": false,
+     "why": "0/0 bound"
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved, 0 recorded sent, 0 posts"
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved; reply: \"Here is where that stands.\""
+    },
+    {
+     "id": "left-out-named",
+     "level": "NICE",
+     "pass": false,
+     "why": "turn 1: \"Here is where that stands.\""
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to all the frontend internships in Chicago",
+     "yes except 2 and 5"
+    ],
+    "replies": [
+     "I can't apply to those yet because there's no list of postings in this thread, so nothing was queued. Name one (\"apply to the <role> role at <Company>\"), or say \"find <role> jobs in <place>\" and then \"apply to these\". Which role should I search for?",
+     "Here is where that stands."
+    ],
+    "intents": [
+     "career_apply_queue",
+     "agent"
+    ],
+    "turnMs": [
+     436,
+     868
+    ],
+    "scripted": [
+     0,
+     1
+    ],
+    "thread": [
+     {
+      "content": "I can't apply to those yet because there's no list of postings in this thread, so nothing was queued. Name one (\"apply to the <role> role at <Company>\"), or say \"find <role> jobs in <place>\" and then \"apply to these\". Which role should I search for?",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_queue",
+       "contained": false,
+       "result_status": "no_list",
+       "career_turn_key": "9fa5c98e-0e03-4aec-9b9e-bb13f17a879a"
+      }
+     },
+     {
+      "content": "Here is where that stands.",
+      "meta": {
+       "brain": "staged",
+       "career": true,
+       "intent": "agent",
+       "shorten": {
+        "ran": false,
+        "why": "within the bound",
+        "bound": 550,
+        "chars": 26,
+        "outcome": "within"
+       },
+       "stopped": "final",
+       "contained": false,
+       "knowledge": {
+        "stage": null,
+        "unknown": [
+         "career stage (year in school, new graduate, changing careers, returning)",
+         "target role or field",
+         "place, or whether remote"
+        ],
+        "playbooks": []
+       },
+       "tool_calls": [],
+       "result_status": "final",
+       "router_intent": "unclaimed",
+       "career_turn_key": "2e6875f1-0209-4552-9cc3-fa8c4dc642a1",
+       "pending_approvals": 0
+      }
+     }
+    ],
+    "atsPosts": [],
+    "postsAt": [
+     0,
+     0
+    ],
+    "jobsAt": [
+     0,
+     0
+    ],
+    "wallMs": [
+     555,
+     1257
+    ],
+    "requested": [
+     "api.anthropic.com"
+    ],
+    "wanted": [],
+    "jobs": [],
+    "questions": []
+   }
+  },
+  {
+   "id": "MA07",
+   "title": "\"maybe\" and a wrong count approve nothing",
+   "score": 3.3,
+   "must": "2/6",
+   "nice": "0/0",
+   "ungraded": 0,
+   "checks": [
+    {
+     "id": "maybe-nothing",
+     "level": "MUST",
+     "pass": true,
+     "why": "after turn 1: 0 approved, 0 reached an employer"
+    },
+    {
+     "id": "wrong-count-nothing",
+     "level": "MUST",
+     "pass": true,
+     "why": "after turn 2: 0 approved, 0 reached an employer"
+    },
+    {
+     "id": "wrong-count-explained",
+     "level": "MUST",
+     "pass": false,
+     "why": "turn 2: \"I won't do that — here is what I will do instead. A blast to people nobody checked is not a mode this product has: each email goes only after you approve its ex\""
+    },
+    {
+     "id": "then-yes",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved"
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "pass": false,
+     "why": "0/0 bound"
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved, 0 recorded sent, 0 posts"
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to all the frontend internships in Chicago",
+     "maybe",
+     "yes send all 8",
+     "yes"
+    ],
+    "replies": [
+     "I can't apply to those yet because there's no list of postings in this thread, so nothing was queued. Name one (\"apply to the <role> role at <Company>\"), or say \"find <role> jobs in <place>\" and then \"apply to these\". Which role should I search for?",
+     "Here is where that stands.",
+     "I won't do that — here is what I will do instead.\nA blast to people nobody checked is not a mode this product has: each email goes only after you approve its exact words, to an address with a source. The true path: a shortlist built from real sources, verified emails, drafts in your voice, your one approval — then the approved emails go from your Gmail. Say the word and I build the shortlist first.",
+     "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+    ],
+    "intents": [
+     "career_apply_queue",
+     "agent",
+     "intent_refusal",
+     "conversation_bare_reply"
+    ],
+    "turnMs": [
+     198,
+     487,
+     285,
+     314
+    ],
+    "scripted": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "thread": [
+     {
+      "content": "I can't apply to those yet because there's no list of postings in this thread, so nothing was queued. Name one (\"apply to the <role> role at <Company>\"), or say \"find <role> jobs in <place>\" and then \"apply to these\". Which role should I search for?",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_queue",
+       "contained": false,
+       "result_status": "no_list",
+       "career_turn_key": "54de2c99-b623-4c16-b872-067cb8c3e229"
+      }
+     },
+     {
+      "content": "Here is where that stands.",
+      "meta": {
+       "brain": "staged",
+       "career": true,
+       "intent": "agent",
+       "shorten": {
+        "ran": false,
+        "why": "within the bound",
+        "bound": 550,
+        "chars": 26,
+        "outcome": "within"
+       },
+       "stopped": "final",
+       "contained": false,
+       "knowledge": {
+        "stage": null,
+        "unknown": [
+         "career stage (year in school, new graduate, changing careers, returning)",
+         "target role or field",
+         "place, or whether remote"
+        ],
+        "playbooks": []
+       },
+       "tool_calls": [],
+       "result_status": "final",
+       "router_intent": "unclaimed",
+       "career_turn_key": "e861de17-9b95-472e-8ac1-54234e377edc",
+       "pending_approvals": 0
+      }
+     },
+     {
+      "content": "I won't do that — here is what I will do instead.\nA blast to people nobody checked is not a mode this product has: each email goes only after you approve its exact words, to an address with a source. The true path: a shortlist built from real sources, verified emails, drafts in your voice, your one approval — then the approved emails go from your Gmail. Say the word and I build the shortlist first.",
+      "meta": {
+       "career": true,
+       "intent": "intent_refusal",
+       "contained": false,
+       "result_status": "blocked",
+       "career_turn_key": "3cd01db3-0ff4-4085-be5f-ff40b0450fdd"
+      }
+     },
+     {
+      "content": "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs.",
+      "meta": {
+       "career": true,
+       "intent": "conversation_bare_reply",
+       "contained": false,
+       "result_status": "awaiting_user",
+       "career_turn_key": "fb94bebd-8efd-4029-bca4-befa7f186371"
+      }
+     }
+    ],
+    "atsPosts": [],
+    "postsAt": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "jobsAt": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "wallMs": [
+     293,
+     540,
+     311,
+     402
+    ],
+    "requested": [
+     "api.anthropic.com"
+    ],
+    "wanted": [],
+    "jobs": [],
+    "questions": []
+   }
+  },
+  {
+   "id": "MA08",
+   "title": "Status check mid-run",
+   "score": 7.9,
+   "must": "11/14",
+   "nice": "3/6",
+   "ungraded": 0,
+   "checks": [
+    {
+     "id": "status-names",
+     "level": "MUST",
+     "pass": false,
+     "why": "missing (?i)stripe, (?i)lumen"
+    },
+    {
+     "id": "status-count",
+     "level": "MUST",
+     "pass": false,
+     "why": "2 sent; reply: \"Here is where that stands.\""
+    },
+    {
+     "id": "no-false-confirmed",
+     "level": "MUST",
+     "pass": true,
+     "why": "never claims confirmed"
+    },
+    {
+     "id": "status-confirmation-id",
+     "level": "NICE",
+     "pass": false,
+     "why": "turn 2: \"Here is where that stands.\""
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "pass": true,
+     "why": "after turn 0: 0 approved, 0 reached an employer"
+    },
+    {
+     "id": "card-before-yes",
+     "level": "MUST",
+     "pass": true,
+     "why": "card of 2 item(s) in 1 message(s)"
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "pass": true,
+     "why": "2/2 bound"
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "pass": true,
+     "why": "2 approved, 2 recorded sent, 2 posts"
+    },
+    {
+     "id": "resume-attached",
+     "level": "MUST",
+     "pass": true,
+     "why": "2/2 with a resume"
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "pass": true,
+     "why": "2 approved; reply: \"2 approved exactly as shown. Nothing has gone to an employer yet. 1. Stripe: approved; it is sent next, from your comput\""
+    },
+    {
+     "id": "card-role-employer",
+     "level": "MUST",
+     "pass": false,
+     "why": "missing #1 role, #2 role"
+    },
+    {
+     "id": "card-link",
+     "level": "MUST",
+     "pass": true,
+     "why": "2 item(s) carry link"
+    },
+    {
+     "id": "card-open-questions",
+     "level": "MUST",
+     "pass": true,
+     "why": "no question open"
+    },
+    {
+     "id": "card-pay-deadline",
+     "level": "NICE",
+     "pass": true,
+     "why": "no posting on the card states pay or a deadline"
+    },
+    {
+     "id": "card-fit",
+     "level": "NICE",
+     "pass": false,
+     "why": "missing #1 fit, #2 fit"
+    },
+    {
+     "id": "card-resume-file",
+     "level": "NICE",
+     "pass": true,
+     "why": "2 item(s) carry resume"
+    },
+    {
+     "id": "fast-turns",
+     "level": "NICE",
+     "pass": true,
+     "why": "slowest turn 1.0 s"
+    },
+    {
+     "id": "proof-after",
+     "level": "NICE",
+     "pass": false,
+     "why": "nothing after the yes says what was sent with its proof (2 message(s))"
+    },
+    {
+     "id": "approved-exact",
+     "level": "MUST",
+     "pass": true,
+     "why": "2 approved"
+    },
+    {
+     "id": "approved-employers",
+     "level": "MUST",
+     "pass": true,
+     "why": "approved: Stripe, Lumen"
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to the Data Analyst role at Stripe and the Data Analyst role at Lumen",
+     "Testcase",
+     "Alex",
+     "alex.testcase@example.test",
+     "Yes",
+     "yes",
+     "did they go through?"
+    ],
+    "replies": [
+     "2/2 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 2 you asked for: Data Analyst at Stripe; Data Analyst at Lumen. I've started preparing them now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare each one before you ask, from the facts you confirmed and a resume tailored to it; if a form asks something you haven't told me, I'll ask you here. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+     "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nFirst Name It's needed for all 2 of your applications.\nJust reply with your answer. I'll ask the next one after you answer this.",
+     "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nEmail It's needed for all 2 of your applications.\nJust reply with your answer.",
+     "Saved. I won't ask this again:\n1. Email: alex.testcase@example.test\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+     "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+     "2 approved exactly as shown. Nothing has gone to an employer yet.\n1. Stripe: approved; it is sent next, from your computer or, if you turned it on, the cloud\n2. Lumen: approved; it is sent next, from your computer or, if you turned it on, the cloud",
+     "Here is where that stands."
+    ],
+    "intents": [
+     "career_apply_queue",
+     "career_apply_questions",
+     "career_apply_questions",
+     "career_apply_questions_answer",
+     "career_apply_questions_answer",
+     "career_apply_card_answer",
+     "agent"
+    ],
+    "turnMs": [
+     573,
+     522,
+     433,
+     222,
+     187,
+     476,
+     974
+    ],
+    "scripted": [
+     0,
+     5,
+     6
+    ],
+    "thread": [
+     {
+      "content": "2/2 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 2 you asked for: Data Analyst at Stripe; Data Analyst at Lumen. I've started preparing them now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare each one before you ask, from the facts you confirmed and a resume tailored to it; if a form asks something you haven't told me, I'll ask you here. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_queue",
+       "contained": false,
+       "result_status": "queued",
+       "career_turn_key": "582804e3-bd8b-4330-be8f-b0cb1ff00f38"
+      }
+     },
+     {
+      "content": "Question 1 of 3 only you can answer, one at a time. Answer it once and I won't ask again.\nLast Name It's needed for 2 of your applications.\nJust reply with your answer. I'll ask the next one after you answer this.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "requested": true,
+       "prepare_request": "4e80fcbc-b902-46a5-91ba-ef8bc550a2b8"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nFirst Name It's needed for all 2 of your applications.\nJust reply with your answer. I'll ask the next one after you answer this.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "contained": false,
+       "result_status": "answered_next",
+       "career_turn_key": "3c246475-c326-49fb-bb37-5cb202499aa0"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nEmail It's needed for all 2 of your applications.\nJust reply with your answer.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "contained": false,
+       "result_status": "answered_next",
+       "career_turn_key": "3b98cda4-a974-403b-b352-e8ee2d50097f"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\n1. Email: alex.testcase@example.test\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "588395b7-5945-4a04-9197-2dfd6a7db4c0"
+      }
+     },
+     {
+      "content": "One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nAre you legally authorized to work in the United States? (Yes / No) It's needed for 2 of your applications.\nJust reply with your answer.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "requested": true,
+       "prepare_request": "37ed4c37-4cdb-4e08-b01e-c877f1076be7"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "98eb7947-324a-4175-918b-8da97f80c17e"
+      }
+     },
+     {
+      "content": "2 applications are ready. Every answer below goes exactly as shown.\n\n1. Stripe\n   First Name: Alex\n   Last Name: Testcase\n   Email: alex.testcase@example.test\n   Are you legally authorized to work in the United States?: Yes\n   Resume: Alex_Testcase_Resume.pdf\n   Sends to https://boards.greenhouse.io/stripe/jobs/301\n\n2. Lumen\n   First Name: Alex\n   Last Name: Testcase\n   Email: alex.testcase@example.test\n   Are you legally authorized to work in the United States?: Yes\n   Resume: Alex_Testcase_Resume.pdf\n   Sends to https://boards.greenhouse.io/lumen/jobs/801\n\nReply \"yes\" to send all 2, \"yes but not 2\" to leave some out, or \"no\".",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_card",
+       "card_id": "ead9cee0-2706-4487-b431-adecb636215a",
+       "requested": true,
+       "prepare_request": "3bd3ce56-5feb-4ca3-9335-6493d4466864"
+      }
+     },
+     {
+      "content": "2 approved exactly as shown. Nothing has gone to an employer yet.\n1. Stripe: approved; it is sent next, from your computer or, if you turned it on, the cloud\n2. Lumen: approved; it is sent next, from your computer or, if you turned it on, the cloud",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_card_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "9a4cdfc7-8a5a-480c-8b3f-2c1c8c4a02d6"
+      }
+     },
+     {
+      "content": "Here is where that stands.",
+      "meta": {
+       "brain": "staged",
+       "career": true,
+       "intent": "agent",
+       "shorten": {
+        "ran": false,
+        "why": "within the bound",
+        "bound": 550,
+        "chars": 26,
+        "outcome": "within"
+       },
+       "stopped": "final",
+       "contained": false,
+       "knowledge": {
+        "stage": null,
+        "unknown": [
+         "career stage (year in school, new graduate, changing careers, returning)",
+         "target role or field",
+         "place, or whether remote"
+        ],
+        "playbooks": []
+       },
+       "tool_calls": [],
+       "result_status": "final",
+       "router_intent": "unclaimed",
+       "career_turn_key": "14a555f6-ae62-42ee-90b0-bbeb126e326a",
+       "pending_approvals": 0
+      }
+     }
+    ],
+    "atsPosts": [
+     {
+      "board": "stripe",
+      "job": "301",
+      "files": [
+       {
+        "name": "resume",
+        "filename": "Alex_Testcase_Resume.pdf",
+        "sha256": "45dd3e171a5aea177753d5f68822fa636957040fdf5c27fa667c972cb4e19fdd",
+        "bytes": 2083
+       }
+      ],
+      "fields": {
+       "first_name": "Alex",
+       "last_name": "Testcase",
+       "email": "alex.testcase@example.test",
+       "question_9001": "1"
+      },
+      "confirmation_id": "GH-stripe-301-4"
+     },
+     {
+      "board": "lumen",
+      "job": "801",
+      "files": [
+       {
+        "name": "resume",
+        "filename": "Alex_Testcase_Resume.pdf",
+        "sha256": "45dd3e171a5aea177753d5f68822fa636957040fdf5c27fa667c972cb4e19fdd",
+        "bytes": 2083
+       }
+      ],
+      "fields": {
+       "first_name": "Alex",
+       "last_name": "Testcase",
+       "email": "alex.testcase@example.test",
+       "question_9001": "1"
+      },
+      "confirmation_id": "GH-lumen-801-5"
+     }
+    ],
+    "postsAt": [
+     0,
+     2,
+     2
+    ],
+    "jobsAt": [
+     0,
+     2,
+     2
+    ],
+    "wallMs": [
+     3008,
+     1671,
+     1022
+    ],
+    "requested": [
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "api.anthropic.com"
+    ],
+    "wanted": [
+     {
+      "company": "Stripe",
+      "title": "Data Analyst",
+      "url": "https://job-boards.greenhouse.io/stripe/jobs/301",
+      "posting_key": "greenhouse:stripe:301"
+     },
+     {
+      "company": "Lumen",
+      "title": "Data Analyst",
+      "url": "https://job-boards.greenhouse.io/lumen/jobs/801",
+      "posting_key": "greenhouse:lumen:801"
+     }
+    ],
+    "jobs": [
+     {
+      "company": "Stripe",
+      "url": "https://boards.greenhouse.io/stripe/jobs/301",
+      "job_id": "greenhouse:stripe:301",
+      "payload_hash": "4d152901d5221a825f11a20535979e793fe3b291d058f97df2da52dafafb19da",
+      "approval_hash": "4d152901d5221a825f11a20535979e793fe3b291d058f97df2da52dafafb19da",
+      "payload_hash_now": "4d152901d5221a825f11a20535979e793fe3b291d058f97df2da52dafafb19da",
+      "state": "submitted_unconfirmed",
+      "confirmation_id": "GH-stripe-301-4",
+      "resume_name": null
+     },
+     {
+      "company": "Lumen",
+      "url": "https://boards.greenhouse.io/lumen/jobs/801",
+      "job_id": "greenhouse:lumen:801",
+      "payload_hash": "c98512063b4a3354166171aa384dcf39be531f088053ca36d9f0adfb9417facf",
+      "approval_hash": "c98512063b4a3354166171aa384dcf39be531f088053ca36d9f0adfb9417facf",
+      "payload_hash_now": "c98512063b4a3354166171aa384dcf39be531f088053ca36d9f0adfb9417facf",
+      "state": "submitted_unconfirmed",
+      "confirmation_id": "GH-lumen-801-5",
+      "resume_name": null
+     }
+    ],
+    "questions": [
+     {
+      "label": "Email",
+      "company": "Stripe",
+      "state": "answered"
+     },
+     {
+      "label": "First Name",
+      "company": "Stripe",
+      "state": "answered"
+     },
+     {
+      "label": "Last Name",
+      "company": "Stripe",
+      "state": "answered"
+     },
+     {
+      "label": "Are you legally authorized to work in the United States?",
+      "company": "Stripe",
+      "state": "answered"
+     }
+    ]
+   }
+  },
+  {
+   "id": "MA09",
+   "title": "A Workday link that needs the person's sign-in",
+   "score": 9.3,
+   "must": "13/14",
+   "nice": "4/6",
+   "ungraded": 0,
+   "checks": [
+    {
+     "id": "handoff-named",
+     "level": "MUST",
+     "pass": true,
+     "why": "\"2/3 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 2 of the 3 you aske\""
+    },
+    {
+     "id": "handoff-not-sent",
+     "level": "MUST",
+     "pass": true,
+     "why": "none approved"
+    },
+    {
+     "id": "others-proceed",
+     "level": "MUST",
+     "pass": true,
+     "why": "approved: Northwind, Pinecrest"
+    },
+    {
+     "id": "reads-2-of-3",
+     "level": "NICE",
+     "pass": true,
+     "why": "turn 0: \"2/3 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 2 of the 3 you asked for: Software Engineering Intern at No\""
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "pass": true,
+     "why": "after turn 0: 0 approved, 0 reached an employer"
+    },
+    {
+     "id": "card-before-yes",
+     "level": "MUST",
+     "pass": true,
+     "why": "card of 2 item(s) in 1 message(s)"
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "pass": true,
+     "why": "2/2 bound"
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "pass": true,
+     "why": "2 approved, 2 recorded sent, 2 posts"
+    },
+    {
+     "id": "resume-attached",
+     "level": "MUST",
+     "pass": true,
+     "why": "2/2 with a resume"
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "pass": true,
+     "why": "2 approved; reply: \"2 approved exactly as shown. Nothing has gone to an employer yet. 1. Northwind: approved; it is sent next, from your com\""
+    },
+    {
+     "id": "card-role-employer",
+     "level": "MUST",
+     "pass": false,
+     "why": "missing #1 role, #2 role"
+    },
+    {
+     "id": "card-link",
+     "level": "MUST",
+     "pass": true,
+     "why": "2 item(s) carry link"
+    },
+    {
+     "id": "card-open-questions",
+     "level": "MUST",
+     "pass": true,
+     "why": "no question open"
+    },
+    {
+     "id": "card-pay-deadline",
+     "level": "NICE",
+     "pass": true,
+     "why": "no posting on the card states pay or a deadline"
+    },
+    {
+     "id": "card-fit",
+     "level": "NICE",
+     "pass": false,
+     "why": "missing #1 fit, #2 fit"
+    },
+    {
+     "id": "card-resume-file",
+     "level": "NICE",
+     "pass": true,
+     "why": "2 item(s) carry resume"
+    },
+    {
+     "id": "fast-turns",
+     "level": "NICE",
+     "pass": true,
+     "why": "slowest turn 0.5 s"
+    },
+    {
+     "id": "proof-after",
+     "level": "NICE",
+     "pass": false,
+     "why": "nothing after the yes says what was sent with its proof (1 message(s))"
+    },
+    {
+     "id": "approved-exact",
+     "level": "MUST",
+     "pass": true,
+     "why": "2 approved"
+    },
+    {
+     "id": "approved-employers",
+     "level": "MUST",
+     "pass": true,
+     "why": "approved: Northwind, Pinecrest"
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to these:\nhttps://boards.greenhouse.io/northwind/jobs/9101\nhttps://boards.greenhouse.io/pinecrest/jobs/9102\nhttps://northwind.wd5.myworkdayjobs.com/en-US/careers/job/Chicago-IL/Software-Engineer-Intern_R-1234",
+     "Alex",
+     "alex.testcase@example.test",
+     "Testcase",
+     "Yes",
+     "yes"
+    ],
+    "replies": [
+     "2/3 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 2 of the 3 you asked for: Software Engineering Intern at Northwind; Software Engineer Intern at Pinecrest. I've started preparing them now from your confirmed facts. Not queued: https://northwind.wd5.myworkdayjobs.com/en-US/careers/job/Chicago-IL/Software-Engineer-Intern_R-1234 at an employer not on record: not a posting link I can read (Greenhouse, Lever or Ashby). Nothing is sent and nothing is filled yet: I prepare each one before you ask, from the facts you confirmed and a resume tailored to it; if a form asks something you haven't told me, I'll ask you here. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+     "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail It's needed for all 2 of your applications.\nJust reply with your answer. I'll ask the next one after you answer this.",
+     "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nLast Name It's needed for all 2 of your applications.\nJust reply with your answer.",
+     "Saved. I won't ask this again:\n1. Last Name: Testcase\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+     "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+     "2 approved exactly as shown. Nothing has gone to an employer yet.\n1. Northwind: approved; it is sent next, from your computer or, if you turned it on, the cloud\n2. Pinecrest: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+    ],
+    "intents": [
+     "career_apply_queue",
+     "career_apply_questions",
+     "career_apply_questions",
+     "career_apply_questions_answer",
+     "career_apply_questions_answer",
+     "career_apply_card_answer"
+    ],
+    "turnMs": [
+     495,
+     277,
+     358,
+     334,
+     314,
+     538
+    ],
+    "scripted": [
+     0,
+     5
+    ],
+    "thread": [
+     {
+      "content": "2/3 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 2 of the 3 you asked for: Software Engineering Intern at Northwind; Software Engineer Intern at Pinecrest. I've started preparing them now from your confirmed facts. Not queued: https://northwind.wd5.myworkdayjobs.com/en-US/careers/job/Chicago-IL/Software-Engineer-Intern_R-1234 at an employer not on record: not a posting link I can read (Greenhouse, Lever or Ashby). Nothing is sent and nothing is filled yet: I prepare each one before you ask, from the facts you confirmed and a resume tailored to it; if a form asks something you haven't told me, I'll ask you here. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_queue",
+       "contained": false,
+       "result_status": "queued",
+       "career_turn_key": "ca7f8b5c-8f32-4469-83f2-9f674755dbe2"
+      }
+     },
+     {
+      "content": "Question 1 of 3 only you can answer, one at a time. Answer it once and I won't ask again.\nFirst Name It's needed for 2 of your applications.\nJust reply with your answer. I'll ask the next one after you answer this.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "requested": true,
+       "prepare_request": "14de2b07-c591-4a6a-9865-616db08d1683"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail It's needed for all 2 of your applications.\nJust reply with your answer. I'll ask the next one after you answer this.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "contained": false,
+       "result_status": "answered_next",
+       "career_turn_key": "292d3a77-1c59-4c24-869b-30b33b8d1826"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nLast Name It's needed for all 2 of your applications.\nJust reply with your answer.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "contained": false,
+       "result_status": "answered_next",
+       "career_turn_key": "7c752aa1-5cb9-4279-a9a4-e4a412e49868"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\n1. Last Name: Testcase\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "dfb7991d-6ec5-4672-8bad-e01f380ee862"
+      }
+     },
+     {
+      "content": "One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nAre you legally authorized to work in the United States? (Yes / No) It's needed for 2 of your applications.\nJust reply with your answer.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "requested": true,
+       "prepare_request": "204a0705-180f-44ba-ab51-530367337465"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "c5cee6d8-6441-44fd-b048-abc8f6d020e3"
+      }
+     },
+     {
+      "content": "2 applications are ready. Every answer below goes exactly as shown.\n\n1. Northwind\n   First Name: Alex\n   Last Name: Testcase\n   Email: alex.testcase@example.test\n   Are you legally authorized to work in the United States?: Yes\n   Resume: Alex_Testcase_Resume.pdf\n   Sends to https://boards.greenhouse.io/northwind/jobs/9101\n\n2. Pinecrest\n   First Name: Alex\n   Last Name: Testcase\n   Email: alex.testcase@example.test\n   Are you legally authorized to work in the United States?: Yes\n   Resume: Alex_Testcase_Resume.pdf\n   Sends to https://boards.greenhouse.io/pinecrest/jobs/9102\n\nReply \"yes\" to send all 2, \"yes but not 2\" to leave some out, or \"no\".",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_card",
+       "card_id": "402c2b22-1adf-47f5-811b-8d2bcd43dfaf",
+       "requested": true,
+       "prepare_request": "cdc81ee3-533b-4d90-ada2-ac1f2c7793e0"
+      }
+     },
+     {
+      "content": "2 approved exactly as shown. Nothing has gone to an employer yet.\n1. Northwind: approved; it is sent next, from your computer or, if you turned it on, the cloud\n2. Pinecrest: approved; it is sent next, from your computer or, if you turned it on, the cloud",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_card_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "38a3ce7a-df40-4656-82d8-da93cf47ff64"
+      }
+     }
+    ],
+    "atsPosts": [
+     {
+      "board": "northwind",
+      "job": "9101",
+      "files": [
+       {
+        "name": "resume",
+        "filename": "Alex_Testcase_Resume.pdf",
+        "sha256": "45dd3e171a5aea177753d5f68822fa636957040fdf5c27fa667c972cb4e19fdd",
+        "bytes": 2083
+       }
+      ],
+      "fields": {
+       "first_name": "Alex",
+       "last_name": "Testcase",
+       "email": "alex.testcase@example.test",
+       "question_9001": "1"
+      },
+      "confirmation_id": "GH-northwind-9101-6"
+     },
+     {
+      "board": "pinecrest",
+      "job": "9102",
+      "files": [
+       {
+        "name": "resume",
+        "filename": "Alex_Testcase_Resume.pdf",
+        "sha256": "45dd3e171a5aea177753d5f68822fa636957040fdf5c27fa667c972cb4e19fdd",
+        "bytes": 2083
+       }
+      ],
+      "fields": {
+       "first_name": "Alex",
+       "last_name": "Testcase",
+       "email": "alex.testcase@example.test",
+       "question_9001": "1"
+      },
+      "confirmation_id": "GH-pinecrest-9102-7"
+     }
+    ],
+    "postsAt": [
+     0,
+     2
+    ],
+    "jobsAt": [
+     0,
+     2
+    ],
+    "wallMs": [
+     3513,
+     1864
+    ],
+    "requested": [
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test"
+    ],
+    "wanted": [
+     {
+      "company": "Northwind",
+      "title": "Software Engineering Intern",
+      "url": "https://job-boards.greenhouse.io/northwind/jobs/9101",
+      "posting_key": "greenhouse:northwind:9101"
+     },
+     {
+      "company": "Pinecrest",
+      "title": "Software Engineer Intern",
+      "url": "https://job-boards.greenhouse.io/pinecrest/jobs/9102",
+      "posting_key": "greenhouse:pinecrest:9102"
+     }
+    ],
+    "jobs": [
+     {
+      "company": "Northwind",
+      "url": "https://boards.greenhouse.io/northwind/jobs/9101",
+      "job_id": "greenhouse:northwind:9101",
+      "payload_hash": "3d8077254390b9640d0f3a827edc1a47c027d76d60fe3c581f491330238f8590",
+      "approval_hash": "3d8077254390b9640d0f3a827edc1a47c027d76d60fe3c581f491330238f8590",
+      "payload_hash_now": "3d8077254390b9640d0f3a827edc1a47c027d76d60fe3c581f491330238f8590",
+      "state": "submitted_unconfirmed",
+      "confirmation_id": "GH-northwind-9101-6",
+      "resume_name": null
+     },
+     {
+      "company": "Pinecrest",
+      "url": "https://boards.greenhouse.io/pinecrest/jobs/9102",
+      "job_id": "greenhouse:pinecrest:9102",
+      "payload_hash": "3e5a56577cb186000927559ef0835acf7a22d9ea4a8bf1765949e0219b784280",
+      "approval_hash": "3e5a56577cb186000927559ef0835acf7a22d9ea4a8bf1765949e0219b784280",
+      "payload_hash_now": "3e5a56577cb186000927559ef0835acf7a22d9ea4a8bf1765949e0219b784280",
+      "state": "submitted_unconfirmed",
+      "confirmation_id": "GH-pinecrest-9102-7",
+      "resume_name": null
+     }
+    ],
+    "questions": [
+     {
+      "label": "Email",
+      "company": "Pinecrest",
+      "state": "answered"
+     },
+     {
+      "label": "First Name",
+      "company": "Pinecrest",
+      "state": "answered"
+     },
+     {
+      "label": "Last Name",
+      "company": "Pinecrest",
+      "state": "answered"
+     },
+     {
+      "label": "Are you legally authorized to work in the United States?",
+      "company": "Northwind",
+      "state": "answered"
+     }
+    ]
+   }
+  },
+  {
+   "id": "MA10",
+   "title": "Duplicates: already applied, and one posting by two links",
+   "score": 10,
+   "must": "5/5",
+   "nice": "0/0",
+   "ungraded": 0,
+   "checks": [
+    {
+     "id": "dup-named",
+     "level": "MUST",
+     "pass": true,
+     "why": "turn 2: \"1/2 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 1 of the 2 you asked for: Data Analyst at Lumen. I've start\""
+    },
+    {
+     "id": "once-per-posting",
+     "level": "MUST",
+     "pass": true,
+     "why": "2 approved, 2 recorded sent, 2 posts"
+    },
+    {
+     "id": "lumen-proceeds",
+     "level": "MUST",
+     "pass": true,
+     "why": "approved"
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "pass": true,
+     "why": "2/2 bound"
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "pass": true,
+     "why": "after turn 0: 0 approved, 0 reached an employer"
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to the Data Analyst role at Stripe",
+     "Testcase",
+     "alex.testcase@example.test",
+     "Alex",
+     "Yes",
+     "yes",
+     "apply to these:\nhttps://boards.greenhouse.io/stripe/jobs/301\nhttps://boards.greenhouse.io/stripe/jobs/301?gh_jid=301\nhttps://boards.greenhouse.io/lumen/jobs/801",
+     "yes"
+    ],
+    "replies": [
+     "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Data Analyst at Stripe is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Stripe only when you approve it on the card that shows it exactly.",
+     "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail It's needed for your application.\nJust reply with your answer. I'll ask the next one after you answer this.",
+     "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nFirst Name It's needed for your application.\nJust reply with your answer.",
+     "Saved. I won't ask this again:\n1. First Name: Alex\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+     "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+     "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Stripe: approved; it is sent next, from your computer or, if you turned it on, the cloud",
+     "1/2 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 1 of the 2 you asked for: Data Analyst at Lumen. I've started preparing it now from your confirmed facts. Not queued: Data Analyst at Stripe: Data Analyst at Stripe is already in your applications as the same posting; nothing was queued. Nothing is sent and nothing is filled yet: I prepare each one before you ask, from the facts you confirmed and a resume tailored to it; if a form asks something you haven't told me, I'll ask you here. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+     "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Lumen: approved; it is sent next, from your computer or, if you turned it on, the cloud"
+    ],
+    "intents": [
+     "career_apply_queue",
+     "career_apply_questions",
+     "career_apply_questions",
+     "career_apply_questions_answer",
+     "career_apply_questions_answer",
+     "career_apply_card_answer",
+     "career_apply_queue",
+     "career_apply_card_answer"
+    ],
+    "turnMs": [
+     1046,
+     901,
+     693,
+     1003,
+     1272,
+     1010,
+     520,
+     746
+    ],
+    "scripted": [
+     0,
+     5,
+     6,
+     7
+    ],
+    "thread": [
+     {
+      "content": "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Data Analyst at Stripe is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Stripe only when you approve it on the card that shows it exactly.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_queue",
+       "contained": false,
+       "result_status": "queued",
+       "career_turn_key": "83e73c36-6531-460d-83cd-99f628880aa2"
+      }
+     },
+     {
+      "content": "Question 1 of 3 only you can answer, one at a time. Answer it once and I won't ask again.\nLast Name It's needed for one of your applications.\nJust reply with your answer. I'll ask the next one after you answer this.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "requested": true,
+       "prepare_request": "4b77aa1c-0686-4322-8999-01bc0e99d67e"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\nLast Name: Testcase\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail It's needed for your application.\nJust reply with your answer. I'll ask the next one after you answer this.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "contained": false,
+       "result_status": "answered_next",
+       "career_turn_key": "005a270b-eaf2-44b7-a04e-010b87386e48"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nFirst Name It's needed for your application.\nJust reply with your answer.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "contained": false,
+       "result_status": "answered_next",
+       "career_turn_key": "59b19a6b-3790-4261-bdb3-1e11e80952cb"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\n1. First Name: Alex\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "9d4fd635-4b58-495f-9ac4-aa3ca76da6ea"
+      }
+     },
+     {
+      "content": "One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nAre you legally authorized to work in the United States? (Yes / No) It's needed for one of your applications.\nJust reply with your answer.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "requested": true,
+       "prepare_request": "6505fec4-66f6-4eba-a079-2280f025d020"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "8a68e7b3-c726-47b2-a487-7d4dad895063"
+      }
+     },
+     {
+      "content": "1 application is ready. Every answer below goes exactly as shown.\n\n1. Stripe\n   First Name: Alex\n   Last Name: Testcase\n   Email: alex.testcase@example.test\n   Are you legally authorized to work in the United States?: Yes\n   Resume: Alex_Testcase_Resume.pdf\n   Sends to https://boards.greenhouse.io/stripe/jobs/301\n\nReply \"yes\" to send it, or \"no\".",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_card",
+       "card_id": "66e54ba4-f077-4be8-98c8-eafd14940071",
+       "requested": true,
+       "prepare_request": "34f77cdb-7350-433e-aa75-b9b500468822"
+      }
+     },
+     {
+      "content": "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Stripe: approved; it is sent next, from your computer or, if you turned it on, the cloud",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_card_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "fdd5f193-c511-43c4-9fdb-6982e3cb9664"
+      }
+     },
+     {
+      "content": "1/2 queued; I'll show you each application's exact answers on a card before anything is sent. Queued 1 of the 2 you asked for: Data Analyst at Lumen. I've started preparing it now from your confirmed facts. Not queued: Data Analyst at Stripe: Data Analyst at Stripe is already in your applications as the same posting; nothing was queued. Nothing is sent and nothing is filled yet: I prepare each one before you ask, from the facts you confirmed and a resume tailored to it; if a form asks something you haven't told me, I'll ask you here. Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_queue",
+       "contained": false,
+       "result_status": "queued",
+       "career_turn_key": "3d156548-2b0e-4944-90e1-1465ea4f44ba"
+      }
+     },
+     {
+      "content": "1 application is ready. Every answer below goes exactly as shown.\n\n1. Lumen\n   First Name: Alex\n   Last Name: Testcase\n   Email: alex.testcase@example.test\n   Are you legally authorized to work in the United States?: Yes\n   Resume: Alex_Testcase_Resume.pdf\n   Sends to https://boards.greenhouse.io/lumen/jobs/801\n\nReply \"yes\" to send it, or \"no\".",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_card",
+       "card_id": "a09449e9-78ba-4210-ba73-dfe513da67a8",
+       "requested": true,
+       "prepare_request": "aa5f38c7-da4b-4784-b625-fa386812e393"
+      }
+     },
+     {
+      "content": "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Lumen: approved; it is sent next, from your computer or, if you turned it on, the cloud",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_card_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "ceb8d393-a62f-4ac9-b79b-0727714cee1f"
+      }
+     }
+    ],
+    "atsPosts": [
+     {
+      "board": "stripe",
+      "job": "301",
+      "files": [
+       {
+        "name": "resume",
+        "filename": "Alex_Testcase_Resume.pdf",
+        "sha256": "45dd3e171a5aea177753d5f68822fa636957040fdf5c27fa667c972cb4e19fdd",
+        "bytes": 2083
+       }
+      ],
+      "fields": {
+       "first_name": "Alex",
+       "last_name": "Testcase",
+       "email": "alex.testcase@example.test",
+       "question_9001": "1"
+      },
+      "confirmation_id": "GH-stripe-301-8"
+     },
+     {
+      "board": "lumen",
+      "job": "801",
+      "files": [
+       {
+        "name": "resume",
+        "filename": "Alex_Testcase_Resume.pdf",
+        "sha256": "45dd3e171a5aea177753d5f68822fa636957040fdf5c27fa667c972cb4e19fdd",
+        "bytes": 2083
+       }
+      ],
+      "fields": {
+       "first_name": "Alex",
+       "last_name": "Testcase",
+       "email": "alex.testcase@example.test",
+       "question_9001": "1"
+      },
+      "confirmation_id": "GH-lumen-801-9"
+     }
+    ],
+    "postsAt": [
+     0,
+     1,
+     1,
+     2
+    ],
+    "jobsAt": [
+     0,
+     1,
+     1,
+     2
+    ],
+    "wallMs": [
+     7079,
+     3036,
+     823,
+     1547
+    ],
+    "requested": [
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test"
+    ],
+    "wanted": [
+     {
+      "company": "Stripe",
+      "title": "Data Analyst",
+      "url": "https://job-boards.greenhouse.io/stripe/jobs/301",
+      "posting_key": "greenhouse:stripe:301"
+     },
+     {
+      "company": "Lumen",
+      "title": "Data Analyst",
+      "url": "https://job-boards.greenhouse.io/lumen/jobs/801",
+      "posting_key": "greenhouse:lumen:801"
+     }
+    ],
+    "jobs": [
+     {
+      "company": "Stripe",
+      "url": "https://boards.greenhouse.io/stripe/jobs/301",
+      "job_id": "greenhouse:stripe:301",
+      "payload_hash": "0441dff67af9ccc4620593e70da6da15dd9dea78b66ce71ec7369da723f6dcf5",
+      "approval_hash": "0441dff67af9ccc4620593e70da6da15dd9dea78b66ce71ec7369da723f6dcf5",
+      "payload_hash_now": "0441dff67af9ccc4620593e70da6da15dd9dea78b66ce71ec7369da723f6dcf5",
+      "state": "submitted_unconfirmed",
+      "confirmation_id": "GH-stripe-301-8",
+      "resume_name": null
+     },
+     {
+      "company": "Lumen",
+      "url": "https://boards.greenhouse.io/lumen/jobs/801",
+      "job_id": "greenhouse:lumen:801",
+      "payload_hash": "369b6b8c21b9b6cc36d9dae6672b2225a594c9ca18c7c5b29089ad923620ab91",
+      "approval_hash": "369b6b8c21b9b6cc36d9dae6672b2225a594c9ca18c7c5b29089ad923620ab91",
+      "payload_hash_now": "369b6b8c21b9b6cc36d9dae6672b2225a594c9ca18c7c5b29089ad923620ab91",
+      "state": "submitted_unconfirmed",
+      "confirmation_id": "GH-lumen-801-9",
+      "resume_name": null
+     }
+    ],
+    "questions": [
+     {
+      "label": "Email",
+      "company": "Stripe",
+      "state": "answered"
+     },
+     {
+      "label": "First Name",
+      "company": "Stripe",
+      "state": "answered"
+     },
+     {
+      "label": "Last Name",
+      "company": "Stripe",
+      "state": "answered"
+     },
+     {
+      "label": "Are you legally authorized to work in the United States?",
+      "company": "Stripe",
+      "state": "answered"
+     }
+    ]
+   }
+  },
+  {
+   "id": "MA11",
+   "title": "Follow-up: \"apply to 20 more\"",
+   "score": 0,
+   "must": "0/5",
+   "nice": "0/0",
+   "ungraded": 1,
+   "checks": [
+    {
+     "id": "acts-followup",
+     "level": "MUST",
+     "pass": false,
+     "why": "turn 2 handled as agent; 0 on the apply list"
+    },
+    {
+     "id": "no-resend",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved, 0 recorded sent, 0 posts"
+    },
+    {
+     "id": "more-added",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 on the apply list"
+    },
+    {
+     "id": "truthful-count",
+     "level": "MUST",
+     "pass": false,
+     "why": "turn 2: \"I couldn't confirm an answer from the pages I read, so I don't have a verified one.\""
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "pass": false,
+     "why": "0/0 bound"
+    },
+    {
+     "id": "fewer-than-20",
+     "level": "NICE",
+     "pass": null,
+     "why": "not judged (run with --model subscription --judge)"
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to all the frontend internships in Chicago",
+     "yes",
+     "apply to 20 more like those",
+     "yes"
+    ],
+    "replies": [
+     "I can't apply to those yet because there's no list of postings in this thread, so nothing was queued. Name one (\"apply to the <role> role at <Company>\"), or say \"find <role> jobs in <place>\" and then \"apply to these\". Which role should I search for?",
+     "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs.",
+     "I couldn't confirm an answer from the pages I read, so I don't have a verified one.",
+     "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+    ],
+    "intents": [
+     "career_apply_queue",
+     "conversation_bare_reply",
+     "agent",
+     "conversation_bare_reply"
+    ],
+    "turnMs": [
+     354,
+     671,
+     28238,
+     4699
+    ],
+    "scripted": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "thread": [
+     {
+      "content": "I can't apply to those yet because there's no list of postings in this thread, so nothing was queued. Name one (\"apply to the <role> role at <Company>\"), or say \"find <role> jobs in <place>\" and then \"apply to these\". Which role should I search for?",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_queue",
+       "contained": false,
+       "result_status": "no_list",
+       "career_turn_key": "d3a49dcf-d0af-4059-97bc-82524229330e"
+      }
+     },
+     {
+      "content": "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs.",
+      "meta": {
+       "career": true,
+       "intent": "conversation_bare_reply",
+       "contained": false,
+       "result_status": "awaiting_user",
+       "career_turn_key": "a2ed814b-e392-48fd-94b8-fc2b32f3c133"
+      }
+     },
+     {
+      "content": "I couldn't confirm an answer from the pages I read, so I don't have a verified one.",
+      "meta": {
+       "brain": "staged",
+       "career": true,
+       "intent": "agent",
+       "shorten": {
+        "ran": false,
+        "why": "within the bound",
+        "bound": 550,
+        "chars": 26,
+        "outcome": "within"
+       },
+       "stopped": "final",
+       "contained": false,
+       "knowledge": {
+        "stage": null,
+        "unknown": [
+         "career stage (year in school, new graduate, changing careers, returning)",
+         "target role or field",
+         "place, or whether remote"
+        ],
+        "playbooks": []
+       },
+       "tool_calls": [
+        {
+         "ok": true,
+         "args": {
+          "limit": 10,
+          "query": "software engineering intern Chicago"
+         },
+         "name": "search_jobs",
+         "effect": "read"
+        },
+        {
+         "ok": false,
+         "name": "queue_applications",
+         "error": "unknown tool: queue_applications",
+         "effect": null
+        }
+       ],
+       "result_status": "final",
+       "router_intent": "career_catchall",
+       "career_turn_key": "bae374af-1050-41de-863d-ac4ae4436836",
+       "pending_approvals": 0
+      }
+     },
+     {
+      "content": "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs.",
+      "meta": {
+       "career": true,
+       "intent": "conversation_bare_reply",
+       "contained": false,
+       "result_status": "awaiting_user",
+       "career_turn_key": "0baed78f-8068-41e3-97a7-47da592ab3eb"
+      }
+     }
+    ],
+    "atsPosts": [],
+    "postsAt": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "jobsAt": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "wallMs": [
+     526,
+     937,
+     29247,
+     5422
+    ],
+    "requested": [
+     "api.anthropic.com",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "api.anthropic.com",
+     "api.anthropic.com"
+    ],
+    "wanted": [],
+    "jobs": [],
+    "questions": []
+   }
+  },
+  {
+   "id": "MA12",
+   "title": "Proof and receipts",
+   "score": 5,
+   "must": "2/4",
+   "nice": "0/1",
+   "ungraded": 0,
+   "checks": [
+    {
+     "id": "receipt-answers",
+     "level": "MUST",
+     "pass": false,
+     "why": "turn 2: \"Here is where that stands.\""
+    },
+    {
+     "id": "receipt-confirmation",
+     "level": "MUST",
+     "pass": false,
+     "why": "turn 2: \"Here is where that stands.\""
+    },
+    {
+     "id": "receipt-no-false-confirmed",
+     "level": "MUST",
+     "pass": true,
+     "why": "never claims confirmed"
+    },
+    {
+     "id": "receipt-resume",
+     "level": "NICE",
+     "pass": false,
+     "why": "turn 2: \"Here is where that stands.\""
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "pass": true,
+     "why": "1/1 bound"
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to the Data Analyst role at Lumen",
+     "alex.testcase@example.test",
+     "Alex",
+     "Testcase",
+     "Yes",
+     "yes",
+     "show me exactly what you sent to Lumen"
+    ],
+    "replies": [
+     "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Data Analyst at Lumen is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Lumen only when you approve it on the card that shows it exactly.",
+     "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nFirst Name It's needed for your application.\nJust reply with your answer. I'll ask the next one after you answer this.",
+     "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nLast Name It's needed for your application.\nJust reply with your answer.",
+     "Saved. I won't ask this again:\n1. Last Name: Testcase\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+     "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+     "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Lumen: approved; it is sent next, from your computer or, if you turned it on, the cloud",
+     "Here is where that stands."
+    ],
+    "intents": [
+     "career_apply_queue",
+     "career_apply_questions",
+     "career_apply_questions",
+     "career_apply_questions_answer",
+     "career_apply_questions_answer",
+     "career_apply_card_answer",
+     "agent"
+    ],
+    "turnMs": [
+     19814,
+     3096,
+     6998,
+     966,
+     759,
+     1250,
+     2682
+    ],
+    "scripted": [
+     0,
+     5,
+     6
+    ],
+    "thread": [
+     {
+      "content": "1/1 queued; I'll show you each application's exact answers on a card before anything is sent. Queued: Data Analyst at Lumen is on your apply list. I've started preparing it now from your confirmed facts. Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to Lumen only when you approve it on the card that shows it exactly.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_queue",
+       "contained": false,
+       "result_status": "queued",
+       "career_turn_key": "d6e9c9f6-8718-4d9f-95c8-4366c3550f98"
+      }
+     },
+     {
+      "content": "Question 1 of 3 only you can answer, one at a time. Answer it once and I won't ask again.\nEmail It's needed for one of your applications.\nJust reply with your answer. I'll ask the next one after you answer this.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "requested": true,
+       "prepare_request": "ad738097-60ba-4be9-a6ec-dc998427675b"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\nEmail: alex.testcase@example.test\n\nNext: Question 1 of 2 only you can answer, one at a time. Answer it once and I won't ask again.\nFirst Name It's needed for your application.\nJust reply with your answer. I'll ask the next one after you answer this.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "contained": false,
+       "result_status": "answered_next",
+       "career_turn_key": "6d67dc91-ac16-4363-ac89-98dfcea00933"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\nFirst Name: Alex\n\nNext: One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nLast Name It's needed for your application.\nJust reply with your answer.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "contained": false,
+       "result_status": "answered_next",
+       "career_turn_key": "abc6c335-113b-46bc-8675-ee50fee8a147"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\n1. Last Name: Testcase\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "c72913b3-2542-43fd-a910-99f704197131"
+      }
+     },
+     {
+      "content": "One question only you can answer is holding up your applications. Answer it once and I won't ask again.\nAre you legally authorized to work in the United States? (Yes / No) It's needed for one of your applications.\nJust reply with your answer.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions",
+       "requested": true,
+       "prepare_request": "80ab318c-1f11-427f-8c7e-6873cc7d34e8"
+      }
+     },
+     {
+      "content": "Saved. I won't ask this again:\n1. Are you legally authorized to work in the United States?: Yes\nI'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready.",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_questions_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "486cd2f6-0c9a-43f2-b907-284c598316aa"
+      }
+     },
+     {
+      "content": "1 application is ready. Every answer below goes exactly as shown.\n\n1. Lumen\n   First Name: Alex\n   Last Name: Testcase\n   Email: alex.testcase@example.test\n   Are you legally authorized to work in the United States?: Yes\n   Resume: Alex_Testcase_Resume.pdf\n   Sends to https://boards.greenhouse.io/lumen/jobs/801\n\nReply \"yes\" to send it, or \"no\".",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_card",
+       "card_id": "ceaa0403-83a1-4147-acd2-d8f54f366daa",
+       "requested": true,
+       "prepare_request": "8ab838c0-ca61-471c-ad76-a484f22c3908"
+      }
+     },
+     {
+      "content": "1 approved exactly as shown. Nothing has gone to an employer yet.\n1. Lumen: approved; it is sent next, from your computer or, if you turned it on, the cloud",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_card_answer",
+       "contained": false,
+       "result_status": "answered",
+       "career_turn_key": "fed57b5a-0bdb-44b3-ab05-c114cf96e447"
+      }
+     },
+     {
+      "content": "Here is where that stands.",
+      "meta": {
+       "brain": "staged",
+       "career": true,
+       "intent": "agent",
+       "shorten": {
+        "ran": false,
+        "why": "within the bound",
+        "bound": 550,
+        "chars": 26,
+        "outcome": "within"
+       },
+       "stopped": "final",
+       "contained": false,
+       "knowledge": {
+        "stage": null,
+        "unknown": [
+         "career stage (year in school, new graduate, changing careers, returning)",
+         "target role or field",
+         "place, or whether remote"
+        ],
+        "playbooks": []
+       },
+       "tool_calls": [],
+       "result_status": "final",
+       "router_intent": "unclaimed",
+       "career_turn_key": "be75d237-577e-4b8f-9c9c-717763659a00",
+       "pending_approvals": 0
+      }
+     }
+    ],
+    "atsPosts": [
+     {
+      "board": "lumen",
+      "job": "801",
+      "files": [
+       {
+        "name": "resume",
+        "filename": "Alex_Testcase_Resume.pdf",
+        "sha256": "45dd3e171a5aea177753d5f68822fa636957040fdf5c27fa667c972cb4e19fdd",
+        "bytes": 2083
+       }
+      ],
+      "fields": {
+       "first_name": "Alex",
+       "last_name": "Testcase",
+       "email": "alex.testcase@example.test",
+       "question_9001": "1"
+      },
+      "confirmation_id": "GH-lumen-801-10"
+     }
+    ],
+    "postsAt": [
+     0,
+     1,
+     1
+    ],
+    "jobsAt": [
+     0,
+     1,
+     1
+    ],
+    "wallMs": [
+     36020,
+     2979,
+     2919
+    ],
+    "requested": [
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "runner.e2e.test",
+     "boards-api.greenhouse.io",
+     "runner.e2e.test",
+     "api.anthropic.com"
+    ],
+    "wanted": [
+     {
+      "company": "Lumen",
+      "title": "Data Analyst",
+      "url": "https://job-boards.greenhouse.io/lumen/jobs/801",
+      "posting_key": "greenhouse:lumen:801"
+     }
+    ],
+    "jobs": [
+     {
+      "company": "Lumen",
+      "url": "https://boards.greenhouse.io/lumen/jobs/801",
+      "job_id": "greenhouse:lumen:801",
+      "payload_hash": "ce1c22a06a71ae1728609a8487eda788bfb10451e00e09c34e14fecf22cfde2a",
+      "approval_hash": "ce1c22a06a71ae1728609a8487eda788bfb10451e00e09c34e14fecf22cfde2a",
+      "payload_hash_now": "ce1c22a06a71ae1728609a8487eda788bfb10451e00e09c34e14fecf22cfde2a",
+      "state": "submitted_unconfirmed",
+      "confirmation_id": "GH-lumen-801-10",
+      "resume_name": null
+     }
+    ],
+    "questions": [
+     {
+      "label": "Email",
+      "company": "Lumen",
+      "state": "answered"
+     },
+     {
+      "label": "First Name",
+      "company": "Lumen",
+      "state": "answered"
+     },
+     {
+      "label": "Last Name",
+      "company": "Lumen",
+      "state": "answered"
+     },
+     {
+      "label": "Are you legally authorized to work in the United States?",
+      "company": "Lumen",
+      "state": "answered"
+     }
+    ]
+   }
+  },
+  {
+   "id": "MA13",
+   "title": "No resume yet",
+   "score": 5,
+   "must": "1/2",
+   "nice": "0/1",
+   "ungraded": 0,
+   "checks": [
+    {
+     "id": "nothing-queued",
+     "level": "MUST",
+     "pass": true,
+     "why": "0 approved, 0 sent"
+    },
+    {
+     "id": "asks-resume",
+     "level": "MUST",
+     "pass": false,
+     "why": "turn 0: \"I found 2 data analyst roles in chicago, but none of them list pay. Here they are by fit, with Apply on each. 1. Stripe — Data Analyst, Chicago, IL (open-checke\""
+    },
+    {
+     "id": "keeps-ask",
+     "level": "NICE",
+     "pass": false,
+     "why": "turn 0: \"I found 2 data analyst roles in chicago, but none of them list pay. Here they are by fit, with Apply on each. 1. Stripe — Data Analyst, Chicago, IL (open-checke\""
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply me to 50 data analyst jobs in chicago"
+    ],
+    "replies": [
+     "I found 2 data analyst roles in chicago, but none of them list pay. Here they are by fit, with Apply on each.\n1. Stripe — Data Analyst, Chicago, IL (open-checked)\n2. Lumen — Data Analyst, Chicago, IL (open-checked)\nhttps://file.e2e.test?t=v1.eyJ1IjoiN2UyZTAwMDAtNmE0My00YTQ5LTlkMmMtMDAwMDAwMDAwMDEzIiwiciI6Ijk0NGFjNzU1YTIiLCJrIjoibCIsImoiOiI2Y2NhOGYwMWQ0OWIzOThkIiwiaSI6MTc5MzgyNjAzMTUyNywiZSI6MTc5MzkxMjQzMTUyN30.jETWlV8NIcU8HxSUvhiSOXiwtPUN4B4UiVwAb_SvGw8"
+    ],
+    "intents": [
+     "career_discovery"
+    ],
+    "turnMs": [
+     2987
+    ],
+    "scripted": [
+     0
+    ],
+    "thread": [
+     {
+      "content": "I found 2 data analyst roles in chicago, but none of them list pay. Here they are by fit, with Apply on each.\n1. Stripe — Data Analyst, Chicago, IL (open-checked)\n2. Lumen — Data Analyst, Chicago, IL (open-checked)\nhttps://file.e2e.test?t=v1.eyJ1IjoiN2UyZTAwMDAtNmE0My00YTQ5LTlkMmMtMDAwMDAwMDAwMDEzIiwiciI6Ijk0NGFjNzU1YTIiLCJrIjoibCIsImoiOiI2Y2NhOGYwMWQ0OWIzOThkIiwiaSI6MTc5MzgyNjAzMTUyNywiZSI6MTc5MzkxMjQzMTUyN30.jETWlV8NIcU8HxSUvhiSOXiwtPUN4B4UiVwAb_SvGw8",
+      "meta": {
+       "career": true,
+       "intent": "career_discovery",
+       "contained": false,
+       "readiness": {
+        "ready": false,
+        "ask_now": [
+         {
+          "key": "resume",
+          "chat": true
+         },
+         {
+          "key": "work_authorization",
+          "chat": true
+         }
+        ],
+        "missing": [
+         {
+          "key": "resume",
+          "chat": true,
+          "blocks": "apply"
+         },
+         {
+          "key": "work_authorization",
+          "chat": true,
+          "blocks": "apply"
+         },
+         {
+          "key": "seniority",
+          "chat": true,
+          "blocks": "quality"
+         },
+         {
+          "key": "email",
+          "chat": true,
+          "blocks": "quality"
+         },
+         {
+          "key": "phone",
+          "chat": true,
+          "blocks": "quality"
+         },
+         {
+          "key": "full_name",
+          "chat": true,
+          "blocks": "quality"
+         }
+        ],
+        "secure_only": 0
+       },
+       "results_file": "944ac755a2",
+       "search_proof": {
+        "result": "I verified 2 open matches. Times are UTC: I don't know your time zone. Nothing was applied for.",
+        "applied": "Nothing was applied for.",
+        "checked": "From 2 live postings for data analyst in chicago.",
+        "invented": "Every row is a posting read this turn.",
+        "freshness": "first seen in the last 1 day",
+        "refreshed_at": null
+       },
+       "result_status": "ranked",
+       "career_turn_key": "e81ce6e8-9d8e-47ad-aaf5-5d0b03329e86"
+      }
+     }
+    ],
+    "atsPosts": [],
+    "postsAt": [
+     0
+    ],
+    "jobsAt": [
+     0
+    ],
+    "wallMs": [
+     3172
+    ],
+    "requested": [
+     "boards-api.greenhouse.io",
+     "boards-api.greenhouse.io"
+    ],
+    "wanted": [],
+    "jobs": [],
+    "questions": []
+   }
+  },
+  {
+   "id": "MA14",
+   "title": "SCALE: 122 open postings in one ask",
+   "score": 1.3,
+   "must": "1/8",
+   "nice": "1/2",
+   "ungraded": 0,
+   "checks": [
+    {
+     "id": "queues-all",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 on the apply list"
+    },
+    {
+     "id": "all-prepared",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card before turn 1"
+    },
+    {
+     "id": "approved-all",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved"
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved, 0 recorded sent, 0 posts"
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "pass": true,
+     "why": "after turn 0: 0 approved, 0 reached an employer"
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "pass": false,
+     "why": "0/0 bound"
+    },
+    {
+     "id": "card-messages-fit",
+     "level": "MUST",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "chat-fit-summary",
+     "level": "NICE",
+     "pass": false,
+     "why": "no card"
+    },
+    {
+     "id": "prep-time",
+     "level": "NICE",
+     "pass": true,
+     "why": "ask to card 1.0 s"
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "pass": false,
+     "why": "0 approved; reply: \"Yes to what? Nothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated\""
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to every remote operations role",
+     "yes"
+    ],
+    "replies": [
+     "I can't apply to those yet because there's no list of postings in this thread, so nothing was queued. Name one (\"apply to the <role> role at <Company>\"), or say \"find <role> jobs in <place>\" and then \"apply to these\". Which role should I search for?",
+     "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs."
+    ],
+    "intents": [
+     "career_apply_queue",
+     "conversation_bare_reply"
+    ],
+    "turnMs": [
+     827,
+     759
+    ],
+    "scripted": [
+     0,
+     1
+    ],
+    "thread": [
+     {
+      "content": "I can't apply to those yet because there's no list of postings in this thread, so nothing was queued. Name one (\"apply to the <role> role at <Company>\"), or say \"find <role> jobs in <place>\" and then \"apply to these\". Which role should I search for?",
+      "meta": {
+       "career": true,
+       "intent": "career_apply_queue",
+       "contained": false,
+       "result_status": "no_list",
+       "career_turn_key": "1863a04f-7367-4e1a-b192-4fe13776cd7e"
+      }
+     },
+     {
+      "content": "Yes to what?\nNothing has been discussed yet in this conversation. No question is waiting on a yes, so I have not treated that as approval of anything, and nothing has changed. Name the action you want and it runs.",
+      "meta": {
+       "career": true,
+       "intent": "conversation_bare_reply",
+       "contained": false,
+       "result_status": "awaiting_user",
+       "career_turn_key": "5d277516-ee00-490f-b95c-f10f88efad62"
+      }
+     }
+    ],
+    "atsPosts": [],
+    "postsAt": [
+     0,
+     0
+    ],
+    "jobsAt": [
+     0,
+     0
+    ],
+    "wallMs": [
+     1038,
+     1414
+    ],
+    "requested": [],
+    "wanted": [],
+    "jobs": [],
+    "questions": []
+   }
+  },
+  {
+   "id": "MA15",
+   "title": "LinkedIn link: refused plainly",
+   "score": 10,
+   "must": "3/3",
+   "nice": "1/1",
+   "ungraded": 0,
+   "checks": [
+    {
+     "id": "nothing-queued",
+     "level": "MUST",
+     "pass": true,
+     "why": "0 approved, 0 sent"
+    },
+    {
+     "id": "no-linkedin-request",
+     "level": "MUST",
+     "pass": true,
+     "why": "none"
+    },
+    {
+     "id": "says-why",
+     "level": "MUST",
+     "pass": true,
+     "why": "turn 0: \"I don't apply on LinkedIn for you (Easy Apply included), and I never sign in to LinkedIn or run anything on it: LinkedIn doesn't allow automated activity on acc\""
+    },
+    {
+     "id": "offers-employer-site",
+     "level": "NICE",
+     "pass": true,
+     "why": "turn 0: \"I don't apply on LinkedIn for you (Easy Apply included), and I never sign in to LinkedIn or run anything on it: LinkedIn doesn't allow automated activity on acc\""
+    }
+   ],
+   "snapshot": {
+    "said": [
+     "apply to this for me https://www.linkedin.com/jobs/view/4012345678"
+    ],
+    "replies": [
+     "I don't apply on LinkedIn for you (Easy Apply included), and I never sign in to LinkedIn or run anything on it: LinkedIn doesn't allow automated activity on accounts. Nothing was sent or done on LinkedIn. Send me the job's link on the employer's own careers site (or its Greenhouse, Lever or Ashby page) and I'll prepare the application there for your approval."
+    ],
+    "intents": [
+     "career_linkedin_refused"
+    ],
+    "turnMs": [
+     559
+    ],
+    "scripted": [
+     0
+    ],
+    "thread": [
+     {
+      "content": "I don't apply on LinkedIn for you (Easy Apply included), and I never sign in to LinkedIn or run anything on it: LinkedIn doesn't allow automated activity on accounts. Nothing was sent or done on LinkedIn. Send me the job's link on the employer's own careers site (or its Greenhouse, Lever or Ashby page) and I'll prepare the application there for your approval.",
+      "meta": {
+       "career": true,
+       "intent": "career_linkedin_refused",
+       "contained": false,
+       "result_status": "refused",
+       "career_turn_key": "bb6d59f0-b8c9-4af8-9972-41f027245354"
+      }
+     }
+    ],
+    "atsPosts": [],
+    "postsAt": [
+     0
+    ],
+    "jobsAt": [
+     0
+    ],
+    "wallMs": [
+     693
+    ],
+    "requested": [],
+    "wanted": [],
+    "jobs": [],
+    "questions": []
+   }
+  }
+ ]
+}

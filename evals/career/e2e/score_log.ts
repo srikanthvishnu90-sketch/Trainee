@@ -2,7 +2,7 @@
 // section of evals/career/SCORE-LOG.md. No I/O here, so the gate's tests import it without the runner.
 import type { Area } from "./judge.ts";
 
-export interface E2EItem { id: string; area: Area; kind: string; pass: boolean; failed: string[]; stage: string[]; replies: string[]; intents: (string | null)[]; family?: string; style?: string; ats?: string; heldout?: boolean; est?: CallEstimate }
+export interface E2EItem { id: string; area: Area; kind: string; pass: boolean; failed: string[]; stage: string[]; replies: string[]; intents: (string | null)[]; family?: string; style?: string; ats?: string; heldout?: boolean; est?: CallEstimate; extra?: Record<string, unknown> }
 export interface E2ERun { label: string; brain: string; model: string; commit: string; total: number; passed: number; rate: number; areas: Record<Area, { total: number; passed: number }>; guards: { total: number; held: number }; stopped: string | null; cost_usd: number; items: E2EItem[]; run_at: string;
   // The scaled set (workstream H, generate.ts): which set ran, how many of it (null: all of it), the seed it was generated
   // and sampled with, the held-out split against the rest (completion tasks; guards for the adversarial set), and the

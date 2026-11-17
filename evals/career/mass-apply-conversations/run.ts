@@ -99,6 +99,21 @@ if (import.meta.main) {
     if (Deno.env.get("ANTHROPIC_API_KEY") || Deno.env.get("ANTHROPIC_AUTH_TOKEN")) { console.log("NOT RUN: start it with env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN (subscription only)"); Deno.exit(2); }
     await (await import("../../subscription/claude_cli.ts")).preflight();
   }
+  // --regrade <results.json>: grade a run's saved snapshots again with this grader (code checks; judge results kept as they were).
+  const again = opt("--regrade");
+  if (again) {
+    const r = JSON.parse(await Deno.readTextFile(again));
+    for (const x of r.results) {
+      const s = SCENARIOS.find((y) => y.id === x.id)!;
+      const checks = [...gradeCode(s, x.snapshot, ALL_POSTINGS), ...x.checks.filter((c: Result) => s.checks.find((k) => k.id === c.id)?.kind === "judge")];
+      Object.assign(x, { checks, ...score(checks) });
+    }
+    r.mean = Math.round((r.results.reduce((a: number, x: ScenarioResult) => a + x.score, 0) / r.results.length) * 100) / 100;
+    await Deno.writeTextFile(again, JSON.stringify(r, null, 1));
+    await Deno.writeTextFile(again.replace(/\.json$/, ".md"), scorecard(r));
+    console.log(`regraded ${again}: mean ${r.mean.toFixed(2)}/10`);
+    Deno.exit(0);
+  }
   const label = opt("--label") || `mac-${model}-${new Date().toISOString().slice(0, 10)}`;
   const r = await runConversations({ label, model, only: opt("--only")?.split(",").filter(Boolean), judge: args.includes("--judge") });
   await Deno.mkdir(new URL("results/", HERE), { recursive: true });

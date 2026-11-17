@@ -32,7 +32,8 @@ import { chatSwitches, liveSwitches, readSubmitSettings } from "./chat_switches.
 import { connectUrlsFor } from "../_shared/connect_link.ts"; // D-037: the send consent link
 import { looksLikePendingSecret, redactionNote, redactPending, secretLeadIn } from "../_shared/identity_redact.ts";
 import { corsFor } from "./_shared/chat_cors.ts";
-import { chatInput } from "./_shared/chat_input.ts";
+import { chatInput, OVER_CAP_REPLY, OverCapText } from "./_shared/chat_input.ts";
+import { linkListAsk } from "../_shared/career_apply_link.ts";
 import { ownerThread, ChatThreadError } from "./_shared/chat_session.ts";
 import { CareerAccess, CareerOnboarding, CareerRouter, CareerDoorstep, CareerReply, CareerContainment, CareerBatchApply, CareerJobs, CareerProfile } from "../_shared/router_core.career.js";
 import { planCareerTaskIntent, normalizeCareerTaskRequest, createCareerBoardFor, createWorkerBoardProvider, planCareerBatchIntent, planCareerBatchPrepare, normalizeCareerBatchRequest } from "../_shared/career_task_bridge.js";
@@ -355,7 +356,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // waiting, is removed from this text like a labeled one.
     const situation = await readSituation(admin, user.id, Date.now()).catch((e) => { console.error("situation:", e?.message ?? e); return null; });
     // Text, photos, or both (a photo alone is a message: spec 16 item 12).
-    const input = chatInput(rawMessage, images, MAX_MESSAGE_LEN, { codePending: codePending(situation) });
+    // 2026-11-17: past the cap only an apply ask made of known posting links (career_apply_link.ts linkListAsk), and only
+    // while the link read is on; such a turn is code's alone (every model call below refuses it: OverCapText).
+    const input = chatInput(rawMessage, images, MAX_MESSAGE_LEN, { codePending: codePending(situation),
+      ...(Deno.env.get("CAREER_APPLY_LINK") === "off" ? {} : { overCapOk: linkListAsk }) });
     if (!input.ok) return json(cors, { error: input.error }, 400);
     let { message, userContent } = input;
     const { imageBlocks } = input;
@@ -523,7 +527,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // R10 WO-D: the first real limit a model call met this turn (the global budget, its pause or window, the provider's rate
     // limit), so a turn the AI could not finish says what stopped and keeps the task instead of falling to a template (limit_stop.ts).
     let limitStop: LimitStop | null = null, limitRetryAt: number | null = null;
+    const overCap = input.overCap === true;
     const callModel: typeof spend.call = async (...a) => {
+      if (overCap) throw new OverCapText();
       try { return await spend.call(...a); } catch (e) { if (!limitStop) { limitStop = stopOfError(e); limitRetryAt = retryAtOf(e, Date.now()); } throw e; }
     };
     // 2026-10-28: this turn's cost row, always (see turnLedger): calls made, zero, or unrecorded. Written in finally, below.
@@ -1472,6 +1478,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (offerAns.comparison) agentMeta = { ...(agentMeta || {}), offer_comparison: offerAns.comparison }; // LOOP 13: the F-15 File's data
       } else if (outreachStatus) {
         out = { reply: outreachStatus.reply, intent: outreachStatus.intent, resultStatus: outreachStatus.status, contained: false, handler: "outreach_status" };
+      } else if (overCap) {
+        // A text past the cap that no code turn above answered never goes on to the brain or the router (OverCapText).
+        out = { reply: OVER_CAP_REPLY, intent: "message_too_long", resultStatus: "refused", contained: false, handler: "over_cap" };
       } else if (!careerTask && !careerBatch && !researchReplyOn(Deno.env) && researchOverAction(message) && !host.isHostControlled(message, ctx)) {
         // R10 WO-H, spec F.2 (d): company research asked with a no-action boundary while research is switched off. The specific
         // blocker, said plainly; never the batch or people-list path the router's keywords pick, and no facts from memory.

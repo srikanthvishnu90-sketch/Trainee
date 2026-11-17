@@ -880,12 +880,58 @@ async function linkApplyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | null> 
 // or read from its ATS now and stored, as linkApplyTurn does for one), then ONE batch through applyManyTurn: one card of
 // what is prepared, each application bound to its own payload hash when the card is built. At most MANY_MAX per message;
 // a link past that, one no board lists, or one no reader knows is named with its reason, never guessed at.
+// 2026-11-17 (ag/ma-09-link-list-input): a pasted list may now carry up to 1,000 links (career_apply_link.ts linkListAsk), so
+// the posting reads of one ask are bounded: at most LINK_READS_AT_ONCE in flight in all, and LINK_READS_PER_HOST on one ATS
+// API host (each family reads from its own host), the rest waiting their turn. Every link is still read (D-NO-LIMITS: this
+// bounds concurrency against the boards, never how many are read or applied to; D-SCALE: no unbounded fan-out).
+export const LINK_READS_AT_ONCE = 8, LINK_READS_PER_HOST = 4;
+// Run `run` over every item, at most `all` at once and `perHost` at once per hostOf(item); results in the items' order. A run
+// that throws gives `failed(error)` in its place.
+export function boundedAll<T, R>(items: T[], hostOf: (t: T) => string, run: (t: T) => Promise<R>, failed: (e: unknown) => R,
+  all = LINK_READS_AT_ONCE, perHost = LINK_READS_PER_HOST): Promise<R[]> {
+  const out: R[] = new Array(items.length), waiting = items.map((_, i) => i), busy = new Map<string, number>();
+  let running = 0;
+  return new Promise((resolve) => {
+    const pump = () => {
+      if (!waiting.length && !running) return resolve(out);
+      for (let k = 0; k < waiting.length && running < all;) {
+        const i = waiting[k], h = hostOf(items[i]);
+        if ((busy.get(h) ?? 0) >= perHost) { k++; continue; }
+        waiting.splice(k, 1);
+        running++;
+        busy.set(h, (busy.get(h) ?? 0) + 1);
+        Promise.resolve().then(() => run(items[i])).then((r) => { out[i] = r; }, (e) => { out[i] = failed(e); }).finally(() => {
+          running--;
+          busy.set(h, (busy.get(h) ?? 1) - 1);
+          pump();
+        });
+      }
+    };
+    pump();
+  });
+}
+// One whole-board read per board per message: a list of many links on one board (the posting's own API not answering) reads
+// that board's feed once, not once per link. A read that failed is that board's answer for this message (each of its links
+// is named unreadable, never guessed); the next message reads again.
+export function feedOncePerBoard(f: FetchFeed): FetchFeed {
+  const seen = new Map<string, ReturnType<FetchFeed>>();
+  const g: FetchFeed = (b) => {
+    const k = `${b.provider}:${String(b.board).toLowerCase()}`;
+    let p = seen.get(k);
+    if (!p) { p = Promise.resolve().then(() => f(b)); seen.set(k, p); }
+    return p;
+  };
+  const one = (f as { one?: unknown }).one;
+  if (typeof one === "function") (g as { one?: unknown }).one = one;
+  return g;
+}
 async function linksApplyTurn(o: ApplyChatDeps, many: { asks: LinkAsk[]; unread: string[] }): Promise<ApplyChatResult> {
   const take = many.asks.slice(0, MANY_MAX), over = many.asks.slice(MANY_MAX);
   const missing: Missing[] = many.unread.map((u) => ({ job_id: null, company: "", title: u, reason: "not a posting link I can read (Greenhouse, Lever or Ashby)" }));
   for (const a of over) missing.push({ job_id: null, company: "", title: a.url, reason: `one message queues at most ${MANY_MAX}; send it again` });
-  const found = await Promise.all(take.map((ask) => postingForLink({ ask, db: o.link!.db, fetchFeed: o.link!.fetchFeed, now: o.now })
-    .catch((e) => ({ kind: "unreadable" as const, why: String(e?.message ?? e) }))));
+  const fetchFeed = feedOncePerBoard(o.link!.fetchFeed);
+  const found = await boundedAll<LinkAsk, Awaited<ReturnType<typeof postingForLink>> | { kind: "unreadable"; why: string }>(take, (ask) => ask.family, (ask) => postingForLink({ ask, db: o.link!.db, fetchFeed, now: o.now }),
+    (e: any) => ({ kind: "unreadable" as const, why: String((e as Error)?.message ?? e) }));
   const list: ShortlistEntry[] = [], seen = new Set<string>();
   found.forEach((f, i) => {
     const url = take[i].url;

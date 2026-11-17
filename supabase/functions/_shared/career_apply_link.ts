@@ -57,6 +57,24 @@ export function linksAsk(message: string): { asks: LinkAsk[]; unread: string[] }
   }
   return asks.length >= 2 ? { asks, unread } : null;
 }
+// MASS APPLY CONVERSATIONS (2026-11-17, ag/ma-09-link-list-input; eval MA14: 122 pasted links were refused "message too
+// long"): the one shape of text allowed past the chat's 4,000-character cap. It must parse as an apply ask (linksAsk), and
+// every link in it must be a posting link a reader here knows (linkOf: Greenhouse, Lever or Ashby postings; never LinkedIn,
+// Indeed or Handshake); at most LINK_LIST_MAX_LINKS links of at most LINK_MAX_CHARS each, at most LINK_LIST_MAX_WORDS
+// characters of other words, LINK_LIST_MAX_CHARS in all. Anything else over the cap is refused as before (chat_input.ts). A
+// text let through here is read only by code: the turn refuses every model call (handler-career.ts), and later turns see it
+// clipped (career_brain.ts historyWindow). These bound one message's size, not how many applications a person may make
+// (D-NO-LIMITS): every link is read and screened.
+export const LINK_LIST_MAX_CHARS = 64_000, LINK_LIST_MAX_LINKS = 1_000, LINK_LIST_MAX_WORDS = 500, LINK_MAX_CHARS = 500;
+export function linkListAsk(text: string): boolean {
+  const t = String(text ?? "");
+  if (t.length > LINK_LIST_MAX_CHARS) return false;
+  const urls = t.match(URL_IN) ?? [];
+  if (urls.length < 2 || urls.length > LINK_LIST_MAX_LINKS) return false;
+  if (urls.some((u) => u.length > LINK_MAX_CHARS || !linkOf(u.replace(/[.,;:!?)\]]+$/, "")))) return false;
+  if (t.replace(URL_IN, " ").replace(/\s+/g, " ").trim().length > LINK_LIST_MAX_WORDS) return false;
+  return linksAsk(t) !== null;
+}
 export function linkOf(url: string): LinkAsk | null {
   // Never LinkedIn, Indeed or Handshake (owner rule), on any suffix or subdomain: the chat declines those before this turn.
   let host = "";

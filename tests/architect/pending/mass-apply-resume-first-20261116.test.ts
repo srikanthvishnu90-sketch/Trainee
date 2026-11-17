@@ -18,9 +18,11 @@ Deno.test("no confirmed resume: the apply ask asks for it first, nothing searche
     assert(/I need your resume/.test(r!.reply) && /Paste or attach your resume/.test(r!.reply), r!.reply);
   }
 });
-Deno.test("a resume on file, an unknown answer, or a question about applying: not this turn's", async () => {
-  eq(await turn("apply me to 50 data analyst jobs in chicago", true), null);
-  eq(await turn("apply me to 50 data analyst jobs in chicago", null), null);
+Deno.test("a resume on file or an unknown answer: never no_resume; a question about applying: not this turn's", async () => {
+  // With a resume on file (or unknown), the ask goes on as its own turn (D-092: the searched first-N ask), never "no_resume".
+  assert((await turn("apply me to 50 data analyst jobs in chicago", true))?.status !== "no_resume");
+  assert((await turn("apply me to 50 data analyst jobs in chicago", null))?.status !== "no_resume");
+  eq(await turn("apply to the Data Analyst role at Acme", true), null, "a named role not on file stays the router's");
   eq(await turn("should I apply to 50 data analyst jobs?", false), null);
   eq(await turn("how do I apply to jobs", false), null);
 });

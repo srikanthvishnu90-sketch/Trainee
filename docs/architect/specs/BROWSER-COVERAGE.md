@@ -123,3 +123,102 @@ its account page is a sign-in wall the person finishes; a closed posting is `pos
 Greenhouse's `job_app` frame is opened at the frame's own address; an employee staff sign-in form still stops the run (login_required, nothing typed) but
 carries no hand-off and is read as the form not reached. The bench paces per provider (every Recruitee subdomain is one provider). Root causes and counts:
 `docs/architect/reports/ITEM4-ROOT-CAUSES-20261112.md`.
+
+## Runner strict pass, 2026-11-16 (branch ag/runner-strict; local runs, nothing sent)
+
+Measured on the owner's machine (it reaches the boards), the committed `sample.csv`, default persona, with
+`node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --max-per-provider 20 [--answered]`. Every run:
+0 breaches, every non-GET aborted in the browser or answered inside it (simulated uploads), robots obeyed, paced per provider.
+
+**The headline and the answered column.** The headline pass gives the runner no answers to the employer's own questions, so a
+posting with one required custom question can never pass; 80 to 95 of 220 stop there ("ready if answered"). That number says
+nothing about execution. `--answered` (`scripts/browser-eval/synth-answers.cjs`) drives each posting again with a synthetic TEST
+answer to every question the runner handed back as the person's (up to three rounds) and counts the instant before Submit: whether
+the runner can put a prepared answer into the page's own control and read it back. Uploads and answers that did not fit are never
+answered. The headline is unchanged and never counts it.
+
+**Dry-run guard, proved with its first wall removed.** `tests/career-browser-strict-guard.test.cjs` takes away the stop before the
+click and lets the production runner press Submit on local pages (a native submit; a board script that fetches, beacons, opens a
+WebSocket and calls `form.submit()`): the local employer receives nothing. Without the bench's gate and page script the same test
+receives `POST /submit`. `STRICT_INIT` now also replaces `WebSocket` (a socket is not a request the gate sees).
+
+| run | trunk / head | headline pass | ready if answered | answered: reached Submit (+ upload simulated) |
+|---|---|---|---|---|
+| base-sample | trunk 9b177617 | 7 | 79 | not measured |
+| r1-sample | 88e04167 (Personio fix) | 7 | 95 | 36 (+8) |
+| r2-sample | 653b5824 (all fixes) | 6 | 82 | 32 (+10), load average 30 to 57: 22 page loads timed out |
+| r3 (Ashby, Personio, Teamtailor re-run at concurrency 3) | 653b5824 | 1 | 32 of 60 | 10 of 60; Personio 16 now stop at its Turnstile, handed off |
+
+Failure classes of the base run (220): custom question unanswered 79; shown or in-form check 36 (SmartRecruiters DataDome 19,
+BambooHR 17); form not found 26 (Personio 19: its Submit is disabled until valid, fixed; Workday 4: the guest start is a POST the dry
+run blocks); the person's agreement / upload / EEO 22 (Teamtailor consent 16); Workday sign-in hand-off 13; closed 23 (404/410 9,
+board says closed 11, sent to job list 3); upload simulated but not taken (Greenhouse Attach) 3; host unreachable 3; other 4.
+
+Execution failures the answered column found and this branch fixed (each with a fixture test that fails on its parent):
+Personio's disabled-until-valid Submit and `(erforderlich)` required marks (19); a box and a choice under one label (Ashby's
+Phone over the texting consent: 5); a dropdown's floating list (Ashby); a Submit held by an unissued invisible Turnstile is that
+check, handed off (Personio); Teamtailor's `candidate[resume_remote_url]` box carrying the stored resume (9); a styled radio /
+tick box whose input takes no click at its point (8). Two of these move the answered column less than their count on the live run:
+Ashby's iwoca dropdown still reads no options (its list is not a `role=listbox`; the fixture's is), and Teamtailor's next stop
+after the resume box is a page-set "Search" / "Sök" value (the job id) and its `range-custom_number` box.
+
+Left, named: Workable's drawn Yes/No radios read back unheld after a full form (11); Greenhouse react-select boxes in other
+languages whose options do not open or match (9); Breezy page-set hidden controls with no label (2) and its `salaryCurrency` (3);
+the Greenhouse `Attach` upload under simulation (3); BambooHR's repeated Apply control (3).
+
+**Throughput (one runner process, `scripts/browser-eval/throughput.cjs`, mock employer, 8-core 8 GB machine under a load average of
+14 to 38 from other sessions, so low):** concurrency 1: 12 to 15 apps/min, p50 4.0 to 4.4 s; 4: 52; 8: 48 to 96; 16: 45 (CPU-bound
+under that load). Of a single application's 4.0 s, 2.3 s is the pre-click guard (the 2 s shown-check settle window, round 2); with
+it at 0 the same lane does 22.5 apps/min. On real postings a run that reached Submit took p50 23 s (load 9.5 s including the
+per-provider pace, fill 1.6 s, guard 2.5 s). The apply VM has no per-person serial cap (the claim widens each person's share when
+fewer people are queued) and no host cap unless the owner sets one; the limits are memory (about 450 MB a context) and each
+portal's own refusals.
+
+### Round 2 (architect rulings of 2026-11-16), measured in CI (`browser-bench`, branches `bench/browser-strict-r2` / `-r3`, never a PR)
+
+Rulings applied: the apply VM drives Ashby (migration `20261116150000`, not applied live); the dry run stays strict (Personio's
+Turnstile is a handed-off wall); open postings only (each row re-checked at the start of its run, closed rows reported apart);
+`checkSettleMs` unchanged. CI 44021741347 measured head dd0672e8, CI 44026400136 head 951df0b3 (Teamtailor job_id and slider, Workable
+drawn radio, Greenhouse react-select chips, the simulated upload's progress events). "Answered" counts reached Submit, with the
+upload simulated in brackets.
+
+| provider | sample: headline, r2 → r3 | sample answered, r2 → r3 | held-out headline, r2 → r3 | held-out answered, r2 → r3 |
+|---|---|---|---|---|
+| ashby | 1 → 1 | 11 → 12 | 2 → 2 | 13 → 13 |
+| breezy | 0 → 0 | 1 (+8) → 1 (+8) | 0 → 0 | 0 (+10) → 0 (+10) |
+| greenhouse | 0 → 0 | 0 → 0 (+13) | 1 → 0 | 1 → 0 (+14) |
+| lever | 5 → 5 | 19 → 18 | 5 → 5 | 12 → 12 |
+| recruitee | 0 → 0 | 2 → 1 | 0 → 0 | 0 → 0 |
+| teamtailor | 0 → 0 | 0 → 0 (+3) | 0 → 0 | 0 → 0 (+8) |
+| workable | 1 → 1 | 1 → 1 (+7) | 0 → 0 | 0 (+2) → 0 (+7) |
+| bamboohr, personio, smartrecruiters, workday | 0 | 0 (bot check / sign-in walls, handed off) | 0 | 0 |
+| **all 220** | **7 → 7** | **34 (+8) → 33 (+31)** | **8 → 7** | **26 (+12) → 25 (+39)** |
+| open only | 7 / 196 | 34 (+8) → 33 (+31) of 196 | 8 / 191 | 26 (+12) → 25 (+39) of 191 |
+
+Closed: 24 of the sample (9 at the start of the run) and 29 of the held-out (13 at the start). The headline (no custom answers) stays
+where it was by construction; the answered column is where execution shows: 42 → 64 of 220 (sample) and 38 → 64 (held-out) reach the
+instant before Submit once answered. Left after r3, by count: Recruitee phone reformats with other digits (`value_changed_by_page`,
+11 to 16), Workable steps with no Submit word (`no_submit_control`, 3 to 4), Breezy unnamed page flags (fixed after r3, aea3d3a7) and
+`salaryCurrency`, Ashby's own dropdown in the live page (still `options_not_readable`).
+
+### Round 3, measured in CI 44032519757 (head ed96caa6, branch `bench/browser-strict-r4`, never a PR)
+
+Round 3 fixes: Recruitee's phone box reset to a bare dial code is set again and read back by its digits; Breezy's unnamed page flag is
+page data; an unlabelled shown control is named by its heading ("Desired Salary (select-one)"); the answered column confirms a page-set
+value as shown. Answered = reached Submit (+ upload simulated).
+
+| provider | sample headline r3 → r4 | sample answered r3 → r4 | held-out headline r3 → r4 | held-out answered r3 → r4 |
+|---|---|---|---|---|
+| ashby | 1 → 1 | 12 → 12 | 2 → 2 | 13 → 12 |
+| breezy | 0 → 0 | 1 (+8) → 1 (+16) | 0 → 0 | 0 (+10) → 0 (+16) |
+| greenhouse | 0 → 0 | 0 (+13) → 0 (+12) | 0 → 0 | 0 (+14) → 0 (+13) |
+| lever | 5 → 5 | 18 → 19 | 5 → 5 | 12 → 12 |
+| recruitee | 0 → 0 | 1 → 4 | 0 → 5 | 0 → 13 |
+| teamtailor | 0 → 0 | 0 (+3) → 0 (+5) | 0 → 0 | 0 (+8) → 1 (+9) |
+| workable | 1 → 1 | 1 (+7) → 1 (+7) | 0 → 0 | 0 (+7) → 0 (+8) |
+| **all 220** | **7 → 7** | **33 (+31) → 37 (+40)** | **7 → 12** | **25 (+39) → 38 (+46)** |
+
+Open only: sample 7 / 196 headline, 37 (+40) answered; held-out 12 / 191 headline, 38 (+46) answered. D-072: 173 and 172 of 220.
+Left: Workable `no_submit_control` (3 and 4; not reproduced locally: the same postings reach Submit in a local dry run), Ashby's own
+dropdowns (an `ashby-application-form-input-autocomplete` list that drew no options after typing in a local dry run; no request was
+made), Recruitee 8 sample `field_not_filled`, Greenhouse 1 to 2. Throughput not re-measured: the machine's load average stayed 14 to 106.

@@ -21,13 +21,13 @@ const page = (mode) => `<!doctype html><html><body><h1>Apply</h1><form action="/
 <label for="p">Phone number *</label><input id="p" type="tel" name="candidate.phone" required><label for="cv">CV</label><input id="cv" type="file" name="candidate.cv">
 <button type="submit">Send</button></form><script>
 let done = false; const ph = document.getElementById("p");
-ph.addEventListener("input", () => { if (done) return; done = true; setTimeout(() => { ph.value = ${JSON.stringify(mode === "reset" ? "+31" : "+31 20 555 0199")}; }, 400); });
+ph.addEventListener("input", () => { if (done) { ${mode === "strip" ? 'setTimeout(() => { const v = ph.value; if (/^\\+1[\\s-]/.test(v)) ph.value = v.replace(/^\\+1[\\s-]*/, ""); }, 50);' : ""} return; } done = true; setTimeout(() => { ph.value = ${JSON.stringify(mode === "rewrite" ? "+31 20 555 0199" : "+31")}; }, 400); });
 </script></body></html>`;
 let server, base, browser, resume, rsha;
 const posts = [];
 before(async () => {
   if (skip) return;
-  server = http.createServer((req, res) => { if (req.method !== "GET") { posts.push(req.url); return res.writeHead(200).end("ok"); } res.writeHead(200, { "content-type": "text/html" }).end(page(req.url.includes("rewrite") ? "rewrite" : "reset")); });
+  server = http.createServer((req, res) => { if (req.method !== "GET") { posts.push(req.url); return res.writeHead(200).end("ok"); } res.writeHead(200, { "content-type": "text/html" }).end(page(req.url.includes("rewrite") ? "rewrite" : req.url.includes("strip") ? "strip" : "reset")); });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${server.address().port}`;
   resume = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ph-")), "resume.pdf"); fs.writeFileSync(resume, "%PDF-1.4 TEST\n"); rsha = sha256(fs.readFileSync(resume));
@@ -49,5 +49,13 @@ test("a phone box reset to a bare dial code is set again and read back: the form
 test("a phone box the page rewrote to other digits is still refused; never pressed", { skip, timeout: 60000 }, async () => {
   const { r, reached } = await run("rewrite");
   assert.equal(reached, 0); assert.equal(r.reason, "field_not_filled", JSON.stringify(r));
+  assert.deepEqual(posts, []);
+});
+
+// Review probe p11-phone-reset-country (2026-11-17): on the re-set the widget keeps its own country and strips the approved "+1",
+// leaving "312 555 0100" with no dial code shown. That is not the approved number read back: refused, nothing posted.
+test("a re-set the widget strips of the approved country code is not the approved phone: refused; never pressed", { skip, timeout: 60000 }, async () => {
+  const { r, reached } = await run("strip");
+  assert.equal(reached, 0, JSON.stringify(r)); assert.equal(r.reason, "field_not_filled", JSON.stringify(r));
   assert.deepEqual(posts, []);
 });

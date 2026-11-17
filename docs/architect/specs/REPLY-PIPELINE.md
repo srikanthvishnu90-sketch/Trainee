@@ -24,9 +24,12 @@ The fix is for the drafting model to say which unit each sentence rests on, and 
        names as a known ATS board (Workday, Greenhouse, Lever, Ashby, SmartRecruiters, Workable and so on), or as a host the posting's
        own text names, else "... at <Employer>" in its title, else to no one. A job board or aggregator (simplify.jobs, joinhandshake,
        wellfound, builtin, ziprecruiter, levels.fyi) never owns a posting. A year in the title names the role and dates no figure only
-       while it is current by the turn's clock (`new Ledger(now)`, `titleYearsCurrent`). A season counts until it ends: Summer
-       to Aug 31, Fall to Dec 31, Spring to Jun 30, Winter to Mar 31; a bare year to Dec 31. "Summer 2023", or "Summer 2026" read in
-       November 2026, still dates the figure (rounds 10 and 11 of #849);
+       while it is current by the turn's clock (`new Ledger(now)`, `titleYearsCurrent`). Each year (four digits, or "'26") goes
+       with the season word nearest it anywhere in the title ("2026 Summer Internship", "Summer Internship 2026"). A season counts
+       until it ends: Summer to Aug 31, Fall to Dec 31, Spring to Jun 30, Winter to Mar 31; a bare year to Dec 31. A title whose period
+       has ended dates the unit's figures however its year is written: a claim on it must carry that year (rounds 10 to 12 of #849).
+       A role named without the season its title adds ("Software Engineer Intern" for "... - Summer 2027") is the same name, and a
+       posting's state unit is read as one sentence, so its role stays with its deadline;
      - its deadline and state;
      - a search's count;
      - requirements;
@@ -74,7 +77,9 @@ The fix is for the drafting model to say which unit each sentence rests on, and 
      layer A; the clause still goes to the judge.
    - An employer that no unit names ("Stripe's internship is in Seattle", when no tool result names Stripe) is a subject too, and is
      carried like any other: "It pays $60 an hour" after it never stands on another employer's unit (round 10 of #849). It never
-     stands on a unit that names no one either (round 11). It must be a name: a sentence's first word that is a function word or an
+     stands on a unit that names no one either (round 11). A name is known only as a posting's or a page's owner: a name some unit
+     merely mentions (a record line "Intern at Stripe", a page naming Stripe in passing) is such a subject too, and may rest only on a
+     unit that names it as its employer. A carried subject never rests on a posting record whose employer code cannot tell (round 12). It must be a name: a sentence's first word that is a function word or an
      imperative opener ("Don't", "Never", "Please", "Also", "Politely") names no one. The object of advice ("Lead with Pixelforge")
      is not carried.
    - What is sent is what was verified: a dropped sentence changes what the next one refers back to, so the check runs again on what

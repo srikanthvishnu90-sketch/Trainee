@@ -21,7 +21,7 @@ import { ADVICE_CLAIM, bare, clausesOf, findSupport, hardParts, indexPages, judg
 export const PIPELINE = { on: true };
 export const isTagged = (t: string) => /\[E\d+(?:\s*,\s*E\d+)*\]/.test(String(t ?? ""));
 export type EvidenceKind = "page" | "chat" | "record" | "absent";
-export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[] }
+export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[]; posting?: boolean; dated?: string[] }
 
 // Units a tool added this turn (pages, posting records, counts): the turn rests on evidence only when it has one. Lines carried from
 // earlier replies, the person's record and what it lacks do not make a turn an evidence turn.
@@ -30,7 +30,7 @@ export class Ledger {
   units: EvidenceUnit[] = [];
   // The turn's clock (PROCESS rule 6): a year in a posting's title names the role only when it is this year or later.
   constructor(readonly now: number = Date.now()) {}
-  add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[] } = {}): string {
+  add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[]; posting?: boolean; dated?: string[] } = {}): string {
     const t = String(text ?? "").replace(/\s+/g, " ").trim();
     if (!t) return "";
     const had = this.units.find((u) => u.kind === kind && u.text === t && (u.url ?? null) === (meta.url ?? null));
@@ -64,12 +64,15 @@ export class Ledger {
       // (round 11: a season or term counts until it ends: Summer to Aug 31, Fall or Autumn to Dec 31, Spring to Jun 30, Winter to Mar 31;
       // a bare year to Dec 31. "Summer 2026" read in November 2026 is over, so it dates the figure)
       const named = typeof p?.title === "string" && p.title.trim() && titleYearsCurrent(p.title, this.now) ? [p.title.trim()] : [];
+      // (round 12: a title whose period has ended dates the unit's figures however its year is written, "2026 Summer Internship":
+      // a claim on it must carry that year)
+      const dated = typeof p?.title === "string" && !titleYearsCurrent(p.title, this.now) ? [...new Set([...p.title.matchAll(/(?<!\d)((?:19|20)\d\d)(?!\d)|['’](\d\d)(?!\d)/g)].map((m: RegExpMatchArray) => m[1] ?? `20${m[2]}`))] : [];
       // (the posting's own places, so layer A reads "Chicago, IL" there as a place, never as an owner)
       const places = [p?.location, ...String(p?.pay ?? "").split(/;\s*/).map((x: string) => /^([^:]+):/.exec(x)?.[1])].filter((x): x is string => typeof x === "string" && /,/.test(x)).map((x) => x.trim());
-      if (typeof p?.pay === "string" && p.pay.trim()) for (const part of p.pay.split(/;\s*/)) ids.push(this.add("chat", `${who}${p?.location ? ` (${p.location})` : ""}: pay ${part.trim()}`, { url, source: name, places, owner: company, named }));
+      if (typeof p?.pay === "string" && p.pay.trim()) for (const part of p.pay.split(/;\s*/)) ids.push(this.add("chat", `${who}${p?.location ? ` (${p.location})` : ""}: pay ${part.trim()}`, { url, source: name, places, owner: company, named, posting: true, dated }));
       const dl = [p?.deadline, p?.closes, p?.close_date].find((x) => typeof x === "string" && x.trim());
       const st = typeof p?.state === "string" ? p.state : null;
-      if (st || dl) ids.push(this.add("chat", `${who}: the posting is ${st ?? "listed"}${dl ? `; it closes ${dl}` : ""}.`, { url, source: name, owner: company, named }));
+      if (st || dl) ids.push(this.add("chat", `${who}: the posting is ${st ?? "listed"}${dl ? `; it closes ${dl}` : ""}.`, { url, source: name, owner: company, named, posting: true, dated }));
     }
     if (Array.isArray(o.postings)) ids.push(this.add("chat", `The search (${name}) returned ${o.postings.length} posting${o.postings.length === 1 ? "" : "s"}.`, { source: name }));
     // Round 3 of #849: a requirement or a sign-in note belongs to its posting's employer, and says so in its text.
@@ -119,10 +122,17 @@ export class Ledger {
   }
 }
 const SEASON_END: Record<string, [number, number]> = { summer: [7, 31], fall: [11, 31], autumn: [11, 31], spring: [5, 30], winter: [2, 31] };
+// Round 11/12 of #849 (N3): each year in the title (four digits, or "'26") goes with the season word nearest it anywhere in the title,
+// before or after ("Summer 2026", "2026 Summer Internship", "Summer Internship 2026", "Summer '26"); with no season it runs to Dec 31.
+// The title counts as current only while every such period has not ended by the turn's clock.
 export function titleYearsCurrent(title: string, now: number): boolean {
-  return [...String(title).matchAll(/(?:(summer|fall|autumn|spring|winter)\s*[-–,]?\s*)?(?<!\d)((?:19|20)\d\d)(?!\d)/giu)].every((m) => {
-    const [mo, d] = SEASON_END[(m[1] ?? "").toLowerCase()] ?? [11, 31];
-    return Date.UTC(Number(m[2]), mo, d, 23, 59, 59) >= now;
+  const t = String(title);
+  const seasons = [...t.matchAll(/(?<![\p{L}])(summer|fall|autumn|spring|winter)(?![\p{L}])/giu)].map((m) => ({ at: m.index!, s: m[1].toLowerCase() }));
+  const years = [...t.matchAll(/(?<!\d)((?:19|20)\d\d)(?!\d)|['’](\d\d)(?!\d)/gu)].map((m) => ({ at: m.index!, y: m[1] ? Number(m[1]) : 2000 + Number(m[2]) }));
+  return years.every(({ at, y }) => {
+    const near = seasons.slice().sort((a, b) => Math.abs(a.at - at) - Math.abs(b.at - at))[0];
+    const [mo, d] = near ? SEASON_END[near.s] : [11, 31];
+    return Date.UTC(y, mo, d, 23, 59, 59) >= now;
   });
 }
 const hostOf = (u: unknown) => { try { return typeof u === "string" ? new URL(u).hostname : null; } catch { return null; } };
@@ -255,16 +265,18 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   // Round 10 of #849: an employer the turn does not know ("Stripe's internship is in Seattle" when no tool result names Stripe) is a
   // subject too: read as a page reads one (unitNames: "X's", "X pays", "at X"), and found in no unit at all. It is carried like any
   // other, so "It pays $60 an hour" after it never stands on another employer's unit.
-  const allText = ledger.units.map((u) => u.text).join("\n");
   // (round 11: a name, never a capitalised function word or an imperative opener read as one: "Don't ask…", "Never…", "Politely…",
   // "Also…" name no one; a single word that opens the sentence counts only when it is none of those classes)
   const unknownIn = (t: string): string | null => unitNames({ id: "", kind: "page", text: t, host: null }, true).find((w) => {
-    if (owners.some((x) => nameFoundIn(x, w) || nameFoundIn(w, x)) || nameFoundIn(w, allText) || SOURCE.test(w)) return false;
+    if (owners.some((x) => nameFoundIn(x, w) || nameFoundIn(w, x)) || SOURCE.test(w)) return false;
     const opens = bare(t).replace(/^["'“‘(]+/, "").toLowerCase().startsWith(w.toLowerCase());
     return !(opens && !/\s/.test(w) && FUNCTION_OPENER(w));
   }) ?? null;
   // (round 11, N4: an employer no unit names stands on no unit: a sentence carried from it never rests on a unit that names no one)
-  const unknownSubject = (w: string | null) => !!w && !owners.some((x) => x === w) && !nameFoundIn(w, allText);
+  // (round 12, B1: a name is known only as a posting's or a page's owner, never because some unit's text mentions it, a record line
+  // "Intern at Stripe" or a page naming Stripe in passing; such a subject may rest only on a unit that names it as its employer)
+  const unknownSubject = (w: string | null) => !!w && !owners.some((x) => x === w);
+  const namesAsEmployer = (u: EvidenceUnit, w: string) => !u.owner && unitNames({ ...u, kind: "page", host: null }, true).some((n) => nameFoundIn(w, n) || nameFoundIn(n, w));
   // (a sentence code does not check, a question or a caveat, still names what the next one refers back to)
   // (`unknown`: an advice sentence's object, "Lead with Pixelforge", is not a subject; only a statement carries an unknown employer)
   const carryPast = (t: string, unknown = true) => { const m = mentioned(t); if (m.length) carried = m.length === 1 ? m[0] : null; else if (unknown) { const u = unknownIn(t); if (u) carried = u; } };
@@ -332,15 +344,19 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
       carried = subject;
       // (a carried subject may not rest on a line from an earlier reply whose owner is unknown: it may be another employer's; a soft
       // subject may rest on a unit that names no employer, and the judge is shown the subject)
+      // (round 12: an unknown subject rests only on a unit that names it as its employer; a carried subject never rests on a posting
+      // record whose employer code cannot tell, which is some other employer's posting)
       const allowedUnits = units.filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") &&
-        (mine(u, subject) || (!!subject && !ownSubj && !unknownSubject(subject) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0)));
+        (unknownSubject(subject) ? namesAsEmployer(u, subject!) :
+          mine(u, subject) || (!!subject && !ownSubj && !u.owner && !u.posting && (anyNamed.get(u.id) ?? []).length === 0)));
       if (!allowedUnits.length) return fail(a, b, text, subject ? `no cited unit is about ${subject}` : "it names no employer, and every unit that could hold it is one employer's", subject);
       checks.push({ a, b, clause: c, units: allowedUnits, claim: text, subject, soft: !ownSubj, untagged: !ids.length });
     }
   }));
   // Layer A: each clause against an index of the units it cites, a record unit read as one record (a fact per line).
   const asks: { k: number; claim: string; source: string }[] = [];
-  const indexOf = (us: EvidenceUnit[]) => indexPages(us.map((u) => ({ text: u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : "The person's confirmed record:", places: u.places ?? [], named: u.named ?? [], lend: u.kind === "chat" && u.owner && u.source !== "an earlier reply in this chat" ? u.owner : null, ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
+  // (round 12: a posting's state unit is read as one sentence, "… is open and closes …", so the role it names stays with its deadline)
+  const indexOf = (us: EvidenceUnit[]) => indexPages(us.map((u) => ({ text: u.posting ? u.text.replace(/; it closes /, " and closes ") : u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : "The person's confirmed record:", places: u.places ?? [], named: u.named ?? [], lend: u.kind === "chat" && u.owner && u.source !== "an earlier reply in this chat" ? u.owner : null, ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
   // Round 8 of #849: the judge always reads a clause with its subject, named or carried ("PayPal: It requires a clearance").
   const withSubject = (c: { clause: string; subject?: string | null }) => `${c.subject && !nameFoundIn(c.subject, c.clause) ? `${c.subject}: ` : ""}${c.clause}`;
   checks.forEach((c, k) => {
@@ -400,6 +416,8 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     }
     if (!f) { const miss = missingSpecifics(c.clause, c.units); failures.push({ sentence: c.claim, reason: c.untagged ? "it states a fact and cites no evidence unit, and no unit holds it" : miss.length ? miss.map((m) => `'${m}' is in no cited unit`).join("; ") : `no single cited unit holds "${c.clause}"`, subject: c.subject ?? null }); bad.add(`${c.a}:${c.b}`); return; }
     const held = c.units[f.page]; // indexPages makes one page per cited unit, in order
+    const stale = (held?.dated ?? []).filter((y) => !c.clause.includes(y) && !c.clause.includes(`'${y.slice(2)}`) && !c.clause.includes(`’${y.slice(2)}`));
+    if (stale.length) { failures.push({ sentence: c.claim, reason: `the unit that holds "${c.clause}" is for a period that has ended (${stale.join(", ")}); the sentence must say so`, subject: c.subject ?? null }); bad.add(`${c.a}:${c.b}`); return; }
     const unitOwner = held?.owner ?? null;
     if (c.subject && (unitOwner ? unitOwner !== c.subject : !c.soft && !nameFoundIn(c.subject, f.unit.passage))) { failures.push({ sentence: c.claim, reason: `the unit that holds "${c.clause}" is not about ${c.subject}`, subject: c.subject }); bad.add(`${c.a}:${c.b}`); return; }
     // (an untagged sentence a unit supports keeps that unit's source link, as a tagged one does)

@@ -344,7 +344,9 @@ function namesOk(claim: Hard, unit: { hard: Hard; lower: Set<string>; lent?: str
   // Round 3: on a page code knows is one asked employer's (indexPages `owner`), that employer's name is the page's, not the claim's.
   const lent = unit.lent ? unit.lent.toLowerCase().split(/\s+/).map((w) => w.replace(/[.'-]+$/, "").replace(/'s$/, "")) : null;
   const runs = unit.hard.names, alt = runs.length && unit.hard.first && runs[0][0] === unit.hard.first ? [runs[0].slice(1), ...runs.slice(1)].filter((r) => r.length) : runs;
-  const has = (r: string[]) => [...runs, ...alt].some((u) => u.length === r.length && u.every((w, k) => w === r[k]));
+  // (round 12 of #849: a role named without the season its title adds, "Software Engineer Intern" for "Software Engineer Intern -
+  // Summer 2027", is the same name: the unit's run may end in season words the claim leaves out)
+  const has = (r: string[]) => [...runs, ...alt].some((u) => (u.length === r.length || u.length > r.length && u.slice(r.length).every((w) => /^(?:summer|fall|autumn|spring|winter)$/.test(w))) && r.every((w, k) => w === u[k]));
   let proper = 0;
   const loose: string[][] = [];
   for (const [k, r0] of claim.names.entries()) {

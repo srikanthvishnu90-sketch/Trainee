@@ -299,11 +299,12 @@ export function applyPersonaOrder(resume0: any, lead: string[]): any {
 // or none is, or the section has fewer than SPLIT_MIN entries, the single section stays. Entries and lines move whole, never
 // changed; the other sections keep their places.
 //
-// The judgement (architect direction after review rv3: structured skill overlap only; the "kind of work" word lists let a
-// go-to-market role recur as relevant and counted "data entry" as data work): an entry is relevant when a skill or tool it names
-// (CareerTailor.skillsInText over its own title, text, bullets and listed skills) is one the posting's own requirements or skills
-// name (parseJD's must-have and nice-to-have skills), a framework counting for its language (React for JavaScript). If the posting
-// names no skills, or no entry names any, there is no judgement and no split.
+// The judgement (architect rulings after reviews rv3 and rv5: STRUCTURED skills only, no skill detection over an entry's free
+// text: "Spring 2025", "Go–to–Market", "R&D" and "used Go to build" never decide it): an entry is relevant when one of its
+// structured skills (the skills listed on the entry itself, and each skill of the resume's skills section bound to that entry by
+// its evidence) is one the posting's parsed requirements or skills name (parseJD's must-have and nice-to-have skills, unchanged),
+// a framework counting for its language (React for JavaScript). If the posting names no skills, or no entry has structured
+// skills, there is no judgement and no split.
 const FAMILY: Record<string, string[]> = {
   javascript: ["react", "node.js", "nodejs", "vue", "angular", "next.js", "typescript", "express"], python: ["django", "flask", "pandas", "numpy", "fastapi", "pytorch"],
   java: ["spring", "kotlin"], sql: ["postgresql", "postgres", "mysql", "sqlite"],
@@ -316,9 +317,7 @@ export function relevantTo(jd: any, profile: any, factIds: string[]): Set<string
   if (!wanted.size) return out;
   for (const id of factIds) {
     const f = CareerProfile.getFact(profile, id);
-    // Review rv4: the entry's skills go through the posting's own guard for ambiguous tokens (Go, R, Spring, Spark), so
-    // "Go-to-Market", "go live" and "R&D" are no Go or R (CareerTailor.skillsInContext).
-    if (f && entrySkills(f).some((x: string) => wanted.has(x.toLowerCase()))) out.add(id);
+    if (f && entrySkills(f, profile).some((x) => wanted.has(x))) out.add(id);
   }
   return out;
 }
@@ -348,9 +347,13 @@ export function submissionResume(resume: any): any {
 
 // ---------------------------------------------------------------- the changelog (from the diff only)
 const wantedOf = (jd: any) => [...(jd.mustHaveSkills || []), ...(jd.niceToHaveSkills || [])];
-// An entry's skills (review rv4): its title, text and bullets through the posting's own guard for ambiguous tokens, and its
-// listed skills, where an item that is the skill itself counts.
-const entrySkills = (f: any): string[] => CareerTailor.skillsInContext(`${f?.title || ""} ${f?.text || ""} ${(f?.bullets || []).join(" ")}`, (f?.skills || []).map(String));
+// An entry's STRUCTURED skills, lower case (review rv5): the skills listed on the entry, and the name of each skill fact whose
+// evidence names this entry. Nothing is read from its title, text or bullets.
+const entrySkills = (f: any, profile: any): string[] => {
+  const bound = (profile?.facts || []).filter((x: any) => x?.kind === "skill" && Array.isArray(x.evidence) && x.evidence.some((e: any) => String(e?.factId ?? e?.id ?? e) === String(f?.id)))
+    .flatMap((x: any) => [x.name, ...(x.skills || [])]);
+  return [...new Set([...(f?.skills || []), ...bound].filter((x) => typeof x === "string" && x.trim()).map((x: string) => x.trim().toLowerCase()))];
+};
 const corpusOf = (f: any) => `${f?.title || ""} ${f?.text || ""} ${(f?.bullets || []).join(" ")} ${(f?.skills || []).join(" ")}`;
 const skillsOfLine = (t: string) => String(t || "").replace(/^technical skills:\s*/i, "").split(/,\s*/).map((x) => x.trim()).filter(Boolean);
 const list = (xs: string[], max = 3) => xs.length <= max ? xs.join(", ") : `${xs.slice(0, max).join(", ")} and ${xs.length - max} more`;
@@ -396,7 +399,7 @@ function selectionChangelog(o: { diff: any; base: any; tailored: any; profile: a
     const kind = inDiff("moved", firstT.text) ? "moved" : inDiff("added", firstT.text) ? "added" : null;
     if (kind) {
       const f = CareerProfile.getFact(o.profile, firstT.factIds[0]);
-      const shows = entrySkills(f).filter((s: string) => wanted.includes(s.toLowerCase()));
+      const shows = CareerTailor.skillsInText(corpusOf(f)).filter((s: string) => wanted.includes(s.toLowerCase()));
       const why = o.persona && !shows.length ? `, as your ${o.persona} persona leads` : shows.length ? `, which shows ${list(shows)} from the posting` : "";
       items.push({ kind: "lead", text: `led with ${titleOf(f)}${why}`, diff: kind, line: firstT.text });
     }
@@ -405,7 +408,7 @@ function selectionChangelog(o: { diff: any; base: any; tailored: any; profile: a
   for (const l of entries(o.base)) {
     if (!inDiff("removed", l.text)) continue;
     const id = l.factIds[0], f = CareerProfile.getFact(o.profile, id);
-    const named = entrySkills(f).some((s: string) => rawSkills.has(s.toLowerCase()));
+    const named = CareerTailor.skillsInText(corpusOf(f)).some((s: string) => rawSkills.has(s.toLowerCase()));
     const why = o.hidden.includes(id) ? `, which your ${o.persona} persona leaves out` : named ? "" : ", which this posting doesn't ask for";
     items.push({ kind: "drop", text: `dropped ${titleOf(f)}${why}`, diff: "removed", line: l.text, name: titleOf(f), why });
   }

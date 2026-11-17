@@ -18,10 +18,14 @@ const PERSONA: { setup: string[] } = JSON.parse(Deno.readTextFileSync(new URL("p
 const NOW = Date.parse("2026-11-16T15:00:00Z");
 const text = (t: string) => ({ content: [{ type: "text", text: t }], stop_reason: "end_turn" });
 const use = (name: string, input: unknown, id = "t1") => ({ content: [{ type: "tool_use", id, name, input }], stop_reason: "tool_use" });
+// Architect ruling (review rv5): the split reads STRUCTURED skills only (an entry's listed skills, or a skills-section skill bound
+// to it), never skills found in its free text. Resume ingest gives no entry structured skills, so these fixtures state each
+// entry's skills as structured data (bindSkills); every assertion below is unchanged.
+const bindSkills = (profile: any, by: Record<string, string[]>) => { for (const f of profile.facts) { const k = Object.keys(by).find((x) => f.kind === "experience" && String(f.text).startsWith(x)); if (k) f.skills = by[k]; } return profile; };
 function personaProfile() {
   const ctx: any = { now: NOW, thread: {} };
   for (const s of PERSONA.setup.slice(0, 2)) CareerRouter.handleChat(s, ctx);
-  return ctx.profile;
+  return bindSkills(ctx.profile, { "Pixelforge": ["React", "JavaScript"], "Crestline Partners": ["Python"] });
 }
 
 Deno.test("CU-2 C10: a tailored resume splits experience into Relevant then Additional Experience, each newest first", async () => {
@@ -67,7 +71,7 @@ Deno.test("CU-2 C10: a tailored resume splits experience into Relevant then Addi
 Deno.test("CU-2b the split reads whole words and stack; the changelog says it only when the printed file shows it", async () => {
   const facts = [
     { id: "e1", kind: "experience", text: "Northwind, Marketing Lead (2025 - present): campaigns and partner launches." },
-    { id: "e2", kind: "experience", text: "Acme, Backend Engineer (2023-2024): built services in Go and Kubernetes." },
+    { id: "e2", kind: "experience", text: "Acme, Backend Engineer (2023-2024): built services in Go and Kubernetes.", skills: ["Go", "Kubernetes"] },
     { id: "e3", kind: "experience", text: "Bluebird, Co-founder (2022): youth-sports management software." },
     { id: "e4", kind: "experience", text: "Cafe Uno, Barista (2021)." },
   ];
@@ -115,7 +119,7 @@ Kestrel Analytics, Data Analyst Intern (2024): SQL dashboards in Tableau; weekly
 Northfield Library, Data Entry Assistant (2023): entered catalog data.
 Maple Cafe, Barista (2022 - 2023): served customers; trained new staff.
 Campus Research Lab, Research Assistant (2023): user research interviews and a literature review.`;
-const profileFrom = (resume: string) => { const ctx: any = { now: NOW, thread: {} }; CareerRouter.handleChat(`Here's my resume:\n${resume}`, ctx); CareerRouter.handleChat("Yes, that's my resume", ctx); return ctx.profile; };
+const profileFrom = (resume: string) => { const ctx: any = { now: NOW, thread: {} }; CareerRouter.handleChat(`Here's my resume:\n${resume}`, ctx); CareerRouter.handleChat("Yes, that's my resume", ctx); return bindSkills(ctx.profile, { "Corvid Labs": ["Java", "Spring", "AWS"], "Kestrel Analytics": ["SQL", "Tableau"] }); };
 
 Deno.test("CU-2c structured skill overlap only: the one judgement for the split and the changelog; no skills, no split", async () => {
   const profile = profileFrom(RES);

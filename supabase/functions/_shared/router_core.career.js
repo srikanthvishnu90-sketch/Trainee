@@ -2021,27 +2021,6 @@ const CareerTailor = (() => {
     }
     return segments.filter((sg) => sg.text || sg.kind !== "intro");
   }
-  const NOT_SKILL_AFTER = { Go: /^(?:\s*-\s*|\s+)(?:to|live|getter)\b/i, R: /^\s*&/ };
-  const NOT_SKILL_BEFORE = { R: /&\s*$/ };
-  function ambiguousInContext(skill, text) {
-    const s = String(text || ""), low = s.toLowerCase(), needle = skill.toLowerCase();
-    const re = new RegExp(`(?<![a-z0-9+#])${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9+#])`, "gi");
-    for (const m of s.matchAll(re)) {
-      const after = s.slice(m.index + m[0].length), before = s.slice(0, m.index);
-      if (NOT_SKILL_AFTER[skill] && NOT_SKILL_AFTER[skill].test(after)) continue;
-      if (NOT_SKILL_BEFORE[skill] && NOT_SKILL_BEFORE[skill].test(before)) continue;
-      const win = low.slice(Math.max(0, m.index - 70), m.index + needle.length + 70);
-      if (TECH_CONTEXT.test(win) || skillsInText(win).some((x) => x !== skill && !AMBIGUOUS_SKILLS.has(x))) return true;
-    }
-    return false;
-  }
-  function skillsInContext(text, listed) {
-    const out = skillsInText(text).filter((x) => !AMBIGUOUS_SKILLS.has(x) || ambiguousInContext(x, text));
-    for (const k of listed || []) {
-      for (const x of skillsInText(k)) if (!out.includes(x) && (!AMBIGUOUS_SKILLS.has(x) || String(k).trim().toLowerCase() === x.toLowerCase() || ambiguousInContext(x, k))) out.push(x);
-    }
-    return out;
-  }
   function sentencesOf(text) { return String(text || "").split(/(?<=[.;])\s+/).map((x) => x.trim()).filter(Boolean); }
   function skillQualifies(skill, zoneSegs, inRequirementsSegment) {
     const zoneText = zoneSegs.map((sg) => sg.text).join(" ");
@@ -2049,7 +2028,16 @@ const CareerTailor = (() => {
     for (const sg of zoneSegs) for (const sent of sentencesOf(sg.text)) if (skillsInText(sent).includes(skill)) hits.push(sent);
     if (!hits.length) return false;
     if (AMBIGUOUS_SKILLS.has(skill)) {
-      return hits.some((sent) => ambiguousInContext(skill, sent));
+      for (const sent of hits) {
+        const low = sent.toLowerCase(), needle = skill.toLowerCase();
+        let idx = low.indexOf(needle);
+        while (idx >= 0) {
+          const win = low.slice(Math.max(0, idx - 70), idx + needle.length + 70);
+          if (TECH_CONTEXT.test(win) || skillsInText(win).some((x) => x !== skill && !AMBIGUOUS_SKILLS.has(x))) return true;
+          idx = low.indexOf(needle, idx + 1);
+        }
+      }
+      return false;
     }
     if (inRequirementsSegment) return true;
     const zoneCount = skillsInText(zoneText).filter((x) => x === skill).length;
@@ -2799,7 +2787,7 @@ const CareerTailor = (() => {
     return { ok: true, mode: "full", resume: assembled, rendered, coverLetter: cover, audit: auditResult, diff, version, gaps, requiredGaps, preferredGaps, eligibilityVerdict: verdict };
   }
 
-  return { BANNED_PHRASES, bannedPhrasesIn, SKILL_LEXICON, skillsInText, skillsInContext, parseJD, resetParseMemos, parseMemoStats, detectFamily, FAMILIES, FAMILY_SKILLS, extractKnockouts, jdSegments, scoreFact, selectFacts, provenSkills, derivedSkillNames, skillFactProven, computeGaps, eligibilityVerdictFor, personaLevelOf, auditResume, audit, diffResume, render, generateCoverLetter, coverOutline, buildAnswerBank, tailorResume, wordCount };
+  return { BANNED_PHRASES, bannedPhrasesIn, SKILL_LEXICON, skillsInText, parseJD, resetParseMemos, parseMemoStats, detectFamily, FAMILIES, FAMILY_SKILLS, extractKnockouts, jdSegments, scoreFact, selectFacts, provenSkills, derivedSkillNames, skillFactProven, computeGaps, eligibilityVerdictFor, personaLevelOf, auditResume, audit, diffResume, render, generateCoverLetter, coverOutline, buildAnswerBank, tailorResume, wordCount };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerTailor;
 

@@ -199,6 +199,33 @@ const CareerTailor = (() => {
     }
     return segments.filter((sg) => sg.text || sg.kind !== "intro");
   }
+  // Review rv4 of the relevance split (Gap #8: "Go-to-Market" counted as Go, "R&D" as R): ONE guard for an ambiguous token, used
+  // by the posting's skills (skillQualifies) and by an entry's skills (skillsInContext) alike. An occurrence counts only as a
+  // whole token that is not part of a phrase that is no skill (go-to-market, go live, go-getter; R&D, R&R), and only with
+  // technical context (TECH_CONTEXT) or another, unambiguous, skill within 70 characters of it.
+  const NOT_SKILL_AFTER = { Go: /^(?:\s*-\s*|\s+)(?:to|live|getter)\b/i, R: /^\s*&/ };
+  const NOT_SKILL_BEFORE = { R: /&\s*$/ };
+  function ambiguousInContext(skill, text) {
+    const s = String(text || ""), low = s.toLowerCase(), needle = skill.toLowerCase();
+    const re = new RegExp(`(?<![a-z0-9+#])${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9+#])`, "gi");
+    for (const m of s.matchAll(re)) {
+      const after = s.slice(m.index + m[0].length), before = s.slice(0, m.index);
+      if (NOT_SKILL_AFTER[skill] && NOT_SKILL_AFTER[skill].test(after)) continue;
+      if (NOT_SKILL_BEFORE[skill] && NOT_SKILL_BEFORE[skill].test(before)) continue;
+      const win = low.slice(Math.max(0, m.index - 70), m.index + needle.length + 70);
+      if (TECH_CONTEXT.test(win) || skillsInText(win).some((x) => x !== skill && !AMBIGUOUS_SKILLS.has(x))) return true;
+    }
+    return false;
+  }
+  // The skills a text names, with each ambiguous one kept only where ambiguousInContext says it is that skill. listed: a fact's own
+  // skills list, where an item that IS the skill ("Go") counts as said; any other item goes through the same guard.
+  function skillsInContext(text, listed) {
+    const out = skillsInText(text).filter((x) => !AMBIGUOUS_SKILLS.has(x) || ambiguousInContext(x, text));
+    for (const k of listed || []) {
+      for (const x of skillsInText(k)) if (!out.includes(x) && (!AMBIGUOUS_SKILLS.has(x) || String(k).trim().toLowerCase() === x.toLowerCase() || ambiguousInContext(x, k))) out.push(x);
+    }
+    return out;
+  }
   function sentencesOf(text) { return String(text || "").split(/(?<=[.;])\s+/).map((x) => x.trim()).filter(Boolean); }
   function skillQualifies(skill, zoneSegs, inRequirementsSegment) {
     const zoneText = zoneSegs.map((sg) => sg.text).join(" ");
@@ -210,16 +237,7 @@ const CareerTailor = (() => {
       // NEAR the token (JD requirement lists are run-on mega-sentences, so
       // whole-sentence context lets a distant "software" vouch for a
       // graduation-season "Spring" 200 characters away).
-      for (const sent of hits) {
-        const low = sent.toLowerCase(), needle = skill.toLowerCase();
-        let idx = low.indexOf(needle);
-        while (idx >= 0) {
-          const win = low.slice(Math.max(0, idx - 70), idx + needle.length + 70);
-          if (TECH_CONTEXT.test(win) || skillsInText(win).some((x) => x !== skill && !AMBIGUOUS_SKILLS.has(x))) return true;
-          idx = low.indexOf(needle, idx + 1);
-        }
-      }
-      return false;
+      return hits.some((sent) => ambiguousInContext(skill, sent));
     }
     if (inRequirementsSegment) return true; // the JD's own requirements section IS the requirement shape
     const zoneCount = skillsInText(zoneText).filter((x) => x === skill).length;
@@ -1314,6 +1332,6 @@ const CareerTailor = (() => {
     return { ok: true, mode: "full", resume: assembled, rendered, coverLetter: cover, audit: auditResult, diff, version, gaps, requiredGaps, preferredGaps, eligibilityVerdict: verdict };
   }
 
-  return { BANNED_PHRASES, bannedPhrasesIn, SKILL_LEXICON, skillsInText, parseJD, resetParseMemos, parseMemoStats, detectFamily, FAMILIES, FAMILY_SKILLS, extractKnockouts, jdSegments, scoreFact, selectFacts, provenSkills, derivedSkillNames, skillFactProven, computeGaps, eligibilityVerdictFor, personaLevelOf, auditResume, audit, diffResume, render, generateCoverLetter, coverOutline, buildAnswerBank, tailorResume, wordCount };
+  return { BANNED_PHRASES, bannedPhrasesIn, SKILL_LEXICON, skillsInText, skillsInContext, parseJD, resetParseMemos, parseMemoStats, detectFamily, FAMILIES, FAMILY_SKILLS, extractKnockouts, jdSegments, scoreFact, selectFacts, provenSkills, derivedSkillNames, skillFactProven, computeGaps, eligibilityVerdictFor, personaLevelOf, auditResume, audit, diffResume, render, generateCoverLetter, coverOutline, buildAnswerBank, tailorResume, wordCount };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerTailor;

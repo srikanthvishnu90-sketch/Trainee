@@ -41,22 +41,23 @@ function memoryStore(qs: OpenQuestion[]) {
   return { store, answered, shownNow: () => shown, said: (intent: string | null) => { last = intent; } };
 }
 
-Deno.test("Q1 one question per message: the first open one, how many are open, never a numbered list", () => {
-  eq(PER_TEXT, 1);
+// architect amendment (D-093, owner 2026-11-16, "All at once"): a batch's open questions go in ONE numbered message, answered
+// in one reply, each answer saved to its own question and reused wherever the same question appears; a lone question keeps
+// E3. Q1-Q4 below change only what the ruling changes (one message with all of them instead of one at a time); a deferral
+// still saves nothing, each answer still lands on its own question, and the card still waits until none is open.
+Deno.test("Q1 (D-093) all open questions in one numbered message, each once; a lone question alone", () => {
+  eq(PER_TEXT, 1, "a lone question is still one per message (E3)");
   const t = questionsText(RAMP, 3)!;
-  eq(t.take.map((x) => x.label), ["School"]);
-  assert(t.text.includes("School") && !t.text.includes("graduation") && !t.text.includes("sponsorship"), t.text);
-  assert(/1 of 3/.test(t.text), `says how many: ${t.text}`);
-  assert(!/Reply with each number|^\d+\. /m.test(t.text), `no numbered list: ${t.text}`);
+  eq(t.take.map((x) => x.label), ["School", "What is your graduation date?", "Requesting visa sponsorship?"]);
+  assert(/^3 questions only you can answer/.test(t.text) && /\n1\. School/.test(t.text) && /\n2\. What is your graduation date\?/.test(t.text) && /\n3\. Requesting visa sponsorship\?/.test(t.text), t.text);
   const one = questionsText([RAMP[0]], 1)!;
   assert(!/next one/.test(one.text) && /Just reply with your answer/.test(one.text), one.text);
 });
 
-Deno.test("Q2 chat: asked, answered, the next asked in the same reply, each answer saved to its own question; the card waits until none is open", async () => {
+Deno.test("Q2 (D-093) chat: all asked at once, answered in one reply, each answer saved to its own question; the card waits until none is open", async () => {
   const m = memoryStore(RAMP);
   const turn = async (message: string) => {
     const r = await questionsTurn({ message, userId: U, threadId: T, now: Date.now(), store: m.store, situation: undefined });
-    // The handler keeps the questions this thread's last word while one is waiting (handler-career.ts).
     m.said(r && (["shown", "partial", "answered_next"].includes(r.status) || r.status.startsWith("draft")) ? "career_apply_questions" : "other");
     return r!;
   };
@@ -65,43 +66,26 @@ Deno.test("Q2 chat: asked, answered, the next asked in the same reply, each answ
     from: () => ({ select: () => ({ eq: () => ({ eq: () => ({ order: () => ({ range: async () => ({ data: [{ posting_key: "ashby:ramp:a13ae586" }], error: null }) }) }) }) }) }) };
   const env = { get: (k: string) => ({ CAREER_PREPARE_AHEAD_URL: "http://runner.test/prepare", CAREER_PREPARE_AHEAD_TOKEN: "TEST-token" } as Record<string, string>)[k] };
   const fetch = (async (u: string | URL | Request) => { kicks.push(String(u)); return new Response("{}", { status: 202 }); }) as typeof globalThis.fetch;
-
   const a = await turn("what do you need from me");
   eq(a.status, "shown");
-  assert(a.reply.includes("School") && !a.reply.includes("graduation"), a.reply);
-  eq(m.shownNow()!.ids, [RAMP[0].id], "only the one shown is what the next message answers");
-
+  eq(m.shownNow()!.ids, RAMP.map((x) => x.id), "all three are what the next message answers");
   const later = await turn("not yet — I'll answer later");
-  eq(m.answered.size, 0, `a deferral is never saved as the answer: ${later.reply}`);
-  assert(!/Saved/.test(later.reply), later.reply);
+  eq(m.answered.size, 0, `a deferral is never saved as an answer: ${later?.reply ?? "(not an answer: the turn goes on)"}`);
   await turn("what do you need from me");
-  const multi = await turn("1 DePaul University 2 06/13/2029 3 no");
-  eq([multi.status, m.answered.size], ["partial", 0], `several numbered answers to one shown question save nothing: ${multi.reply}`);
-  assert(/one question at a time/.test(multi.reply) && multi.reply.includes("School"), multi.reply);
-  eq(m.shownNow()!.ids, [RAMP[0].id], "the same question still waits");
-  const b = await turn("DePaul University");
-  eq(b.status, "answered_next", b.reply);
+  const part = await turn("1 DePaul University\n3 no");
   eq(m.answered.get(RAMP[0].id), "DePaul University");
-  assert(/What is your graduation date\?/.test(b.reply) && !/sponsorship/.test(b.reply), `the next question, alone: ${b.reply}`);
-  eq(m.shownNow()!.ids, [RAMP[1].id]);
-  eq(await prepareAfterAnswers(b, { admin, userId: U, env, fetch }), "skipped", "no card while questions are open");
+  eq(await m.store.countOpen(U), 1, part.reply);
+  eq(await prepareAfterAnswers(part, { admin, userId: U, env, fetch }), "skipped", "no card while a question is open");
   eq(kicks.length, 0);
-
-  const c = await turn("06/13/2029");
-  eq(c.status, "answered_next", c.reply);
-  eq(m.answered.get(RAMP[1].id), "06/13/2029", "the date went to the date question, not the school's");
-  assert(/sponsorship/.test(c.reply), c.reply);
-  eq(m.shownNow()!.ids, [RAMP[2].id]);
-
-  const d = await turn("no");
-  eq(d.status, "answered", d.reply);
-  eq(m.answered.size, 3);
-  eq(await m.store.countOpen(U), 0);
+  await turn("what do you need from me");
+  const d = await turn("06/13/2029");
+  eq(m.answered.get(RAMP[1].id), "06/13/2029", "the date went to the date question");
+  eq([m.answered.size, await m.store.countOpen(U)], [3, 0], d.reply);
   eq(await prepareAfterAnswers(d, { admin, userId: U, env, fetch }), "started", "prepared again, for the card, only now");
   eq(kicks, ["http://runner.test/prepare"]);
 });
 
-Deno.test("Q4 'skip' moves on to the next question; the skipped one comes back after the others, and nothing is saved for it", async () => {
+Deno.test("Q4 (D-093) a question left out of the reply stays open and comes back; nothing is saved for it", async () => {
   const m = memoryStore(RAMP);
   const turn = async (message: string) => {
     const r = (await questionsTurn({ message, userId: U, threadId: T, now: Date.now(), store: m.store, situation: undefined }))!;
@@ -109,15 +93,10 @@ Deno.test("Q4 'skip' moves on to the next question; the skipped one comes back a
     return r;
   };
   await turn("what do you need from me");
-  const s = await turn("skip");
-  eq(s.status, "answered_next", s.reply);
-  assert(/graduation/.test(s.reply) && !/School/.test(s.reply.split("Next:")[1] ?? ""), s.reply);
-  eq(m.answered.size, 0);
-  const a = await turn("06/13/2029");
-  assert(/sponsorship/.test(a.reply), `the next one not skipped: ${a.reply}`);
-  const b = await turn("no");
-  eq(b.status, "answered_next", "the skipped one is asked again");
-  assert(/School/.test(b.reply), b.reply);
+  await turn("2 06/13/2029\n3 no");
+  eq(m.answered.has(RAMP[0].id), false);
+  const again = await turn("what do you need from me");
+  assert(/School/.test(again.reply) && !/graduation/.test(again.reply), again.reply);
   const c = await turn("DePaul University");
   eq([c.status, m.answered.size], ["answered", 3]);
 });
@@ -131,7 +110,7 @@ Deno.test("Q5 the production store keeps what was skipped, so 'skip' moves on th
   eq((await store.shown(U))?.skipped, [RAMP[0].id]);
 });
 
-Deno.test("Q3 the hosted push (Telegram, SMS, WhatsApp: one outbox text) carries exactly one question", async () => {
+Deno.test("Q3 (D-093) the hosted push (Telegram, SMS, WhatsApp: one outbox text) carries every open question, numbered", async () => {
   const SECRET = "TEST-secret-0123456789abcdef0123456789abcdef", RID = "aaaaaaaa-bbbb-4ccc-8ddd-0000000003a3", LEASE = "aaaaaaaa-bbbb-4ccc-8ddd-0000000003a4";
   const row = { id: RID, user_id: U, job_ids: ["ashby:ramp:1"], lease_token: LEASE, state: "running", claimed_at: new Date().toISOString() };
   const calls: any[] = [];
@@ -147,9 +126,9 @@ Deno.test("Q3 the hosted push (Telegram, SMS, WhatsApp: one outbox text) carries
   await handlePrepareBridge("finish", { id: RID, sandbox: "sbx_A", token: await prepareToken(SECRET, RID, LEASE, "sbx_A"),
     outcomes: [{ job_id: "ashby:ramp:1", outcome: "asked", detail: "3" }] }, deps);
   const push = calls.find((c) => c.name === "career_apply_questions_push_requested_for");
-  eq(push.args.p_ids, [RAMP[0].id], "one question pushed");
-  assert(push.args.p_text.includes("School") && !push.args.p_text.includes("graduation"), push.args.p_text);
-  assert(push.args.p_text.length <= 1600, "fits one SMS/WhatsApp message");
+  eq(push.args.p_ids, RAMP.map((x) => x.id), "every open question pushed in one text");
+  assert(push.args.p_text.includes("1. School") && push.args.p_text.includes("2. What is your graduation date?"), push.args.p_text);
+  assert(push.args.p_text.length <= 4000, "fits one text");
 });
 
 // ---------------------------------------------------------------------------------------- C: the card's consent lines

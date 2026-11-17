@@ -121,30 +121,28 @@ Deno.test("WO-029/4 'what do you need from me' asks them, numbered, with the cho
     q({ id: "b", key: "job:00000000000000cc", kind: "essay", label: "Why do you want to work at Ramp?", type: "textarea", company: "Ramp" }),
     q({ id: "c", key: "label:00000000000000dd", kind: "unknown", label: "Passport number", type: "text" }),
   ];
-  // One question per message (coordinator review of #360, 2026-10-31): the first open one, with its choices; the employer
-  // when it is one job's is shown when that question's turn comes.
+  // architect amendment (D-093, owner 2026-11-16, "All at once"): the open questions in ONE numbered message (each with its
+  // choices, the employer when it is one job's), answered in one reply; an identity number is still never asked by text.
   const store = fakeStore(rows);
   const r = await questionsTurn({ message: "what do you need from me", userId: "u", threadId: "t", now: T, store });
   eq(r!.status, "shown");
-  assert(r!.reply.includes("Will you require sponsorship? (Yes / No)"), r!.reply);
-  assert(!r!.reply.includes("Why do you want to work at Ramp?"), `one question only: ${r!.reply}`);
-  assert(/Question 1 of 2 /.test(r!.reply), `counts what it will ask, never the passport: ${r!.reply}`);
+  assert(r!.reply.includes("1. Will you require sponsorship? (Yes / No)"), r!.reply);
+  assert(r!.reply.includes("2. Why do you want to work at Ramp? For Ramp. (in your own words"), r!.reply);
+  assert(/^2 questions only you can answer/.test(r!.reply), `counts what it will ask, never the passport: ${r!.reply}`);
   assert(!/passport/i.test(r!.reply), "an identity number is never asked by text");
-  assert(/Answer it once and I won't ask again/.test(r!.reply) && /Just reply with your answer/.test(r!.reply) && !/"1 no 2 3 years"/.test(r!.reply));
-  eq((await store.shown("u"))!.ids, ["a"]);
+  eq((await store.shown("u"))!.ids, ["a", "b"]);
   store.setIntent(QUESTIONS_INTENT);
-  const next = await questionsTurn({ message: "no", userId: "u", threadId: "t", now: T, store });
-  eq(next!.status, "answered_next");
-  assert(next!.reply.includes("Why do you want to work at Ramp? For Ramp. (in your own words"), next!.reply);
-  eq((await store.shown("u"))!.ids, ["b"]);
+  const next = await questionsTurn({ message: "1 no\n2 I want to build card issuing", userId: "u", threadId: "t", now: T, store });
+  eq(next!.status, "answered", next!.reply);
   const none = await questionsTurn({ message: "what do you need from me", userId: "u", threadId: "t", now: T, store: fakeStore([]) });
   assert(/Nothing is waiting on you/.test(none!.reply));
   const many = Array.from({ length: 9 }, (_, i) => q({ id: `m${i}`, label: `Question number ${i} about something?` }));
   const t = questionsText(many, 9)!;
-  eq(t.take.length, 1, "one a text");
-  assert(t.text.includes("Question 1 of 9") && t.text.includes("I'll ask the next one after you answer this."), t.text);
+  eq(t.take.length, 9, "all nine in one text");
+  assert(t.text.includes("9. Question number 8 about something?"), t.text);
   const long = Array.from({ length: 3 }, (_, i) => q({ id: `l${i}`, label: `${"Long question words ".repeat(40)}${i}?` }));
-  eq(questionsText(long, 3)!.take.length, 1, "a long question is never cut");
+  const lt = questionsText(long, 3)!;
+  assert(lt.take.length >= 1 && lt.take.every((x) => lt.text.includes(x.label.replace(/\s+/g, " ").trim())), "a long question is never cut");
 });
 
 Deno.test("WO-029/5 the next text answers them by number while they are the thread's last word; a wrong fit is said back and stays open", async () => {
@@ -159,16 +157,12 @@ Deno.test("WO-029/5 the next text answers them by number while they are the thre
   eq(await questionsTurn({ message: "1 no", userId: "u", threadId: "t", now: T, store }), null, "not the last word: not an answer");
   store.setIntent(QUESTIONS_INTENT);
   eq(await questionsTurn({ message: "1 no", userId: "u", threadId: "other", now: T, store }), null, "another thread's questions are not answered here");
-  // One at a time: each answer is the shown question's; the next is asked in the same reply.
-  const r = await questionsTurn({ message: "nope", userId: "u", threadId: "t", now: T, store });
-  eq(r!.status, "answered_next", r!.reply);
-  assert(/^Saved\. I won't ask this again:/.test(r!.reply) && r!.reply.includes("Why do you want to work at Ramp?"), r!.reply);
-  const essay = await questionsTurn({ message: "I've built card issuing twice and want to do it at scale", userId: "u", threadId: "t", now: T, store });
-  eq(essay!.status, "answered_next", essay!.reply);
+  // architect amendment (D-093): all three answered in one reply by number; a wrong fit is said back and stays open.
+  const r = await questionsTurn({ message: "1 nope\n2 I've built card issuing twice and want to do it at scale\n3 a phd", userId: "u", threadId: "t", now: T, store });
+  eq(r!.status, "partial", r!.reply);
   eq(store.answers, [["a", "No"], ["b", "I've built card issuing twice and want to do it at scale"]]);
-  const wrong = await questionsTurn({ message: "a phd", userId: "u", threadId: "t", now: T, store });
-  eq(wrong!.status, "partial");
-  assert(wrong!.reply.includes("Still open:\n1 needs one of: Bachelor's / Master's."), wrong!.reply);
+  assert(r!.reply.includes("Still open:\n3 needs one of: Bachelor's / Master's."), r!.reply);
+  await questionsTurn({ message: "what do you need from me", userId: "u", threadId: "t", now: T + 30000, store });
   const again = await questionsTurn({ message: "masters", userId: "u", threadId: "t", now: T + 60000, store });
   eq(again!.status, "answered");
   eq(store.answers.at(-1), ["c", "Master's"]);
@@ -208,8 +202,8 @@ Deno.test("WO-029/6 the loop: a form stops, its questions are stored, answered b
   const store = fakeStore(rows);
   await questionsTurn({ message: "what do you need from me", userId: "TEST", threadId: "t", now: T, store });
   store.setIntent(QUESTIONS_INTENT);
-  await questionsTurn({ message: "no", userId: "TEST", threadId: "t", now: T, store });
-  await questionsTurn({ message: "Ramp's spend tools are what I wished I had as a controller", userId: "TEST", threadId: "t", now: T, store });
+  // architect amendment (D-093): both answered in one reply, by number.
+  await questionsTurn({ message: "1 no\n2 Ramp's spend tools are what I wished I had as a controller", userId: "TEST", threadId: "t", now: T, store });
   const merged = factsWithTextAnswers(facts, rows.map((r) => ({ id: r.id, key: r.key, kind: r.kind, answer: r.answer! })));
   const plan = (job: string, fields: any[]) =>
     planBatch({ userId: "TEST", postings: [{ job_id: job, company: "Ramp", title: "", fields }], answers: merged.answers as any, saved: merged.saved as any, log: [], now: T });

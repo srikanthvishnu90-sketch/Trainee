@@ -75,3 +75,47 @@ Deno.test("with a list on the thread, 'all the remote internships' is still that
   await b.turn("apply to all the frontend internships in Chicago");
   eq(await b.companies(), ["Acme", "Brite"], "Chicago named: searched, not the list");
 });
+
+Deno.test("'that I qualify for': a degree the posting requires and their confirmed facts show they lack is left out, by name, with why", async () => {
+  const rows = [posting("Northwind", "Software Engineering Intern", "Chicago, IL"), posting("Saltbox", "Software Engineer Intern, Research", "Chicago, IL", "Requirements: must be enrolled in a PhD program in Computer Science.")];
+  const facts = [{ id: "F-1", text: "TEST University - B.S. Computer Science, GPA 3.7, graduating May 2028", status: "confirmed", needs_confirmation: false }];
+  const w = await world(rows, { facts });
+  const r = await w.turn("apply to every SWE internship in Chicago that I qualify for");
+  eq(await w.companies(), ["Northwind"]);
+  assert(/Left out: .*Saltbox \(the posting requires a PhD; your confirmed facts show a bachelor's\)/.test(r!.reply), r!.reply);
+  // Without "that I qualify for", or with no degree confirmed, nothing is ruled out on a guess.
+  const all = await world(rows, { facts });
+  await all.turn("apply to every SWE internship in Chicago");
+  eq(await all.companies(), ["Northwind", "Saltbox"]);
+  const none = await world(rows);
+  await none.turn("apply to every SWE internship in Chicago that I qualify for");
+  eq(await none.companies(), ["Northwind", "Saltbox"]);
+});
+
+Deno.test("'apply to 20 more like those': the last batch's search again, without what is already on the apply list; fewer said plainly", async () => {
+  const rows = [posting("Acme", "Frontend Engineering Intern", "Chicago, IL"), posting("Brite", "Frontend Developer Intern", "Chicago, IL"), posting("Cobalt", "Frontend Intern", "Chicago, IL")];
+  const db = memoryPostingsDb();
+  await db.putMany(rows);
+  const wants = memoryWantStore();
+  let kept: any = null;
+  const turn = (message: string) => applyTurn({ message, userId: "u1", now: T, wants, apps: async () => [], facts: [], shortlist: null, postings: { search: (w: string[], l: number) => db.search(w, l) }, resumeOnFile: async () => true,
+    lastSearch: async () => kept });
+  eq(applyManyAsk("apply to 20 more like those"), { kind: "more", n: 20 });
+  eq(applyManyAsk("apply to more of those please"), { kind: "more", n: null });
+  // No search kept on the thread: nothing queued, and what to say instead (before: the brain said "I can't apply from this chat").
+  const none = await turn("apply to 20 more like those");
+  eq([none?.status, (await wants.list("u1")).length], ["none", 0], none?.reply);
+  // The first batch: a searched ask keeps its search on the reply.
+  const first = await turn("apply to the top 2 frontend internships in Chicago");
+  assert(first?.search, "the searched batch returns its search for the reply's meta");
+  kept = first!.search;
+  const before = (await wants.list("u1")).map((w) => w.company).sort();
+  eq(before.length, 2);
+  const more = await turn("apply to 20 more like those");
+  const after = (await wants.list("u1")).map((w) => w.company).sort();
+  eq(after.length, 3, more?.reply);
+  assert(/2 already on your apply list left out/.test(more!.reply) && /not 20/.test(more!.reply), more!.reply);
+  const again = await turn("apply to 20 more like those");
+  eq(again?.status, "none", again?.reply);
+  assert(/already on your apply list, so there are no more/.test(again!.reply), again!.reply);
+});

@@ -80,7 +80,9 @@ export interface ManyWhat { role: string; words: string[]; place: string | null;
 // search, not the thread's list: `search` is what to search for (the places it names, each one), `qualify` keeps only the
 // postings their confirmed facts do not rule out, `exclude` the employers they said to skip. The turn searches when the
 // thread has no list or a place other than remote is named; otherwise "all the remote internships" stays the list's filter.
-export type ManyAsk = { kind: "all"; filter?: ListFilter; good?: true; what?: ManyWhat; search?: ManyWhat; qualify?: true; exclude?: string[] } | { kind: "first"; n: number; what?: ManyWhat } | { kind: "nth"; i: number } | { kind: "pick"; is: number[] };
+// "apply to 20 more like those": `more` is the search the thread's last batch came from (ApplyChatDeps.lastSearch), again,
+// with every posting already on their apply list left out; `n` the count they said (null: every new match).
+export type ManyAsk = { kind: "more"; n: number | null } | { kind: "all"; filter?: ListFilter; good?: true; what?: ManyWhat; search?: ManyWhat; qualify?: true; exclude?: string[] } | { kind: "first"; n: number; what?: ManyWhat } | { kind: "nth"; i: number } | { kind: "pick"; is: number[] };
 // Short forms a person types for a role family, read against the listed titles.
 const ROLE_ALIASES: Record<string, string[]> = {
   swe: ["software engineer", "software engineering", "software developer", "swe"],
@@ -263,7 +265,21 @@ async function postingsFor(o: ApplyChatDeps, what: ManyWhat): Promise<{ list: Sh
       rankedBy = "fit";
     }
   } catch { /* fit unknown: newest first, and said so */ }
+  for (const p of matched) { const why = degreeShort(p?.description, o.facts ?? []); if (why && p?.job_id && !ruledOut.has(String(p.job_id))) ruledOut.set(String(p.job_id), why); }
   return { rankedBy, ruledOut, list: ordered.map((p) => ({ id: p.job_id ?? null, title: p.title ?? null, company: p.company ?? null, location: p.location ?? null, url: p.url ?? null })) };
+}
+// A degree the posting requires that the person's confirmed facts show they do not hold ("must be enrolled in a PhD program"
+// against a confirmed B.S.): the reason, or null. Only a requirement the posting states with "must", "required" or
+// "enrolled", and only when a confirmed fact names their degree; anything unclear rules nothing out.
+const DEGREE_LEVEL: [RegExp, number, string][] = [[/\b(?:ph\.?\s?d|doctor(?:al|ate))(?![a-z])/i, 3, "a PhD"], [/\b(?:master'?s|m\.s\.|m\.?eng|mba)(?![a-z])/i, 2, "a master's"], [/\b(?:bachelor'?s?|b\.s\.|b\.a\.|b\.sc|undergraduate)(?![a-z])/i, 1, "a bachelor's"]];
+export function degreeShort(description: unknown, facts: any[]): string | null {
+  const d = String(description ?? "");
+  const req = /\b(?:must\s+be\s+(?:enrolled|pursuing|a\s+current)|required|requires|must\s+have|enrolled\s+in)\b[^.]{0,80}/i.exec(d)?.[0] ?? "";
+  const need = DEGREE_LEVEL.find(([re]) => re.test(req));
+  if (!need) return null;
+  const said = (facts ?? []).map((f) => String(f?.text ?? f?.value ?? "")).join(" \n ");
+  const have = DEGREE_LEVEL.find(([re]) => re.test(said));
+  return have && have[1] < need[1] ? `the posting requires ${need[2]}; your confirmed facts show ${have[2]}` : null;
 }
 // The open postings on file for one place (or none): every role word in the title, the place in the location (or remote).
 async function matchesFor(o: ApplyChatDeps, what: ManyWhat): Promise<any[]> {
@@ -322,6 +338,8 @@ export function applyManyAsk(message: string): ManyAsk | null {
   const t = raw.toLowerCase().replace(/[.!]+$/, "").replace(/\s+/g, " ");
   const after = t.match(/\bapply\b(?:\s+me)?(?:\s+(?:to|for))?\s+(.*)$/)?.[1];
   if (after === undefined) return null;
+  const more = /^(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)?\s*more(?:\s+(?:like\s+(?:those|these|that|them|the\s+last\s+ones)|of\s+(?:those|these|them)|similar(?:\s+ones)?|ones?|roles?|jobs?|internships?|postings?|of\s+the\s+same))*(?:\s+please)?$/.exec(after);
+  if (more) return { kind: "more", n: more[1] ? numOf(more[1]) : null };
   let m = after.match(/^(?:the\s+)?(first|second|third|fourth|fifth)\s+one\b/);
   if (m) return { kind: "nth", i: ORD[m[1]] };
   m = after.match(/^(?:the\s+)?(?:top|first|best)\s+(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)\b\s*(.*)$/);
@@ -390,6 +408,9 @@ export interface ApplyChatDeps {
   // place's metro area), re-checked open on each posting's own page: up to `want` verified open roles not on the list, named
   // beside it and never queued. Absent or failing, none.
   nearby?: (want: number, listed: ShortlistEntry[]) => Promise<ShortlistEntry[]>;
+  // MASS APPLY CONVERSATIONS: the search this thread's last searched batch came from (the reply's meta.apply_search), for
+  // "apply to 20 more like those"; absent or none, the ask is answered with what to say instead.
+  lastSearch?: () => Promise<ManyWhat | null>;
 }
 // A posting held back by the possible-match question (SERIAL-1490): queued only when the person answers no.
 export interface EmployerQuestion { job_id: string | null; url: string; company: string; title: string }
@@ -398,6 +419,8 @@ export type ApplyChatResult = {
   reply: string; status: "queued" | "already" | "none" | "which" | "refused" | "unreadable" | "pace_unknown" | "pace_unreadable" | "no_list" | "asking_employer" | "no_resume" | "resume_unreadable"; intent: typeof APPLY_QUEUE_INTENT;
   // FEATURE 1: how many of the postings asked for went into the queue, and whether the server prepare was asked to run.
   coverage?: { queued: number; total: number }; prepare?: PrepareKick;
+  // MASS APPLY CONVERSATIONS: the search a searched batch came from, kept on the reply (meta.apply_search) for "N more like those".
+  search?: ManyWhat;
   posting?: { job_id: string; company: string; title: string };
   // The batch ask: what went into the queue and what did not, each with its reason.
   queued?: { job_id: string; company: string; title: string }[]; refused?: { job_id: string | null; company: string; title: string; reason: string; said?: string }[];
@@ -643,6 +666,14 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   // place other than remote (the thread's list is not where they asked for); otherwise it is the list's filter, as before.
   const hasList = (o.shortlist ?? []).some((e) => e && (e.url || e.id));
   let skipped: string[] = [];
+  let onList: Set<string> | null = null, moreNote = "";
+  if (ask.kind === "more") {
+    const prev = o.lastSearch ? await o.lastSearch().catch(() => null) : null;
+    if (!prev) return { reply: `I don't have the search your last batch came from on this thread, so I can't tell what "more like those" means and nothing was queued. Say "apply to ${ask.n ?? 10} more <role> in <place>" or "apply to every <role> in <place>".`, status: "none", intent, queued: [], refused: [] };
+    try { onList = new Set((await o.wants.list(o.userId)).map((w) => String(w.posting_key))); }
+    catch { return { reply: "I couldn't read your apply list just now, so I couldn't leave out the ones already on it; nothing was queued. Ask again in a minute.", status: "unreadable", intent, queued: [], refused: [] }; }
+    ask = { kind: "first", n: ask.n ?? MANY_MAX, what: prev };
+  }
   if (ask.kind === "all" && ask.search && !ask.what && (!hasList || (ask.search.places ?? [ask.search.place]).some((p) => p && p !== "remote"))) {
     ask = { kind: "all", what: ask.search, ...(ask.qualify ? { qualify: true as const } : {}), ...(ask.exclude ? { exclude: ask.exclude } : {}) };
   }
@@ -653,6 +684,13 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
     let ruledOut = new Map<string, string>();
     try { ({ list, rankedBy, ruledOut } = await postingsFor(o, what)); }
     catch { return { reply: `I couldn't search the postings just now, so nothing was queued. Ask again in a minute.`, status: "unreadable", intent, queued: [], refused: [] }; }
+    // "more like those": only postings not already on their apply list; none left is said plainly.
+    if (onList) {
+      const before = list.length;
+      list = list.filter((e) => !onList!.has(String(e.id ?? "")));
+      if (!list.length) return { reply: `All ${before} open ${what.role || "matching"} posting${before === 1 ? "" : "s"} I can find for that search ${before === 1 ? "is" : "are"} already on your apply list, so there are no more and nothing new was queued. Say "apply to every <role> in <place>" to search wider.`, status: "none", intent, queued: [], refused: [] };
+      if (list.length < before) moreNote = `${before - list.length} already on your apply list left out. `;
+    }
     // The employers they said to skip, and (for "that I qualify for") what their confirmed facts rule out: left out by name, with why.
     if (ask.kind === "all" && (ask.exclude?.length || ask.qualify)) {
       const skip = (ask.exclude ?? []).map(employerKey);
@@ -795,7 +833,7 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   if (beyond) parts.push(beyond);
   const status = queued.length ? "queued" : already ? "already" : asking.length ? "asking_employer" : "refused";
   const tail = queued.length || already ? ` ${NOTHING_SENT_MANY(prepareRunsNow(o))}` : "";
-  return { reply: `${note}${parts.join(" ")}${tail}`.trim(), status, intent, queued, refused, coverage: { queued: queued.length, total }, screen: screened.gate, ...(kick ? { prepare: kick } : {}),
+  return { reply: `${moreNote}${note}${parts.join(" ")}${tail}`.trim(), status, intent, queued, refused, coverage: { queued: queued.length, total }, screen: screened.gate, ...(what && queued.length ? { search: what } : {}), ...(kick ? { prepare: kick } : {}),
     ...(asking.length ? { ask: asking.map((r) => ({ job_id: r.posting.job_id, url: r.posting.url, company: r.posting.company, title: r.posting.title })) } : {}) };
 }
 

@@ -1159,6 +1159,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           shortlist: (loaded.snapshot as any)?.stores?.discovery?.lastShortlist ?? null,
           limits: paceReader(admin, user.id),
           employerAnswers: () => employerAsk.answers(tid),
+          // MASS APPLY CONVERSATIONS: "apply to 20 more like those": the search this thread's last searched batch came from.
+          lastSearch: async () => {
+            const r = await admin.from("agent_messages").select("meta").eq("thread_id", tid).eq("role", "assistant").order("id", { ascending: false }).limit(40);
+            const hit = (r?.data ?? []).find((m: any) => m?.meta?.apply_search && Array.isArray(m.meta.apply_search.words));
+            return hit ? hit.meta.apply_search : null;
+          },
           // R10 fix 12: "the top three" from a shorter list: the thread's last city search, one step wider (its metro area),
           // each role re-checked open on its own page; named beside the list, never queued (career_apply_chat.ts nearby).
           nearby: async (want, listed) => {
@@ -1413,6 +1419,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const asking = !!queued.ask?.length;
         out = { reply: queued.reply, intent: asking ? EMPLOYER_ASK_INTENT : queued.intent, resultStatus: queued.status, contained: false, handler: "apply_queue" };
         if (asking) agentMeta = { employer_question: queued.ask };
+        if ((queued as any).search) agentMeta = { ...(agentMeta ?? {}), apply_search: (queued as any).search };
         // R9-G: the email half of the same message, drafted by the networking turn: both answers, the draft batch last, so
         // "send 1" answers it (OUTREACH_INTENT). The application keeps its own card and its own yes.
         if (reach && networking) {

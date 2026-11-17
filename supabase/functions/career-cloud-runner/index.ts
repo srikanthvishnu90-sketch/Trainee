@@ -18,4 +18,4 @@ const review = admin ? supabaseReviewLinks(admin, Deno.env) : undefined;
 // Each application's role and its posting's own terms (where, pay and deadline as posted) on the pushed card.
 // deno-lint-ignore no-explicit-any
 const describe = admin ? (user: string, rows: any[]) => withRoles(admin, user, rows) : undefined;
-Deno.serve(createRunnerHandler({ env: Deno.env, waitUntil: (p) => edge?.waitUntil ? edge.waitUntil(p) : void p, review, describe }));
+Deno.serve(createRunnerHandler({ describe, env: Deno.env, waitUntil: (p) => edge?.waitUntil ? edge.waitUntil(p) : void p, review }));

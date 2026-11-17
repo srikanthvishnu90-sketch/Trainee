@@ -200,3 +200,25 @@ where it was by construction; the answered column is where execution shows: 42 �
 instant before Submit once answered. Left after r3, by count: Recruitee phone reformats with other digits (`value_changed_by_page`,
 11 to 16), Workable steps with no Submit word (`no_submit_control`, 3 to 4), Breezy unnamed page flags (fixed after r3, aea3d3a7) and
 `salaryCurrency`, Ashby's own dropdown in the live page (still `options_not_readable`).
+
+### Round 3, measured in CI 44032519757 (head ed96caa6, branch `bench/browser-strict-r4`, never a PR)
+
+Round 3 fixes: Recruitee's phone box reset to a bare dial code is set again and read back by its digits; Breezy's unnamed page flag is
+page data; an unlabelled shown control is named by its heading ("Desired Salary (select-one)"); the answered column confirms a page-set
+value as shown. Answered = reached Submit (+ upload simulated).
+
+| provider | sample headline r3 → r4 | sample answered r3 → r4 | held-out headline r3 → r4 | held-out answered r3 → r4 |
+|---|---|---|---|---|
+| ashby | 1 → 1 | 12 → 12 | 2 → 2 | 13 → 12 |
+| breezy | 0 → 0 | 1 (+8) → 1 (+16) | 0 → 0 | 0 (+10) → 0 (+16) |
+| greenhouse | 0 → 0 | 0 (+13) → 0 (+12) | 0 → 0 | 0 (+14) → 0 (+13) |
+| lever | 5 → 5 | 18 → 19 | 5 → 5 | 12 → 12 |
+| recruitee | 0 → 0 | 1 → 4 | 0 → 5 | 0 → 13 |
+| teamtailor | 0 → 0 | 0 (+3) → 0 (+5) | 0 → 0 | 0 (+8) → 1 (+9) |
+| workable | 1 → 1 | 1 (+7) → 1 (+7) | 0 → 0 | 0 (+7) → 0 (+8) |
+| **all 220** | **7 → 7** | **33 (+31) → 37 (+40)** | **7 → 12** | **25 (+39) → 38 (+46)** |
+
+Open only: sample 7 / 196 headline, 37 (+40) answered; held-out 12 / 191 headline, 38 (+46) answered. D-072: 173 and 172 of 220.
+Left: Workable `no_submit_control` (3 and 4; not reproduced locally: the same postings reach Submit in a local dry run), Ashby's own
+dropdowns (an `ashby-application-form-input-autocomplete` list that drew no options after typing in a local dry run; no request was
+made), Recruitee 8 sample `field_not_filled`, Greenhouse 1 to 2. Throughput not re-measured: the machine's load average stayed 14 to 106.

@@ -19,6 +19,7 @@ import { confirmedResumeSql } from "../../flow/resume-seed.ts";
 import { handlePrepareBridge, prepareToken } from "../../../supabase/functions/_shared/cloud_prepare.ts";
 // Read by name, so that on a build without it (afc5739d5) this test runs and fails on what the person sees, not on an import.
 const links: any = await import("../../../supabase/functions/_shared/application_review_links.ts");
+const tap: any = await import("../../../supabase/functions/_shared/channel_card_tap.ts");
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -30,6 +31,8 @@ const RESUME_SHA = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256
 const PEOPLE: Record<string, string> = {
   "tok-d094-scale": "7b0f8f8e-6a43-4a49-9d2c-0000000d0941", "tok-d094-edit": "7b0f8f8e-6a43-4a49-9d2c-0000000d0942",
   "tok-d094-grammar": "7b0f8f8e-6a43-4a49-9d2c-0000000d0943", "tok-d094-small": "7b0f8f8e-6a43-4a49-9d2c-0000000d0944",
+  // Architect follow-up (2026-11-17): the Telegram Approve-all button, and the chat's "show my applications".
+  "tok-d094-tap": "7b0f8f8e-6a43-4a49-9d2c-0000000d0945", "tok-d094-show": "7b0f8f8e-6a43-4a49-9d2c-0000000d0946",
 };
 const THREAD = (u: string) => `${u.slice(0, -4)}7${u.slice(-3)}`;
 const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
@@ -142,6 +145,9 @@ Deno.test({
         ok(before.data.batch.items[2].answers[1].answer !== "a different answer", "the File was edited after it was shown");
         const again = await b.chat.say("yes", { thread_id: THREAD(u) });
         eq((await jobs(u)).length, 0, `a second yes approves nothing either: ${again.reply.slice(0, 120)}`);
+        // Architect follow-up (2026-11-17): and it is told the File changed, never "That card was already answered".
+        eq(again.resultStatus, "file_changed", again.reply);
+        ok(/File listing these applications changed/.test(again.reply) && !/already answered/.test(again.reply), again.reply);
         eq((await json(`select to_jsonb(state) from public.career_apply_cards where id = '${card.id}'`)), "open", "the card was never answered by a refused yes");
       });
 
@@ -160,6 +166,51 @@ Deno.test({
         const j = await jobs(u), two = file.data.batch.items[1];
         eq(j.length, 39, "39 of the File's 40");
         ok(!j.some((x: any) => x.payload_hash === two.payload_hash), `number 2 of the File (${two.employer}) was left out`);
+      });
+
+      await t.step("follow-up: the Telegram \"Approve all N\" button on a File changed after it was shown approves nothing", async () => {
+        const u = PEOPLE["tok-d094-tap"], b = await batchOf(u, 30), card = b.cards[0];
+        ok(card?.file_id, "a summary card bound to its File");
+        const buttons = await tap.cardButtons(card);
+        await pg.sql(`update public.career_watch_kv set value = jsonb_set(value, '{data,batch,items,0,employer}', '"someone else"') where user_id = '${u}' and key = 'tf:file:${card.file_id}'`);
+        const r = await tap.tapCard({ userId: u, data: buttons[0][0].data, now: Date.now(), store: tap.supabaseTapStore(admin) });
+        eq(r.status, "file_changed", r.reply);
+        ok(/nothing was approved/.test(r.reply), r.reply);
+        eq((await jobs(u)).length, 0, "nothing enqueued by the button");
+      });
+
+      await t.step("follow-up: \"show my applications\" of a list that would page is a summary plus its File; the yes approves the File's set", async () => {
+        const u = PEOPLE["tok-d094-show"], person = pg.asPerson(u);
+        for (let i = 1; i <= 20; i++) {
+          const k = `lever:d094show:${String(i).padStart(3, "0")}`, company = `D094 Show ${i}`, url = `https://jobs.lever.co/d094show/${i}`;
+          const payload = { version: 1, user_id: u, job_id: k, company, url, privacy_epoch: 0, account_version: 0, resume_sha256: RESUME_SHA,
+            expires_at: new Date(Date.now() + 3 * 3600_000).toISOString(),
+            fields: [{ name: "email", label: "Email", value: "alex.testcase@example.test", factId: "basics.email" }, { name: "why", label: "Why this role?", value: `TEST show answer ${i}`, factId: "text-answer:1" }] };
+          const r = await person.rpc("career_apply_prepare_own", { p_payload: payload, p_card_lines: [company, "First Name: Alex", "Last Name: Testcase", "Email: alex.testcase@example.test", `Why this role?: TEST show answer ${i}`, "Resume: Alex_Resume.pdf", `Sends to ${url}`] });
+          eq(r.error, null, JSON.stringify(r.error));
+        }
+        const prev = Deno.env.get("TRAINEE_FILE_BASE_URL"), prevKey = Deno.env.get("TRAINEE_FILE_LINK_SECRET");
+        Deno.env.set("TRAINEE_FILE_BASE_URL", FILE_ENV.TRAINEE_FILE_BASE_URL); Deno.env.set("TRAINEE_FILE_LINK_SECRET", FILE_ENV.TRAINEE_FILE_LINK_SECRET);
+        try {
+          const chat = h!.chat("tok-d094-show");
+          const shown = await chat.say("show my applications", { thread_id: THREAD(u) });
+          eq(shown.resultStatus, "shown", shown.reply.slice(0, 200));
+          ok(/^20 applications are ready\./.test(shown.reply) && shown.reply.includes(FILE_ENV.TRAINEE_FILE_BASE_URL) && shown.reply.length <= 4000, shown.reply.slice(0, 300));
+          ok(!shown.reply.includes("TEST show answer 9"), "the answers are in the File, not in a paged chat card");
+          const card = (await json(`select json_agg(json_build_object('id', id, 'n', jsonb_array_length(items), 'file_id', file_id)) from public.career_apply_cards where user_id = '${u}' and state = 'open'`))[0];
+          eq(card.n, 20, "one card of all 20");
+          ok(/^[0-9a-f]{10}$/.test(card.file_id ?? ""), "bound to its File");
+          const file = await fileOf(u, card.file_id);
+          eq(file.data.batch.items.length, 20, "the File lists all 20");
+          const yes = await chat.say("yes", { thread_id: THREAD(u) });
+          eq(yes.resultStatus, "answered", yes.reply.slice(0, 200));
+          const j = await jobs(u), hashes = new Set(file.data.batch.items.map((x: any) => x.payload_hash));
+          eq(j.length, 20, "the yes approved the File's 20");
+          ok(j.every((x: any) => hashes.has(x.approval_hash)), "each at the hash the File lists");
+        } finally {
+          if (prev === undefined) Deno.env.delete("TRAINEE_FILE_BASE_URL"); else Deno.env.set("TRAINEE_FILE_BASE_URL", prev);
+          if (prevKey === undefined) Deno.env.delete("TRAINEE_FILE_LINK_SECRET"); else Deno.env.set("TRAINEE_FILE_LINK_SECRET", prevKey);
+        }
       });
 
       await t.step("a small batch (fits one card text) still shows inline as today, every line on the card, no File", async () => {

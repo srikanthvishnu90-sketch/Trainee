@@ -4,6 +4,8 @@
 // conversation through the same real handler and world, in order, on one person and one thread.
 //
 //   deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/mirror/run-conversation.ts --dry-run --conv <file> [--persona <file>] [--out file]
+//   deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/mirror/run-conversation.ts --subscription --conv <file> --persona <file> --out <file>
+//     (D-089: the same real-model run, answered by the `claude` CLI on the owner's subscription; no API key, no API spend; local only)
 //   MIRROR_SPEND_APPROVED=D-057 deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/mirror/run-conversation.ts --live --budget-usd <cap> --conv <file> --persona <file> --out <file>
 //
 // --conv: JSON, an array of {id, prompt} (extra fields ignored), sent in order. --persona: JSON {setup: string[]}: turns sent
@@ -27,13 +29,22 @@ import * as zlib from "node:zlib";
 import * as nodeCrypto from "node:crypto";
 import { Buffer } from "node:buffer";
 
+import { inCi } from "../subscription/claude_cli.ts";
+import { brainEnvOverrides, SUBSCRIPTION_PLACEHOLDER_KEY } from "../career/run.ts";
+
 const realFetch = globalThis.fetch;
 const a = Deno.args, opt = (n: string) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
-const dry = a.includes("--dry-run"), live = a.includes("--live");
+const sub = a.includes("--subscription");
+const dry = a.includes("--dry-run"), live = a.includes("--live") || sub;
+if (sub && (a.includes("--live") || inCi())) { console.log("refused: --subscription runs alone and never in CI (D-089)"); Deno.exit(3); }
+// D-089: the same environment rule as run.ts --subscription: nothing may change the brain, its model, the gateway or a switch.
+const overrides = sub ? brainEnvOverrides(Deno.env.toObject()) : [];
+if (overrides.length) { console.log(`refused: --subscription measures the committed code, but the environment sets ${overrides.join(", ")}; unset them (D-089)`); Deno.exit(3); }
 const convPath = opt("--conv");
 if (dry === live || !convPath) { console.log("usage: run-conversation.ts --dry-run | --live --budget-usd <cap>  --conv <file> [--persona <file>] [--out file]"); Deno.exit(2); }
 const budget = Number(opt("--budget-usd") ?? 0);
-if (live) {
+if (sub) await (await import("../subscription/claude_cli.ts")).preflight();
+if (live && !sub) {
   if (!/^D-\d{3}[a-z]?$/.test(Deno.env.get("MIRROR_SPEND_APPROVED") ?? "")) { console.log("refused: --live needs MIRROR_SPEND_APPROVED=<the DECISIONS.md line of the owner's written spend approval>"); Deno.exit(3); }
   if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("refused: --live needs ANTHROPIC_API_KEY"); Deno.exit(3); }
   if (!(budget > 0)) { console.log("refused: --live needs --budget-usd <cap>"); Deno.exit(3); }
@@ -112,6 +123,9 @@ const model = async (req: Request): Promise<Response> => {
   if (dry) return await anthropicWire(req, scripted);
   // D-065 (item 6): at the cap the runner refuses the call the way the provider refuses at an account's spending limit (HTTP 400,
   // its own words), so the product says it stopped at a spending limit, never "an error on its side, not a limit" (limit_stop.ts).
+  // Subscription mode: the product holds only the placeholder key; a request carrying any other key is refused, never answered.
+  if (sub && req.headers.get("x-api-key") !== SUBSCRIPTION_PLACEHOLDER_KEY) return Response.json({ type: "error", error: { type: "authentication_error", message: "subscription mode: the request carries a key other than the placeholder (D-089)" } }, { status: 401 });
+  if (sub) { modelCalls++; return await (await import("../subscription/claude_cli.ts")).cliFetch(req); }
   if (spent >= budget) return Response.json({ type: "error", error: { type: "invalid_request_error", message: `You have reached your specified API usage limits (mirror runner cap $${budget}, $${spent.toFixed(3)} spent).` } }, { status: 400 });
   modelCalls++;
   const res = await realFetch(req);
@@ -128,7 +142,8 @@ const model = async (req: Request): Promise<Response> => {
 
 // Read before openWorld: it clears ANTHROPIC_API_KEY (response_world ENV_KEYS) so a test world never holds a real key; the first
 // live run (2026-11-11) sent the string "undefined" and every model call came back 401.
-const LIVE_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+// (subscription mode: the product needs some key to consider itself configured; the request never leaves this process)
+const LIVE_KEY = sub ? SUBSCRIPTION_PLACEHOLDER_KEY : Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const ACTION_TABLES: [string, string][] = [["career_apply_receipts", "submit"], ["career_contact_sends", "send"], ["career_outbox", "send"], ["career_outlook_sends", "send"], ["career_apply_jobs", "queue"], ["career_apply_prepared", "prepare"]];
 const w = await openWorld(2, { model });
 // D-065 (item 7): the test world Instinct had (instinct-wa-batch1/world.ts): the benchmark's recorded postings served from their
@@ -245,7 +260,7 @@ try {
     lines.push(JSON.stringify({ id: t.id, reply, actions, route: modelCalls > callsBefore ? (dry ? "model-scripted" : "model") : "router", intent, status, ms: Math.round(performance.now() - t1), usd: Number((spent - spentBefore).toFixed(4)), trace }));
     // The product falls back to the router when the model call is refused at the cap, so later turns would be the fallback's
     // words, not the model's: stop here (as heldout/harness.ts does). Live run 5 (2026-11-12) ran C18 to C23 on the fallback.
-    if (live && spent >= budget) { stopped = `budget reached: $${spent.toFixed(3)} of $${budget}`; break; }
+    if (live && !sub && spent >= budget) { stopped = `budget reached: $${spent.toFixed(3)} of $${budget}`; break; }
   }
 } finally {
   Deno.env.delete("ANTHROPIC_API_KEY");
@@ -256,4 +271,4 @@ try {
 }
 await Deno.writeTextFile(out, lines.join("\n") + (lines.length ? "\n" : ""));
 if (promptLog) await Deno.writeTextFile(promptLog, prompts.join("\n\n"));
-console.log(`MIRROR-CONVERSATION ${dry ? "dry-run" : "live"} gmail_sent=${gmail.sent.length} turns=${lines.filter((l) => !l.includes('"setup":true')).length}/${turns.length} model_calls=${modelCalls} external_requests=${w.outbound.length} web_searches=${webSearches} spent_usd=${spent.toFixed(4)} in ${((performance.now() - t0) / 1000).toFixed(0)} s -> ${out}${stopped ? ` (stopped: ${stopped})` : ""}`);
+console.log(`MIRROR-CONVERSATION ${dry ? "dry-run" : sub ? "subscription" : "live"} gmail_sent=${gmail.sent.length} turns=${lines.filter((l) => !l.includes('"setup":true')).length}/${turns.length} model_calls=${modelCalls} external_requests=${w.outbound.length} web_searches=${webSearches} spent_usd=${spent.toFixed(4)} in ${((performance.now() - t0) / 1000).toFixed(0)} s -> ${out}${stopped ? ` (stopped: ${stopped})` : ""}`);

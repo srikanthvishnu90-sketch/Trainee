@@ -96,9 +96,17 @@ The release's reply-quality check (deploy standard S3) can be measured on your C
 in CI ($0 API spend; it uses your subscription's limits and takes a few hours). CI cannot run it: the `claude` CLI runs
 only on your machine. Run it on the **final** release candidate, after everything for the release has merged. The
 `claude` CLI must be signed in to your subscription: `claude -p --output-format stream-json --verbose` must report
-`apiKeySource: none`, and the runner refuses otherwise. `--brain` is the brain the candidate serves (`PRODUCTION_BRAIN` in
-`supabase/functions/agent-chat/release_config.ts`, `staged` today). Run the five passes once, in one sitting, and pack
-those five; never pick five from more.
+`apiKeySource: none`, and the runner refuses otherwise (on every call). `--brain` is the brain the candidate serves
+(`PRODUCTION_BRAIN` in `supabase/functions/agent-chat/release_config.ts`, `staged` today). The runner also refuses when
+your environment sets anything that changes the brain, the gateway or the judges (`CAREER_*`, `ANTHROPIC_*` other than
+the removed key, `MODEL_*`, `EVAL_*` and the release switches; it names what to unset).
+
+**One sitting, and every sitting is pushed.** A sitting is the five passes run one after another, within 24 hours,
+packed together. Push every sitting you start, including one that is BELOW the bar, refused or given up after a pass or
+two: S3 is decided by the FIRST sitting recorded on `ci/brain-eval` for the candidate's reply code and eval code
+(`scripts/launch/s3-subscription.ts`), and a later sitting for the same code never replaces it. An empty commit or a
+docs-only commit does not change that code, so it does not give a second chance; a real change to the reply code (or the
+eval code) is a new measurement.
 
 ```
 SHA=<the 40-character release candidate>
@@ -106,22 +114,31 @@ git fetch origin && git worktree add --detach ~/trainee-s3-$SHA $SHA && cd ~/tra
 for p in 1 2 3 4 5; do
   env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN deno run -A evals/career/run.ts --subscription --brain staged --set dev --label s3sub-$SHA-p$p || break
 done
-env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN deno run -A scripts/launch/s3-subscription.ts --sha $SHA --out ~/trainee-s3-evidence evals/career/results/s3sub-$SHA-p{1,2,3,4,5}.json
+# pack the passes that exist (all five, or fewer if the sitting stopped): the packer records an incomplete sitting too
+env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN deno run -A scripts/launch/s3-subscription.ts --sha $SHA --out ~/trainee-s3-evidence $(ls evals/career/results/s3sub-$SHA-p*.json)
 git worktree add --detach ~/trainee-brain-eval-$SHA origin/ci/brain-eval
-mkdir -p ~/trainee-brain-eval-$SHA/evals/career/subscription
-cp ~/trainee-s3-evidence/evals/career/subscription/$SHA.json ~/trainee-brain-eval-$SHA/evals/career/subscription/
-git -C ~/trainee-brain-eval-$SHA add evals/career/subscription/$SHA.json
-git -C ~/trainee-brain-eval-$SHA commit -m "S3 subscription evidence for $SHA (D-091)"
+cp -R ~/trainee-s3-evidence/evals ~/trainee-brain-eval-$SHA/
+git -C ~/trainee-brain-eval-$SHA add evals/career/subscription
+git -C ~/trainee-brain-eval-$SHA commit -m "S3 subscription sitting for $SHA (D-091)"
 git -C ~/trainee-brain-eval-$SHA push origin HEAD:ci/brain-eval
 ```
 
-The runner refuses a checkout with changes under `supabase/`, `packages/` or `evals/` (results aside). The packer checks
-the evidence exactly as S3 will and prints `MEETS` or `BELOW the bar` with every pass's count. Push the evidence only if it
-meets the bar; S3 fails it otherwise. If the push is refused because CI wrote to `ci/brain-eval` meanwhile, run
-`git -C ~/trainee-brain-eval-$SHA pull --rebase origin ci/brain-eval` and push again. Then push `$SHA` to
-`release/production` as usual. `deploy-production.yml`'s measure job finds the evidence and makes no API measurement; S3
-prints `SUBSCRIPTION (D-091): staged worst pass N/38 >= 95%`. The same evidence also counts for a later SHA within 10
-first-parent commits whose reply code and eval code are unchanged.
+The runner refuses a checkout with changes under `supabase/`, `packages/` or `evals/` (results aside). The packer refuses
+the same file, label or run time twice, checks the sitting exactly as S3 will, writes it to
+`evals/career/subscription/<sha>/<first pass's run time>.json` and prints `MEETS`, `BELOW the bar` or `REFUSED` with the
+reason; push it in every case (never edit or delete a sitting file: S3 reads each one as the commit that added it wrote it).
+If the push is refused because CI wrote to `ci/brain-eval` meanwhile, run
+`git -C ~/trainee-brain-eval-$SHA pull --rebase origin ci/brain-eval` and push again (never force-push `ci/brain-eval`).
+Then push `$SHA` to `release/production` as usual. `deploy-production.yml`'s measure job finds the sitting and makes no API
+measurement; S3 prints `SUBSCRIPTION (D-091): staged worst pass N/38 >= 95%`. The same sitting also counts for a later
+SHA within 10 first-parent commits whose reply code and eval code are unchanged. A CI measurement of the candidate, when
+one exists, is judged instead (as before D-091).
+
+S3's other paths are unchanged and apply to subscription sittings too: against the deployed SHA named by owner ruling D-056
+the bar alone decides; the one-time `S3_WAIVER` (D-039, deployed SHA `33f7d00`) applies only to CI measurements, so
+against that deployed SHA a subscription sitting needs a comparable deployed sitting, which cannot exist (S3 fails); against
+any other deployed SHA the candidate's mean must also be at least the deployed SHA's own first subscription sitting on the
+same set size and eval code.
 
 ## What you are asked for
 

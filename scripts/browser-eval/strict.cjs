@@ -16,6 +16,7 @@
 //   - a page script cancels every form submit, form.submit() and requestSubmit(), and counts the attempt;
 //   - the runner is stopped before its click, with retries 0; robots.txt is obeyed; 1 page load a second per host.
 //   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20] [--providers greenhouse,lever,workable,breezy,ashby] [--persona default|full]
+//     [--answered | --answered-from <an earlier strict.jsonl>]  (the answered column: synth-answers.cjs; never the headline)
 // --persona full (eval-lib FULL_FACTS) is a separate run and a separate column: the same synthetic person with the facts a real
 // applicant confirms (city, state, US work authorization, no sponsorship need). The default persona's number is never replaced.
 const fs = require("node:fs");
@@ -23,6 +24,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const lib = require("./eval-lib.cjs");
 const d072 = require("./d072.cjs");
+const { synthesize } = require("./synth-answers.cjs");
 const { applyOne, payloadHash, NeedsUser } = require("../../workers/career-browser/parallel-apply.cjs");
 // The apply VM's own verdict on the link (atsOf): a pass on a board the VM refuses is not one production can reach.
 const { atsOf } = require("../../workers/career-browser/apply-vm.cjs");
@@ -119,6 +121,20 @@ async function robotsOk(url, cache, ua, pacer) {
   return g !== "deny" && lib.robotsAllows(g, u.pathname + u.search);
 }
 
+// Architect ruling (2026-11-16): measure on open postings only. Each sample row's open status is re-checked at the start of its
+// run: one paced GET of the posting's own address (robots.txt already obeyed), no redirect followed by fetch itself. 404 or 410 is
+// closed at the start ("closed_at_start"), and the row is not driven. The runner's own closed verdicts during the run (a board that
+// says the posting is gone, a link sent back to the job list; d072 closedPosting) are closed too. Both are reported apart and left
+// out of the open denominator; the all-rows headline is printed beside it as before.
+async function openAtStart(url, o) {
+  try {
+    await o.pacer.wait(paceKey(new URL(url).host));
+    const r = await fetch(url, { method: "GET", headers: { "user-agent": o.ua }, redirect: "manual", signal: AbortSignal.timeout(15000) });
+    try { await r.body?.cancel(); } catch { /* none */ }
+    return r.status === 404 || r.status === 410 ? `page_load_${r.status}` : null;
+  } catch { return null; }
+}
+const isClosed = (x) => !!x.closed_at_start || /^posting_closed/.test(((x.d072 || d072.classify(x)) || {}).cause || "") || x.reason === "posting_closed";
 // The bench's stop at the instant before the click. A Submit inside an employee sign-in form is refused (architect ruling on #741:
 // Teamtailor's "Already working at X?" form was counted as a pass), never counted as reaching the application's Submit.
 function strictStop() {
@@ -128,21 +144,110 @@ function strictStop() {
     throw new NeedsUser("strict_reached_submit");
   };
 }
-async function strictPosting(browser, item, o) {
-  const persona = o.persona || "default";
-  if (!lib.PERSONAS[persona]) throw new Error(`unknown persona: ${persona}`);
-  const r = { provider: item.provider, url: item.url, persona, vm: vmVerdict(item.url), result: "fail", reason: null, field: null, needs: null, sent_blocked: 0, upload_simulated: 0, graphql_reads: 0, submit_attempts: 0, ms: 0 };
-  const t0 = Date.now();
-  const rb = await robotsOk(item.url, o.robots, o.ua, o.pacer);
-  if (rb !== true) { r.reason = rb === "unreachable" ? "host_unreachable" : "robots_disallowed"; r.ms = Date.now() - t0; r.d072 = d072.classify(r); return r; }
-  const host = new URL(item.url).hostname.toLowerCase();
-  // The posting's own host and its www twin (sofi.com sends every visitor to www.sofi.com: the same site, not a redirect off it).
-  const twin = host.startsWith("www.") ? host.slice(4) : `www.${host}`;
-  const allowHosts = [...new Set([host, twin, ...(PROVIDER_HOSTS[item.provider] || [])])];
-  const resumeSha = crypto.createHash("sha256").update(fs.readFileSync(o.resumePath)).digest("hex");
-  const p = { id: `${item.provider}-${item.n ?? ""}`, ats: item.provider, url: item.url, facts: lib.PERSONAS[persona], answers: {}, resume: { path: o.resumePath, sha256: resumeSha, preparedWithSha256: resumeSha } };
-  p.approval = { approval_id: "strict-dry-run", hash: payloadHash(p) };
-  const gate = async (req) => {
+// The page script of the dry run: every form submit, form.submit() and requestSubmit() is cancelled (eval-lib SUBMIT_TRAP's
+// rule). A WebSocket opened from the page, a same-origin frame of it, or a worker any of them starts never opens (a socket is not
+// a request the gate sees): it reports closed and sends nothing; WebSocketStream, WebTransport and peer connections are refused there
+// too, and a popup is never opened. tests/career-browser-strict-guard.test.cjs carries a positive control (the page's own workers
+// really run under this script). Stated limit: a GET that carries typed values
+// in its address to another host (an image beacon, a script URL) is a GET, and the gate lets GETs through; images are not fetched,
+// but other GETs are, so the bench does not prove that no answer can leave through a GET's address.
+function STRICT_INIT() {
+  window.__strictTrapped = 0;
+  const hit = () => { window.__strictTrapped++; try { window.__evalSubmitAttempt(); } catch { /* not bound in the strict bench */ } };
+  window.addEventListener("submit", (e) => { e.preventDefault(); e.stopImmediatePropagation(); hit(); }, true);
+  HTMLFormElement.prototype.submit = function () { hit(); };
+  HTMLFormElement.prototype.requestSubmit = function () { hit(); };
+  // Default-deny for the channels the request gate does not see (review of the rs-01 split, 2026-11-17: probes p01-worker-ws-bench,
+  // p01-iframe-wsstream-bench, p01-worker-runs, p01-modes). In this window, in every same-origin frame it holds, and in every worker
+  // any of them starts (and any worker such a worker starts): WebSocket never opens (it reports closed and sends nothing), and
+  // WebSocketStream, WebTransport and RTCPeerConnection are refused. A worker starts from a bootstrap that installs the same refusals,
+  // makes the worker's relative addresses resolve against its real script address (as they would without the bootstrap: location,
+  // fetch, Request, XMLHttpRequest, EventSource, importScripts, nested workers), then loads the page's own worker script
+  // (importScripts, or a dynamic import for a module worker). A popup is never opened (window.open returns null).
+  function workerPrelude(BASE, PRELUDE_SRC) {
+    const g = self, resolve = (u) => { try { return new URL(String(u), BASE).href; } catch { return u; } };
+    const deny = (k) => function () { throw new DOMException(k + " is refused by the dry run", "SecurityError"); };
+    class NoSocket { constructor(u) { this.url = String(u); this.readyState = 3; setTimeout(() => { if (typeof this.onclose === "function") this.onclose({ type: "close" }); }, 0); }
+      send() {} close() {} addEventListener() {} removeEventListener() {} dispatchEvent() { return false; } }
+    NoSocket.CONNECTING = 0; NoSocket.OPEN = 1; NoSocket.CLOSING = 2; NoSocket.CLOSED = 3;
+    g.WebSocket = NoSocket;
+    for (const k of ["WebSocketStream", "WebTransport", "RTCPeerConnection"]) if (k in g) g[k] = deny(k);
+    let loc = null; try { loc = new URL(BASE); } catch { /* an opaque address: left as it is */ }
+    if (loc && /^https?:$/.test(loc.protocol)) try { Object.defineProperty(g, "location", { configurable: true, get: () => loc }); } catch { /* kept */ }
+    const rel = (i) => (typeof i === "string" || i instanceof URL ? resolve(i) : i);
+    if (g.fetch) { const f0 = g.fetch; g.fetch = function (i, o) { return f0.call(this, rel(i), o); }; }
+    if (g.Request) { const R0 = g.Request; const R = function (i, o) { return new R0(rel(i), o); }; R.prototype = R0.prototype; g.Request = R; }
+    if (g.XMLHttpRequest) { const o0 = g.XMLHttpRequest.prototype.open; g.XMLHttpRequest.prototype.open = function (m, u, ...r) { return o0.call(this, m, resolve(u), ...r); }; }
+    if (g.EventSource) { const E0 = g.EventSource; const E = function (u, o) { return new E0(resolve(u), o); }; E.prototype = E0.prototype; g.EventSource = E; }
+    if (g.importScripts) { const i0 = g.importScripts; g.importScripts = function (...us) { return i0.apply(this, us.map(resolve)); }; }
+    const boot = (abs, o) => { const mod = !!(o && o.type === "module");
+      const src = "(" + PRELUDE_SRC + ")(" + JSON.stringify(abs) + ", " + JSON.stringify(PRELUDE_SRC) + ");\n" + (mod ? "await import(" + JSON.stringify(abs) + ");\n" : "importScripts(" + JSON.stringify(abs) + ");\n");
+      return URL.createObjectURL(new Blob([src], { type: "text/javascript" })); };
+    for (const k of ["Worker", "SharedWorker"]) { const O = g[k]; if (typeof O !== "function") continue;
+      const W = function (u, o) { return new O(boot(resolve(u), o), o); }; W.prototype = O.prototype; g[k] = W; }
+  }
+  const PRELUDE_SRC = workerPrelude.toString();
+  const install = (w) => {
+    try {
+      if (!w || w.__strictInstalled) return;
+      w.__strictInstalled = true;
+      class NoSocket extends w.EventTarget {
+        constructor(url) { super(); this.url = String(url); this.readyState = 3; window.__strictSockets = (window.__strictSockets || 0) + 1; setTimeout(() => { const e = new w.Event("close"); if (typeof this.onclose === "function") this.onclose(e); this.dispatchEvent(e); }, 0); }
+        send() { /* never sent */ }
+        close() { /* already closed */ }
+      }
+      NoSocket.CONNECTING = 0; NoSocket.OPEN = 1; NoSocket.CLOSING = 2; NoSocket.CLOSED = 3;
+      w.WebSocket = NoSocket;
+      for (const k of ["WebSocketStream", "WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection"]) if (k in w) w[k] = function () { throw new w.DOMException(`${k} is refused by the dry run`, "SecurityError"); };
+      w.open = function () { return null; };
+      for (const k of ["Worker", "SharedWorker"]) {
+        const O = w[k]; if (typeof O !== "function") continue;
+        const W = function (u, o) {
+          const abs = new w.URL(u, w.document.baseURI || w.location.href).href, mod = !!(o && o.type === "module");
+          window.__strictWorkers = (window.__strictWorkers || 0) + 1;
+          const src = "(" + PRELUDE_SRC + ")(" + JSON.stringify(abs) + ", " + JSON.stringify(PRELUDE_SRC) + ");\n" + (mod ? "await import(" + JSON.stringify(abs) + ");\n" : "importScripts(" + JSON.stringify(abs) + ");\n");
+          return new O(w.URL.createObjectURL(new w.Blob([src], { type: "text/javascript" })), o);
+        };
+        W.prototype = O.prototype;
+        w[k] = W;
+      }
+      // A same-origin frame of this window gets the same refusals the moment it is reached: by its element (contentWindow,
+      // contentDocument) or when it is put in the page (every insertion that may carry a frame).
+      const P = w.HTMLIFrameElement && w.HTMLIFrameElement.prototype;
+      for (const E of [w.HTMLIFrameElement, w.HTMLFrameElement]) {
+        if (!E) continue;
+        const cw = Object.getOwnPropertyDescriptor(E.prototype, "contentWindow"), cd = Object.getOwnPropertyDescriptor(E.prototype, "contentDocument");
+        if (cw && cw.get) Object.defineProperty(E.prototype, "contentWindow", { configurable: true, get() { const x = cw.get.call(this); install(x); return x; } });
+        if (cd && cd.get) Object.defineProperty(E.prototype, "contentDocument", { configurable: true, get() { const x = cd.get.call(this); if (x) install(x.defaultView); return x; } });
+      }
+      const sweep = (n) => { try { if (n && n.nodeType === 1 && (/^(IFRAME|FRAME)$/.test(n.tagName) || (n.querySelector && n.querySelector("iframe, frame")))) for (const f of w.document.querySelectorAll("iframe, frame")) install(f.contentWindow); } catch { /* cross-origin: its own init script */ } };
+      const after = (C, names) => { for (const m of names) { const o = C && C.prototype[m]; if (typeof o !== "function") continue; C.prototype[m] = function (...a) { const r = o.apply(this, a); for (const x of a) sweep(x); sweep(this); return r; }; } };
+      after(w.Node, ["appendChild", "insertBefore", "replaceChild"]);
+      after(w.Element, ["append", "prepend", "after", "before", "replaceWith", "replaceChildren", "insertAdjacentElement", "insertAdjacentHTML"]);
+      for (const k of ["innerHTML", "outerHTML"]) { const d = Object.getOwnPropertyDescriptor(w.Element.prototype, k); if (d && d.set) Object.defineProperty(w.Element.prototype, k, { configurable: true, get: d.get, set(v) { const p = this.parentNode; d.set.call(this, v); sweep(this.isConnected ? this : p); } }); }
+      void P;
+    } catch { /* a frame that cannot be reached is another origin's, with this init script of its own */ }
+  };
+  install(window);
+  // A board's own resume upload is answered inside the browser (SIMULATED_UPLOADS), so its body never goes over the wire and the
+  // browser fires no upload progress for it. Greenhouse's job-boards upload shows the file only once its upload reached 100%
+  // (strict runs 43276162667 and CI 44021741347: 19 'Attach' rows, progress bar left at 0%). For those same addresses only, the
+  // upload's own progress events are dispatched when the simulated answer arrives. Nothing is sent either way.
+  const SIM = /^https:\/\/(?:grnhse-prod-jben-[a-z0-9-]+\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com|workable-application-form\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com|simulated-upload\.invalid|app\.breezy\.hr\/api\/portal\/[A-Za-z0-9_-]+\/upload)/;
+  const open0 = XMLHttpRequest.prototype.open, send0 = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (m, u) { try { this.__strictSim = String(m).toUpperCase() === "POST" && SIM.test(new URL(u, location.href).href); } catch { this.__strictSim = false; } return open0.apply(this, arguments); };
+  XMLHttpRequest.prototype.send = function (body) {
+    if (this.__strictSim) { const x = this, n = (body && (body.size || body.length)) || 1; let done = false;
+      x.addEventListener("readystatechange", () => { if (!done && x.readyState >= 2) { done = true; for (const t of ["loadstart", "progress", "load", "loadend"]) x.upload.dispatchEvent(new ProgressEvent(t, { lengthComputable: true, loaded: n, total: n })); } }); }
+    return send0.apply(this, arguments);
+  };
+}
+// The bench's own guard on every request the page makes (the second wall after strictStop; the third is STRICT_INIT): every
+// request but GET/HEAD/OPTIONS is aborted in the browser, except a GraphQL read and the board's own resume upload answered
+// inside the browser (simulatedUpload); images, fonts and media are not fetched; page loads are paced per provider. It holds
+// even if the runner pressed Submit (tests/career-browser-strict-guard.test.cjs).
+function strictGate(item, r, o) {
+  return async (req) => {
     let u; try { u = new URL(req.url()); } catch { return false; }
     if (/^(data|blob|about):$/.test(u.protocol)) return true;
     if (simulatedFileRead(req)) return false;
@@ -157,8 +262,25 @@ async function strictPosting(browser, item, o) {
     if (req.isNavigationRequest()) await o.pacer.wait(paceKey(u.host));
     return true;
   };
+}
+async function strictPosting(browser, item, o) {
+  const persona = o.persona || "default";
+  if (!lib.PERSONAS[persona]) throw new Error(`unknown persona: ${persona}`);
+  const r = { provider: item.provider, url: item.url, persona, vm: vmVerdict(item.url), result: "fail", reason: null, field: null, needs: null, sent_blocked: 0, upload_simulated: 0, graphql_reads: 0, submit_attempts: 0, ms: 0 };
+  const t0 = Date.now();
+  const rb = await robotsOk(item.url, o.robots, o.ua, o.pacer);
+  if (rb !== true) { r.reason = rb === "unreachable" ? "host_unreachable" : "robots_disallowed"; r.ms = Date.now() - t0; r.d072 = d072.classify(r); return r; }
+  if (o.openCheck !== false && !o.answers) { const gone = await openAtStart(item.url, o); if (gone) { r.reason = "posting_closed"; r.error = gone; r.closed_at_start = gone; r.ms = Date.now() - t0; r.d072 = d072.classify(r); return r; } }
+  const host = new URL(item.url).hostname.toLowerCase();
+  // The posting's own host and its www twin (sofi.com sends every visitor to www.sofi.com: the same site, not a redirect off it).
+  const twin = host.startsWith("www.") ? host.slice(4) : `www.${host}`;
+  const allowHosts = [...new Set([host, twin, ...(PROVIDER_HOSTS[item.provider] || [])])];
+  const resumeSha = crypto.createHash("sha256").update(fs.readFileSync(o.resumePath)).digest("hex");
+  const p = { id: `${item.provider}-${item.n ?? ""}`, ats: item.provider, url: item.url, facts: lib.PERSONAS[persona], answers: o.answers || {}, resume: { path: o.resumePath, sha256: resumeSha, preparedWithSha256: resumeSha } };
+  p.approval = { approval_id: "strict-dry-run", hash: payloadHash(p) };
+  const gate = strictGate(item, r, o);
   const stop = strictStop();
-  const out = await applyOne(browser, p, { allowHosts, retries: 0, diag: true, stepTimeoutMs: 20000, requestGate: gate, initScript: lib.SUBMIT_TRAP, onPhase: stop }).catch((e) => ({ status: "error", reason: `driver_error: ${String(e && e.message).split("\n")[0].slice(0, 140)}` }));
+  const out = await applyOne(browser, p, { allowHosts, retries: 0, diag: true, stepTimeoutMs: 20000, requestGate: gate, initScript: STRICT_INIT, onPhase: stop }).catch((e) => ({ status: "error", reason: `driver_error: ${String(e && e.message).split("\n")[0].slice(0, 140)}` }));
   r.reason = out.reason || out.status; r.error = out.error ? String(out.error).slice(0, 140) : out.check ? `shown: ${out.check}` : null; r.field = out.field ? String(out.field).slice(0, 80) : null; r.needs = out.needs || null;
   if (out.reason === "strict_reached_submit") r.result = r.upload_simulated ? "ready_except_upload" : "pass";
   else if (out.reason === "missing_required_answer" && CUSTOM_ONLY(out.needs)) r.result = "ready_if_answered";
@@ -171,18 +293,47 @@ async function strictPosting(browser, item, o) {
   return r;
 }
 
+// --answered (synth-answers.cjs): the same posting driven again with a synthetic answer to every question the runner handed back
+// as the person's, up to three rounds. Its own column; the headline row above is never changed by it.
+const REACHED = new Set(["pass", "ready_except_upload"]);
+async function answeredPosting(browser, item, o, first) {
+  const cut = (row, rounds, asked, extra = {}) => ({ result: REACHED.has(row.result) ? row.result : "fail", reason: row.reason, field: row.field || row.error || null, rounds, asked,
+    needs: row.result === "pass" ? null : (row.needs || []).slice(0, 8).map((n) => ({ label: String(n.label || "").slice(0, 80), reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 160) } : {}) })), ...extra });
+  let row = first, answers = {};
+  for (let round = 1; round <= 3; round++) {
+    if (REACHED.has(row.result) || row.reason !== "missing_required_answer") return cut(row, round - 1, Object.keys(answers).length);
+    const s = synthesize(row.needs, answers);
+    if (s.unanswerable.length) return cut(row, round - 1, Object.keys(answers).length, { unanswerable: s.unanswerable.slice(0, 6) });
+    answers = s.answers;
+    row = await strictPosting(browser, item, { ...o, answers });
+    if (/^BREACH/.test(row.reason || "")) return { result: "fail", reason: row.reason, rounds: round, asked: Object.keys(answers).length };
+  }
+  return cut(row, 3, Object.keys(answers).length);
+}
+
+// The answered column's counts (absent when the run had no --answered).
+function answeredCounts(rs) {
+  const a = rs.filter((x) => x.answered);
+  if (!a.length) return {};
+  const fails = Object.entries(a.filter((x) => x.answered.result === "fail").reduce((m, x) => ((m[x.answered.reason] = (m[x.answered.reason] || 0) + 1), m), {})).sort((p, q) => q[1] - p[1]);
+  return { answered_pass: a.filter((x) => x.answered.result === "pass").length, answered_upload: a.filter((x) => x.answered.result === "ready_except_upload").length, answered_top_fail: fails.slice(0, 4) };
+}
 function summarize(rows) {
   const by = new Map();
   for (const x of rows) { if (!by.has(x.provider)) by.set(x.provider, []); by.get(x.provider).push(x); }
   const reasons = (rs) => Object.entries(rs.filter((x) => x.result === "fail").reduce((m, x) => ((m[x.reason] = (m[x.reason] || 0) + 1), m), {})).sort((a, b) => b[1] - a[1]);
   const prov = [...by].sort().map(([provider, rs]) => ({ provider, sampled: rs.length, pass: rs.filter((x) => x.result === "pass").length,
     ready_if_answered: rs.filter((x) => x.result === "ready_if_answered").length, ready_except_upload: rs.filter((x) => x.result === "ready_except_upload").length, fail: rs.filter((x) => x.result === "fail").length, top_fail: reasons(rs).slice(0, 3),
-    vm_drives: rs.filter((x) => (x.vm || vmVerdict(x.url)) === "drives").length, vm_pass: rs.filter((x) => x.result === "pass" && (x.vm || vmVerdict(x.url)) === "drives").length }));
+    vm_drives: rs.filter((x) => (x.vm || vmVerdict(x.url)) === "drives").length, ...answeredCounts(rs), vm_pass: rs.filter((x) => x.result === "pass" && (x.vm || vmVerdict(x.url)) === "drives").length }));
   const all = { sampled: rows.length, pass: rows.filter((x) => x.result === "pass").length,
     vm_pass: rows.filter((x) => x.result === "pass" && (x.vm || vmVerdict(x.url)) === "drives").length, ready_if_answered: rows.filter((x) => x.result === "ready_if_answered").length,
     ready_except_upload: rows.filter((x) => x.result === "ready_except_upload").length, uploads_simulated: rows.reduce((a, x) => a + (x.upload_simulated || 0), 0),
     sends_blocked: rows.reduce((a, x) => a + x.sent_blocked, 0), graphql_reads: rows.reduce((a, x) => a + x.graphql_reads, 0),
-    breaches: rows.filter((x) => /^BREACH/.test(x.reason || "")).length, top_fail: reasons(rows).slice(0, 8) };
+    breaches: rows.filter((x) => /^BREACH/.test(x.reason || "") || /^BREACH/.test((x.answered && x.answered.reason) || "")).length, top_fail: reasons(rows).slice(0, 8), ...answeredCounts(rows) };
+  const open = rows.filter((x) => !isClosed(x));
+  all.open = { sampled: open.length, closed: rows.length - open.length, closed_at_start: rows.filter((x) => x.closed_at_start).length, pass: open.filter((x) => x.result === "pass").length,
+    ready_if_answered: open.filter((x) => x.result === "ready_if_answered").length, ready_except_upload: open.filter((x) => x.result === "ready_except_upload").length, ...answeredCounts(open) };
+  for (const pr of prov) { const os_ = open.filter((x) => x.provider === pr.provider); pr.open = { sampled: os_.length, closed: pr.sampled - os_.length, pass: os_.filter((x) => x.result === "pass").length, ...answeredCounts(os_) }; }
   return { all, prov, d072: d072.tally(rows) };
 }
 
@@ -193,6 +344,15 @@ function markdown(label, s, persona = "default") {
     "| provider | sampled | pass | pass % | ready if answered | ready except upload | fail | VM today | pass the VM drives | top failure reasons |", "|---|---|---|---|---|---|---|---|---|---|"];
   for (const x of s.prov) L.push(`| ${x.provider} | ${x.sampled} | ${x.pass} | ${pct(x.pass, x.sampled)} | ${x.ready_if_answered} | ${x.ready_except_upload} | ${x.fail} | ${x.vm_drives === x.sampled ? "drives" : x.vm_drives ? `drives ${x.vm_drives}/${x.sampled}` : "refuses"} | ${x.vm_pass} | ${x.top_fail.map(([k, n]) => `${k} ${n}`).join("; ")} |`);
   L.push("", "Failure reasons overall: " + s.all.top_fail.map(([k, n]) => `${k} ${n}`).join("; "));
+  if (s.all.open) {
+    const o = s.all.open;
+    L.push("", `**Open postings only (architect ruling 2026-11-16): pass ${o.pass} / ${o.sampled} (${pct(o.pass, o.sampled)}); ready if answered ${o.ready_if_answered}; ready except upload ${o.ready_except_upload}${o.answered_pass !== undefined ? `; answered: reached Submit ${o.answered_pass} (+ ${o.answered_upload} upload simulated)` : ""}.** Closed, reported apart: ${o.closed} (${o.closed_at_start} found closed at the start of the run, the rest by the runner on the page).`, "",
+      "| provider | open | closed | pass (open) | answered: reached Submit (open) |", "|---|---|---|---|---|", ...s.prov.map((x) => `| ${x.provider} | ${x.open.sampled} | ${x.open.closed} | ${x.open.pass} | ${x.open.answered_pass ?? "-"}${x.open.answered_upload ? ` (+${x.open.answered_upload})` : ""} |`));
+  }
+  if (s.all.answered_pass !== undefined) {
+    L.push("", `**Answered (--answered, not the headline): ${s.all.answered_pass} / ${s.all.sampled} reached the instant before Submit once every question the runner handed back as the person's had a synthetic TEST answer (+ ${s.all.answered_upload} with the upload simulated).** Execution failures left: ${s.all.answered_top_fail.map(([k, n]) => `${k} ${n}`).join("; ")}.`, "",
+      "| provider | answered: reached Submit | answered: upload simulated | answered: top failures |", "|---|---|---|---|", ...s.prov.map((x) => `| ${x.provider} | ${x.answered_pass} | ${x.answered_upload} | ${(x.answered_top_fail || []).map(([k, n]) => `${k} ${n}`).join("; ")} |`));
+  }
   if (s.d072) {
     const t = s.d072;
     L.push("", `**D-072 (99% bar): (a) ${t.a} + (b) ${t.b} = ${t.a + t.b} / ${t.n}; needs ${t.need}; ${t.meets ? "meets" : "does not meet"}.** Raw reached Submit: ${t.raw_pass}.`, "",
@@ -215,8 +375,14 @@ async function main() {
   if (!lib.PERSONAS[persona]) { console.error(`unknown --persona ${persona} (default|full)`); process.exit(2); }
   const o = { persona, robots: new Map(), pacer: lib.createPacer(), ua: `Mozilla/5.0 ${lib.UA_TOKEN}`, resumePath: lib.syntheticResume(path.join(out, "fixtures")) };
   const rows = new Array(items.length); let next = 0;
+  // --answered: the answered column beside the headline. --answered-from <strict.jsonl>: the headline rows of a run already made
+  // (same sample) are kept as they are and only the answered rounds are driven (fewer page loads on the boards).
+  const answered = a.includes("--answered") || !!arg("answered-from", "");
+  const prior = arg("answered-from", "") ? new Map(fs.readFileSync(arg("answered-from"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).map((x) => [x.url, x])) : null;
   const conc = Math.max(1, Number(arg("concurrency", 6)));
-  await Promise.all(Array.from({ length: conc }, async () => { while (next < items.length) { const i = next++; rows[i] = await strictPosting(browser, items[i], o);
+  await Promise.all(Array.from({ length: conc }, async () => { while (next < items.length) { const i = next++; rows[i] = (prior && prior.get(items[i].url)) || await strictPosting(browser, items[i], o);
+    if (answered) { rows[i].answered = await answeredPosting(browser, items[i], o, rows[i]); const w = rows[i].answered;
+      console.log(["ANSWERED", rows[i].provider, w.result, w.reason, w.field || "", `rounds=${w.rounds}`, `asked=${w.asked}`, rows[i].url, JSON.stringify(w.unanswerable || (w.result === "fail" ? w.needs : []) || [])].join(" | ")); }
     const x = rows[i]; console.log(["STRICT", x.provider, x.result, `vm=${x.vm}`, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `upload_simulated=${x.upload_simulated}`, `${(x.ms / 1000).toFixed(1)}s`, x.url, `persona=${x.persona}`].join(" | "));
     if (x.handoff) console.log("HANDOFF | " + x.provider + " | " + x.url + " | " + JSON.stringify({ reason: x.handoff.reason, wall: x.handoff.wall, link: x.handoff.link, card: x.handoff.card || null, step: x.handoff.step, filled: x.handoff.filled.length, at_door: x.handoff.at_door, remaining: x.handoff.remaining.slice(0, 6) }));
     console.log("D072 | " + x.provider + " | " + x.d072.outcome + " | " + x.d072.cause + " | " + x.url);
@@ -233,4 +399,4 @@ async function main() {
   if (s.all.breaches) process.exit(3);
 }
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { strictStop, simulatedUpload, simulatedFileRead, SIMULATED_FILE, SIMULATED_UPLOADS, strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };
+module.exports = { openAtStart, isClosed, answeredPosting, answeredCounts, strictGate, STRICT_INIT, strictStop, simulatedUpload, simulatedFileRead, SIMULATED_FILE, SIMULATED_UPLOADS, strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };

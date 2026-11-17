@@ -160,7 +160,10 @@ Deno.test("R3 the replies lane's thread adoption skips a mail reply: a migration
   ok((await read("tests/db/run.sh")).includes("career_outreach_adopt_skip_mail_reply.check.sql") && (await read("tests/db/career_outreach_adopt_skip_mail_reply.check.sql")).includes("mail_reply"));
   const live = await read("scripts/launch/trainee-go-live.sh");
   const list = /MIGRATIONS=\(\n([\s\S]*?)\n\)/.exec(live)![1].trim().split(/\s+/), marks = /MIGRATION_MARK=\(\n([\s\S]*?)\n\)/.exec(live)![1].trim().split("\n");
-  eq([list.at(-1), list.length, /career_outreach_threads_adopt' and prosrc like '%mail_reply%'/.test(marks.at(-1)!)], [`${name}.sql`, marks.length, true], "last in both lists, in order");
+  // architect amendment (D-094, owner 2026-11-16): D-094's migration 20261116140000 (and later ones) follow this one in go-live,
+  // so "last" became "at the same place in both lists, after its predecessor"; the pairing of file and mark is checked as before.
+  const at = list.indexOf(`${name}.sql`);
+  eq([at >= 0 && list[at - 1] === "20261113140000_career_apply_stop_stale_facts.sql", list.length, /career_outreach_threads_adopt' and prosrc like '%mail_reply%'/.test(marks[at]!)], [true, marks.length, true], "in both lists, at the same place, in order");
 });
 
 // ---------------------------------------------------------------------------------------------- R4

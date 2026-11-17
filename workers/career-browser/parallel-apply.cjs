@@ -721,16 +721,17 @@ function CONTROLS(arg) {
     }
     return false;
   };
-  const widgetOf = (e, v = "") => {
+  const widgetOf = (e) => {
     const near = [e.previousElementSibling, e.previousElementSibling && e.previousElementSibling.previousElementSibling, e.nextElementSibling, e.parentElement !== root && e.parentElement.tagName !== "FORM" ? e.parentElement : null];
-    // A container beside the hidden value is its widget's only when it holds at most one question: Teamtailor keeps the posting's
-    // job_id in the container of the whole form, which also holds the phone's country search box (role=combobox, "Search"); that
-    // box is not what the job_id is the value of (answered run of 2026-11-16: "Search: set by the page" on 9 postings).
+    // Teamtailor keeps the posting's job_id in the container of the whole form, which also holds the phone's country search box
+    // (intl-tel-input's role=combobox "Search"); that box is not what the job_id is the value of (answered run of 2026-11-16: "Search:
+    // set by the page" on 9 postings). Delta review of rs-07 (probes p07-widget-hidden, p07-widget-hidden-id, 2026-11-17): only that
+    // case is dropped, by what the widget is, never by how the hidden value looks. In a container holding several questions, a widget
+    // that is a phone box's own country picker (inside the intl-tel-input shell of a tel box) is not a neighbouring hidden value's
+    // widget. Every other widget keeps its hidden value, which is asked as before.
     const oneQuestion = (n) => new Set([...n.querySelectorAll("[data-upmore-q]")].map((x) => x.getAttribute("data-upmore-q"))).size <= 1;
-    // Review of the rs-07 split (probe p07-widget-hidden, 2026-11-17): dropping the neighbour's widget let a page-set work_location
-    // "Remote" beside a drawn listbox and two other questions go unconfirmed. A crowded container's widget is dropped only when the
-    // hidden value is itself page structure (structural: an id, a source, a position); any other value keeps the widget, and is asked.
-    for (const n of near) { if (!n) continue; if (n.matches(WIDGET)) return n; const w = n.querySelector(WIDGET); if (w && (oneQuestion(n) || !structural(e.name || "", v))) return n.matches("[role=group], [role=radiogroup]") || n.hasAttribute("aria-label") ? n : w; }
+    const phoneCountryPicker = (w) => { const s = w.closest(".iti"); return !!s && !!s.querySelector("input[type=tel]"); };
+    for (const n of near) { if (!n) continue; if (n.matches(WIDGET)) return n; const w = n.querySelector(WIDGET); if (w && (oneQuestion(n) || !phoneCountryPicker(w))) return n.matches("[role=group], [role=radiogroup]") || n.hasAttribute("aria-label") ? n : w; }
     return null;
   };
   const named = (w, value) => {
@@ -750,7 +751,7 @@ function CONTROLS(arg) {
       let label = squash((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder).slice(0, 200), hidden = e.type === "hidden", answer = false;
       if (hidden) {
         const v = String(e.value || "").trim();
-        const w = widgetOf(e, v);
+        const w = widgetOf(e);
         // The "off" value a form keeps beside its own tick box of the same name (Lever: consent[marketing]=0 beside the box, sent
         // when it is not ticked) is that box's unticked state, not an answer of its own: the box is the question.
         const offOfBox = /^(?:0|no|false|off|)$/i.test(v) && !!e.name && [...(e.form ? e.form.elements : document.querySelectorAll("input"))].some((x) => x !== e && x.name === e.name && (x.type === "checkbox" || x.type === "radio"));

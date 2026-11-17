@@ -47,6 +47,10 @@ const PAGES = {
   "written-without-upload": form("", `onFile((f) => { document.querySelector("${BOX}").value = "https://storage.example/uploads/7f3a/" + f.name; });`),
   // a file of that name was sent to that host by the page at load, before this run set the resume
   "upload-before-set": form("", `up("storage.example", new File(["x"], "Casey-Example-Resume.pdf", { type: "application/pdf" })); onFile((f) => { document.querySelector("${BOX}").value = "https://storage.example/uploads/7f3a/" + f.name; });`),
+  // Second delta review of rs-05 (2026-11-17): two boxes of the box's name, one holding a stale address at load (and, in -b, the
+  // other written with the storage address after this run's upload). Evidence is per element: two boxes of one name are asked.
+  "dup-name": form("https://storage.example/uploads/old/Casey-Example-Resume.pdf", `onFile((f) => up("storage.example", f));`).replace('<button type="submit">', '<input type="text" name="candidate[resume_remote_url]" value="" style="position:absolute;left:-9999px" tabindex="-1" aria-hidden="true"><button type="submit">'),
+  "dup-name-b": form("https://storage.example/uploads/old/Casey-Example-Resume.pdf", `onFile((f) => up("storage.example", f).then(() => { document.querySelectorAll("${BOX}")[1].value = "https://storage.example/uploads/7f3a/" + f.name; }));`).replace('<button type="submit">', '<input type="text" name="candidate[resume_remote_url]" value="" style="position:absolute;left:-9999px" tabindex="-1" aria-hidden="true"><button type="submit">'),
 };
 let server, base, browser, resume, rsha;
 const posts = [];
@@ -88,7 +92,7 @@ test("an address the page put in that box at load is never the resume, even with
   assert.equal(posts.length, n);
 });
 
-for (const k of ["late-set-after-load", "set-on-first-input", "created-later", "prefilled-emptied-refilled", "third-party-host", "written-without-upload", "upload-before-set"]) {
+for (const k of ["late-set-after-load", "set-on-first-input", "created-later", "prefilled-emptied-refilled", "third-party-host", "written-without-upload", "upload-before-set", "dup-name", "dup-name-b"]) {
   test(`delta review of rs-05, ${k}: an address the file set did not put there is never the resume: asked, nothing sent`, { skip, timeout: 60000 }, async () => {
     const n = posts.length;
     const r = await applyOne(browser, job(k), { stepTimeoutMs: 8000, retries: 0 });

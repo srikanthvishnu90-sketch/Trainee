@@ -1259,7 +1259,7 @@ async function attempt(browser, p, opts, timing) {
     if (formSnap) { const fs = JSON.parse(formSnap), why = sentDiffers(fs.dom, fs.rows); if (why) { const e = new NeedsUser("page_changed_at_submit", why); throw e; } }
     // The person's own confirmed answer to a question, as ats-fill reads it (an approved answer, else a confirmed fact).
     const known = factsFrom(p.facts || {}, p.answers || {});
-    const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country });
+    const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country, resumeName: require("node:path").basename(p.resume.path) });
     if (unconfirmed.length) { const e = new NeedsUser("missing_required_answer", unconfirmed[0].label); e.needs = unconfirmed; throw e; }
     if (!hasApproval(p)) throw new NeedsUser("not_approved", "payload changed after approval");
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });

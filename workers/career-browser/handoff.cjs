@@ -103,9 +103,24 @@ const DIAL = /country.?code|dial|calling code|phone.?country|country.{0,12}phone
 // The same answer: the same words, or the same yes / no as a hidden field writes it ("Yes" and "1", "No" and "false").
 const YES = /^(yes|y|true|1|on|checked)$/i, NO = /^(no|n|false|0|off)$/i;
 const same = (a, b) => { const x = String(a).trim().toLowerCase().replace(/\s+/g, " "), y = String(b).trim().toLowerCase().replace(/\s+/g, " "); return x === y || (YES.test(x) && YES.test(y)) || (NO.test(x) && NO.test(y)); };
+// A box the board's own upload script fills with the address where it stored the approved resume (Teamtailor's
+// candidate[resume_remote_url], answered run of 2026-11-16: 9 Teamtailor postings stopped on it as "set by the page"): it carries
+// the resume the person approved, not a default. Only a box named for the resume whose value is an https address ending in the
+// approved file's own name.
+const RESUME_BOX = /resume|\bcv\b|curriculum|lebenslauf/i;
+const fileKey = (x) => String(x || "").toLowerCase().replace(/\.[a-z0-9]{1,5}$/, "").replace(/[^a-z0-9]/g, "");
+function carriesResume(c, resumeName) {
+  if (!resumeName || !RESUME_BOX.test(c.name || "") || c.type === "checkbox" || c.type === "radio") return false;
+  let u; try { u = new URL(String(c.value || "").trim()); } catch { return false; }
+  if (u.protocol !== "https:") return false;
+  let last = ""; try { last = decodeURIComponent(u.pathname.split("/").pop() || ""); } catch { return false; }
+  const ext = (x) => (/\.([a-z0-9]{1,5})$/i.exec(x) || [])[1];
+  return !!fileKey(resumeName) && fileKey(last) === fileKey(resumeName) && String(ext(last) || "").toLowerCase() === String(ext(resumeName) || "").toLowerCase();
+}
 function unconfirmedDefaults(controls, person = {}) {
   const out = [], seen = new Set();
   for (const c of controls || []) {
+    if (carriesResume(c, person.resumeName)) continue;
     // Round 2 (review of #818): every control the page set and the engine did not, text boxes, hidden answers and contenteditable
     // regions included; a disabled control is never sent, so it is shown on the card and never asked.
     if ((c.hidden && !c.answer) || c.pageData || c.touched || c.disabled || !set(c) || c.type === "file") continue;
@@ -178,4 +193,4 @@ async function recheck(browser, p, opts = {}, deps = {}) {
   return { state: "stopped", reason: res.reason || res.status, field: res.field || null };
 }
 
-module.exports = { buildHandoff, askedQuestions, answersCard, cardHash, yesMatches, pageRows, pageDigest, unconfirmedDefaults, recheck, PERSON_REASONS, PER_LOAD_TOKEN };
+module.exports = { carriesResume, buildHandoff, askedQuestions, answersCard, cardHash, yesMatches, pageRows, pageDigest, unconfirmedDefaults, recheck, PERSON_REASONS, PER_LOAD_TOKEN };

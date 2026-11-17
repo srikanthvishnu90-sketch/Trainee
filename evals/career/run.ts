@@ -30,6 +30,8 @@ export interface EvalResult { total: number; passed: number; pass_rate: number; 
 import { type BrainName, checkExpect, HARNESS, type ModelFn, outcomeOf, searchStep } from "./harness.ts";
 import { isClaude, JUDGE_A_MAX_TOKENS, JUDGE_A_MODEL, JUDGE_A_SYSTEM, JUDGE_B_MAX_TOKENS, JUDGE_B_MODEL, JUDGE_B_SYSTEM, judgeBPrompt, judgeFingerprint, judgeModelProblem, parseJudgeB } from "./judges.ts";
 import { attribute, attributionLines } from "./attribution.ts";
+import * as RC from "../../supabase/functions/agent-chat/release_config.ts";
+import { inCi } from "../subscription/claude_cli.ts";
 import { budgetTargets, claudeSpentUsd, ledgerSpentUsd, openGate, preflight, quoteRun, spendLine } from "./eval_budget.ts";
 // stop: asked before each item; a reason ends the run there (the spend cap), and the items not run are not scored.
 export async function runEval(items: EvalItem[], brain: Brain, judge: Judge, stop?: () => string | null): Promise<EvalResult> {
@@ -259,9 +261,61 @@ export function redactSealed(r: EvalResult): EvalResult {
 }
 
 
+// ---------------------------------------------------------------------------------------------------- subscription mode
+// D-089 (review of #853, B3): a --subscription run measures the committed code, so nothing in the environment may change the
+// brain, its model or effort, the gateway, the judges, a release flag or another switch the reply path reads. The run is
+// refused when any such variable is set (even empty), and the result records the rule it checked (`env_check`) and what was
+// found (`env_overrides`, always [] in a result that exists). Covered: every name with one of the prefixes (CAREER_BRAIN,
+// CAREER_BRAIN_ROUTER_INTENTS, CAREER_MODEL, CAREER_REPLY_MODEL, CAREER_REPLY_WRITER, CAREER_JUDGE, ANTHROPIC_EFFORT,
+// ANTHROPIC_MODEL, ANTHROPIC_BASE_URL, MODEL_PROVIDER, MODEL_BUDGET_*, EVAL_JUDGE_MODEL(_2), EVAL_SEALED_PATH, ...) and every
+// switch named in agent-chat/release_config.ts. The keys this runner removes itself before any call are not overrides.
+// EVAL_SEALED_PATH is refused too, so --set sealed cannot run in subscription mode yet.
+export const BRAIN_ENV_PREFIXES: readonly string[] = ["CAREER_", "ANTHROPIC_", "MODEL_", "EVAL_", "TRAINEE_", "UPMORE_", "CHANNEL_", "WHATSAPP_", "APPLY_", "CLOUD_RUNNER", "RESEARCH_", "BRAVE_"];
+export const BRAIN_ENV_REMOVED: readonly string[] = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "EVAL_LEDGER"];
+export const BRAIN_ENV_NAMES: readonly string[] = [...new Set([RC.ROLLBACK_ENV, RC.APPLY_ALL_YES_ENV, ...Object.keys(RC.RELEASE_FLAGS), ...Object.keys(RC.RELEASE_PENDING),
+  ...RC.RELEASE_NEVER_ON, ...Object.keys(RC.RELEASE_DB_SWITCHES)])].sort();
+export const brainEnvCheck = () => ({ prefixes: [...BRAIN_ENV_PREFIXES], names: [...BRAIN_ENV_NAMES], removed: [...BRAIN_ENV_REMOVED] });
+export function brainEnvOverrides(env: Record<string, string>): string[] {
+  return Object.keys(env).filter((k) => !BRAIN_ENV_REMOVED.includes(k) && (BRAIN_ENV_NAMES.includes(k) || BRAIN_ENV_PREFIXES.some((p) => k.startsWith(p)))).sort();
+}
+// The process environment under --subscription: the real key, the auth token, the database and the shared ledger are removed
+// (no request can reach the API or a database with them), and a placeholder key is set only for the product's "configured"
+// check; the bridge never sends it anywhere (the child CLI's environment is claude_cli.ts CHILD_ENV).
+export const SUBSCRIPTION_PLACEHOLDER_KEY = "sk-subscription-mode-not-a-key";
+export const SUBSCRIPTION_CLEARED: readonly string[] = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "EVAL_LEDGER"];
+export function enterSubscriptionEnv(env: { delete(k: string): void; set(k: string, v: string): void }): void {
+  for (const k of SUBSCRIPTION_CLEARED) env.delete(k);
+  env.set("ANTHROPIC_API_KEY", SUBSCRIPTION_PLACEHOLDER_KEY);
+}
+// fetch under --subscription: a request to the Messages endpoint itself goes to the CLI; everything else to `below`.
+export function subscriptionFetch(toCli: (req: Request) => Promise<Response>, isMessages: (url: string) => boolean, below: typeof fetch): typeof fetch {
+  return (async (input: Request | URL | string, init?: RequestInit) => {
+    const req = input instanceof Request && !init ? input : new Request(input as any, init);
+    return isMessages(req.url) ? await toCli(req) : await below(req);
+  }) as typeof fetch;
+}
+
 // ---------------------------------------------------------------------------------------------------- CLI
 if (import.meta.main) {
   const args = Deno.args, opt = (n: string) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] ?? null : null; };
+  // D-089 subscription mode: every model call (brain and both judges) is answered by the `claude` CLI on the owner's subscription
+  // (evals/subscription/claude_cli.ts); no API key, no API spend, a process-local notional meter. Local only, never in CI.
+  const subscription = args.includes("--subscription");
+  let cliStats: unknown = null;
+  const envOverrides = subscription ? brainEnvOverrides(Deno.env.toObject()) : [];
+  if (subscription) {
+    if (envOverrides.length) { console.log(`NOT RUN: --subscription measures the committed code, but the environment sets ${envOverrides.join(", ")} (brain, model, gateway, judge or switch); unset them (D-089).`); Deno.exit(2); }
+    if (inCi()) { console.log("NOT RUN: --subscription never runs in CI (D-089)."); Deno.exit(2); }
+    // D-091: a subscription measurement stands for the committed SHA, so the code it runs must be exactly that commit's.
+    const dirty = await new Deno.Command("git", { args: ["status", "--porcelain", "--", "supabase", "packages", "evals", ":!evals/career/results"], stdout: "piped" }).output();
+    if (!dirty.success || new TextDecoder().decode(dirty.stdout).trim()) { console.log("NOT RUN: --subscription needs a clean checkout (no change under supabase/, packages/ or evals/ outside evals/career/results/)."); Deno.exit(2); }
+    const cli = await import("../subscription/claude_cli.ts");
+    await cli.preflight();
+    cliStats = cli.stats;
+    enterSubscriptionEnv(Deno.env);
+    globalThis.fetch = subscriptionFetch(cli.cliFetch, cli.isMessagesUrl, globalThis.fetch);
+    console.log("subscription mode (D-089): model calls go to the claude CLI on the subscription; apiKeySource none checked");
+  }
   const get = (k: string) => Deno.env.get(k);
   const brainName = opt("--brain") || "router", label = opt("--label") || `${brainName}-${new Date().toISOString().slice(0, 10)}`;
   if (!["router", "agent", "staged"].includes(brainName)) { console.log(`NOT RUN: --brain must be router, agent or staged (got ${brainName}).`); Deno.exit(2); }
@@ -290,7 +344,7 @@ if (import.meta.main) {
       for await (const e of Deno.readDir(new URL(dir, import.meta.url))) if (e.name.endsWith(".json")) prior.push(JSON.parse(await Deno.readTextFile(new URL(`${dir}${e.name}`, import.meta.url))));
     } catch { /* no results yet */ }
   }
-  let before = claudeSpentUsd(prior, label);
+  let before = subscription ? 0 : claudeSpentUsd(prior, label);
   const opened = openGate(bud, get, before, target, parallel);
   if ("error" in opened) { console.log(`NOT RUN: ${opened.error}.`); Deno.exit(2); }
   const { gate, shared: sharedLedger } = opened;
@@ -298,7 +352,19 @@ if (import.meta.main) {
   if (sharedLedger) { const led = await ledgerSpentUsd(gate); if (led === null) { console.log("NOT RUN: the shared budget ledger could not be read; no model call was made."); Deno.exit(2); } before = led; console.log(`shared ledger: $${led.toFixed(3)} recorded across all runs; remaining allowance $${Math.max(0, target - led).toFixed(3)} of $${target.toFixed(2)}`); }
   const call = (meterOf: typeof meter) => (cfg: any, payload: any) => gw.callModel(cfg, payload, { meter: meterOf, role: "chat", budget: gate });
   const brain: Brain = await makeBrain({ name: brainName as any, env: Deno.env, model: usesModel ? (p: any) => gw.callModel(brainCfg, p, { meter, role: "chat", budget: gate }) : null });
-  const judge = makeJudge({ cfgA: judgeCfg, cfgB: judge2Cfg, call: call(judgeMeter) });
+  // D-091: under --subscription every raw judge answer is kept per case (run.ts makeJudge's attempts, in order), so CI can
+  // re-judge the case by code (scripts/launch/s3-subscription.ts). runEval judges one case at a time.
+  const judgeRaw = new Map<string, { judge: "a" | "b"; text?: string; error?: string }[]>();
+  const judge: Judge = !subscription ? makeJudge({ cfgA: judgeCfg, cfgB: judge2Cfg, call: call(judgeMeter) }) : (it, reply, state) => {
+    const rec: { judge: "a" | "b"; text?: string; error?: string }[] = [];
+    judgeRaw.set(it.id, rec);
+    const base = call(judgeMeter);
+    return makeJudge({ cfgA: judgeCfg, cfgB: judge2Cfg, call: async (cfg, payload) => {
+      const who = payload.system === JUDGE_A_SYSTEM ? "a" : "b";
+      try { const res = await base(cfg, payload); rec.push({ judge: who, text: textOf(res) }); return res; }
+      catch (e) { rec.push({ judge: who, error: String(e instanceof Error ? e.message : e).slice(0, 300) }); throw e; }
+    } })(it, reply, state);
+  };
   const setName = opt("--set") || "official";
   let setPath: string | URL;
   // "heldout" is the sealed held-out set (the bar) from 2026-10-26; the 38 it used to name are the dev set.
@@ -337,7 +403,7 @@ if (import.meta.main) {
   const capStop = budgetStop(cap, now$), hardStop = budgetStop(hard, now$, 0.05);
   const raw = await runEval(items, brain, judge, () => capStop() ?? hardStop());
   const sealedSet = setName === "sealed" || setName === "heldout" || setName === "fresh";
-  const r = sealedSet ? redactSealed(raw) : raw;
+  const r = sealedSet ? redactSealed(raw) : subscription ? { ...raw, items: raw.items.map((x) => ({ ...x, judge_raw: judgeRaw.get(x.id) ?? [] })) } : raw;
   let source = "unknown";
   try { const o = await new Deno.Command("git", { args: ["rev-parse", "--short", "HEAD^2"] }).output(); if (o.success) source = new TextDecoder().decode(o.stdout).trim(); } catch { /* no second parent */ }
   let commit = "unknown";
@@ -350,6 +416,12 @@ if (import.meta.main) {
     judge_prompt_sha: await judgeFingerprint(JUDGE_PROMPT, { a: judgeCfg.model, b: judge2Cfg.model }), judge_disagreement: { items: split, rate: r.total ? split / r.total : 0 },
     commit, source_commit: source === "unknown" ? commit : source, run_at: new Date().toISOString(),
     cost_usd: costs, unpriced_calls: meter.unpriced + judgeMeter.unpriced, quote_usd: quote.total_usd, spend_line: spend, ledger: sharedLedger ? "shared" : "process-local",
+    ...(subscription ? { subscription: { mode: "claude CLI on the owner's subscription (D-089); API spend $0; usd figures are notional", cli: cliStats,
+      api_key_source: (cliStats as { apiKeySource?: string | null } | null)?.apiKeySource ?? null,
+      // D-091: one random id per pass, so one pass copied under five labels is five copies, not five passes.
+      run_id: crypto.randomUUID(),
+      sha: new TextDecoder().decode((await new Deno.Command("git", { args: ["rev-parse", "HEAD"], stdout: "piped" }).output()).stdout).trim(),
+      env_check: brainEnvCheck(), env_overrides: envOverrides } } : {}),
     budget_usd: budget, spent_before_usd: before, target_usd: target, hard_usd: hard, brain_turn_ms: BRAIN_TURN_MS, brain_calls: meter.calls, brain_failed_calls: meter.failed,
     route_attribution: attribution, ...r };
   await Deno.mkdir(new URL("./results/", import.meta.url), { recursive: true });

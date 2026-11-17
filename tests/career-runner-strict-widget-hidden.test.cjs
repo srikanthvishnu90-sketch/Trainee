@@ -23,7 +23,12 @@ const mk = (name, val) => `<!doctype html><html><body><h1>Apply</h1><form action
 <span id="wl">Preferred work location</span><div role="listbox" aria-labelledby="wl"><div role="option" aria-selected="true" data-id="3">Remote</div><div role="option" aria-selected="false" data-id="4">Office</div></div></div>
 <input type="hidden" name="${name}" value="${val}">
 <button type="submit">Submit application</button></form></body></html>`;
-const PAGES = { "/a": mk("work_location", "Remote"), "/office_id": mk("office_id", "3"), "/location_id": mk("location[id]", "3"), "/officeId": mk("officeId", "3") };
+// Second delta review of rs-07 (2026-11-17): the same container with a phone box's country picker placed before the listbox.
+const picker = (html) => html.replace('<label>Phone <input name="phone"></label>', '<label for="ph">Phone</label><div class="iti"><div class="iti__selected-flag"><input role="combobox" aria-label="Search" placeholder="Search"></div><input id="ph" type="tel" name="phone"></div>');
+const PAGES = { "/a": mk("work_location", "Remote"), "/office_id": mk("office_id", "3"), "/location_id": mk("location[id]", "3"), "/officeId": mk("officeId", "3"),
+  "/picker-a": picker(mk("work_location", "Remote")), "/picker-office_id": picker(mk("office_id", "3")),
+  // a long id that is not this posting's own (not in the page's address) keeps its widget too
+  "/picker-office_id_long": picker(mk("office_id", "12345678")) };
 let server, base, browser, resume, rsha;
 const posts = [];
 before(async () => {
@@ -45,10 +50,10 @@ test("a page-set hidden value beside a drawn listbox in a crowded container is a
   assert.deepEqual(posts, []);
 });
 
-for (const k of ["office_id", "location_id", "officeId"]) {
-  test(`delta review of rs-07: an id-valued page-set hidden value (${k}=3) beside that listbox is asked, never posted unconfirmed`, { skip, timeout: 60000 }, async () => {
+for (const k of ["office_id", "location_id", "officeId", "picker-a", "picker-office_id", "picker-office_id_long"]) {
+  test(`delta review of rs-07: a page-set hidden value (${k}) beside that listbox is asked, never posted unconfirmed, also with a phone picker before it`, { skip, timeout: 60000 }, async () => {
     const n = posts.length;
-    const p = { id: "wh-" + k, ats: "greenhouse", url: `${base}/${k}`, facts: { first_name: "Casey", last_name: "Example", email: "casey@example.invalid" }, answers: {}, resume: { path: resume, sha256: rsha, preparedWithSha256: rsha } };
+    const p = { id: "wh-" + k, ats: "greenhouse", url: `${base}/${k}`, facts: { first_name: "Casey", last_name: "Example", email: "casey@example.invalid", phone: "+1 312 555 0100" }, answers: {}, resume: { path: resume, sha256: rsha, preparedWithSha256: rsha } };
     p.approval = { approval_id: "a-" + k, hash: payloadHash(p) };
     const r = await applyOne(browser, p, { stepTimeoutMs: 8000, retries: 0 });
     assert.equal(r.status, "not_submitted", JSON.stringify(r));

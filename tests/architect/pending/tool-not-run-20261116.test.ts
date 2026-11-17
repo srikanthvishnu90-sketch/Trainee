@@ -66,7 +66,7 @@ Deno.test("NR-2 a second refusal ends that tool for the turn: a third call, even
   eq(JSON.parse(String(resultsOf(m.payloads[2])[0].content)).retry_allowed, false);
   ok(/will not run this turn/.test(JSON.parse(String(resultsOf(m.payloads[3])[0].content)).note));
   eq(r.tool_calls.map((c) => c.ok), [false, false, false]);
-  ok(r.reply.startsWith(LINE), r.reply);
+  ok(/^The people search (?:for Lakeshore )?did not run this time, so there is no result from it\./.test(r.reply), r.reply);
 });
 
 Deno.test("NR-3 C19: the not-run line is always added, no sentence is removed, and it costs no model call", async () => {
@@ -107,7 +107,7 @@ Deno.test("NR-5 no sentence is ever removed (O1, O2, O3)", async () => {
   const msg = "find lakeshore alumni at google, and does google hire interns?";
   const a = await run([people, comp], scripted([use("find_people", { employers: "Google" }, "a"), use("research_company", { company: "Google" }, "c"), use("find_people", { employers: "Google" }, "b"), text(o1)]), msg);
   const base = await run([people, comp], scripted([use("research_company", { company: "Google" }, "c"), text(o1)]), msg);
-  eq(a.reply, `${LINE}\n\n${base.reply}`, "a sentence the run research covers is kept as the guards keep it");
+  eq(a.reply, `${LINE.replace("people search", "people search for Google")}\n\n${base.reply}`, "a sentence the run research covers is kept as the guards keep it");
   for (const said of ["If anyone at a career fair asks, lead with your 2 internships. Which school should I search?", "Your profile has no summary line yet. Which school should I search?"]) {
     const r = await run([people], scripted([...twice("find_people"), text(said)]));
     eq(r.reply, `${LINE}\n\n${await baseline([people], said)}`);
@@ -136,4 +136,37 @@ Deno.test("NR-7 every tool the brain can be offered has a human label; an unknow
   const r = await run([tool("queue_application", ["posting_id"])], scripted([...twice("queue_application"), text("Which posting should I queue?")]), "queue it");
   ok(r.reply.startsWith("The requested step did not run this time"), r.reply);
   ok(!/queue_application/.test(r.reply), r.reply);
+});
+
+// Review rv3 of ag/cd-a-not-run (probes-rv3-cd/a3_probe.ts): the line is decided per CALL, goes wherever the turn's text goes out,
+// a retry that asked the person a question is not "failed", whitespace is missing, and labels read as actions.
+Deno.test("NR-8 per call: a refused call another call to the same tool did not cover still gets its line (N1, the C19 shape)", async () => {
+  const people = tool("find_people", ["school"]);
+  const r = await run([people], scripted([use("find_people", { school: "Lakeshore", employers: "Google" }, "a"), use("find_people", { employers: "Meta" }, "b"), use("find_people", { employers: "Meta" }, "c"), text("I found 3 Lakeshore alumni at Google and none at Meta.")]), "find lakeshore alumni at google and at meta");
+  ok(r.reply.startsWith("The people search for Meta did not run this time, so there is no result from it."), r.reply);
+  // A retry with the refused call's arguments (and more) covers it.
+  const r2 = await run([people], scripted([use("find_people", { employers: "Meta" }, "a"), use("find_people", { school: "Lakeshore", employers: "Meta" }, "b"), text("Found 3.")]));
+  ok(!r2.not_run && !/did not run/.test(r2.reply), r2.reply);
+});
+
+Deno.test("NR-9 the line goes in a shown text and its parts too (N3); a retry that asked the person is not 'failed' (N2)", async () => {
+  const shown = tool("draft_outreach", ["to"], async (_i, c: any) => { c.turn.show = { intent: "career_outreach_batch", text: "1. Draft to Jane\n\n2. Draft to Omar", parts: ["1. Draft to Jane", "2. Draft to Omar"] }; return { drafted: 2 }; });
+  const r = await run([shown, tool("find_email", ["name"])], scripted([use("find_email", {}, "a"), use("find_email", {}, "b"), use("draft_outreach", { to: "Jane" }, "c"), text("Here are the drafts.")]));
+  const line = "The inbox search did not run this time, so there is no result from it.";
+  ok(r.show && r.show.text.startsWith(line) && r.show.parts?.[0] === line && r.show.parts?.length === 3, JSON.stringify(r.show));
+  eq(r.reply, r.show!.text, "the reply and the shown text stay the same text");
+  const { AskPerson } = await import("../../../supabase/functions/_shared/agent/loop.ts");
+  const asks = tool("find_people", ["school"], async () => { throw new AskPerson("Which school did you go to?"); });
+  const a = await run([asks], scripted([use("find_people", {}, "a"), use("find_people", { school: "x" }, "b"), text("Which school did you go to?")]));
+  ok(/people search did not run/.test(a.reply) && !/failed/.test(a.reply), a.reply);
+});
+
+Deno.test("NR-10 whitespace-only input is missing (N10); labels read as actions (N11)", async () => {
+  runs.length = 0;
+  const r = await run([tool("find_people", ["school"])], scripted([use("find_people", { school: "   " }, "a"), text("Found none.")]));
+  eq(runs, [], "a whitespace school never runs the search");
+  ok(r.reply.startsWith(LINE), r.reply);
+  const f = await run([tool("create_file", ["kind"])], scripted([use("create_file", {}, "a"), use("create_file", {}, "b"), text("Here is your plan.")]), "make me a plan file");
+  ok(f.reply.startsWith("The file creation did not run this time"), f.reply);
+  for (const [name, label] of Object.entries(LABELS)) ok(/\b(?:search|check|lookup|read|save|update|creation|build|export|drafting|attachment|research|comparison|scoring|setup|stop|switch|recall|removal|confirmation|correction|brief)\b/.test(label), `${name}: "The ${label} did not run" does not read as an action`);
 });

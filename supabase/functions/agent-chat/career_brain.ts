@@ -351,11 +351,14 @@ export async function agentTurn(o: {
   // card with a payload (draft_outreach, draft_email_reply): those are never rewritten.
   const d = (ctx.turn as any)?.draft as { label: string; body: string; recheck: (b: string) => boolean } | undefined;
   if (result.show?.intent === "career_followup_draft" && d && result.reply === result.show.text) {
+    // Gap #5: code's not-run lines (loop.ts runAgentTurn) lead the shown text; they are kept and not counted as the draft.
+    const lead = result.notRunText ?? "";
+    const draftText = lead && result.reply.startsWith(lead) ? result.reply.slice(lead.length).trim() : result.reply;
     const bound = overLimit(draftLength);
-    if (textLength(result.reply) > bound) {
+    if (textLength(draftText) > bound) {
       const room = bound - textLength(d.label) - 2;
       const short = await condenseReply(o.model, d.body, { max: room, aim: draftLength.aim }, (long, out) => shortenedOk(long, out, room) && d.recheck(out));
-      if (short) { const text = `${short}\n\n${d.label}`; result = { ...result, reply: text, show: { ...result.show, text } }; }
+      if (short) { const text = [lead, `${short}\n\n${d.label}`].filter(Boolean).join("\n\n"); result = { ...result, reply: text, show: { ...result.show, text } }; }
     }
   }
   // D-067 (owner, must-fix (d): "each figure carries its source link and place"): a posting's pay said in the reply comes with that

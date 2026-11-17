@@ -3,7 +3,7 @@
 import { FACT_SCHEMA } from './fact_schema.ts';
 import { quarantinedFact } from './fact_quarantine.ts';
 
-type Key = 'country' | 'work_authorization' | 'phone';
+type Key = 'country' | 'work_authorization' | 'phone' | 'full_name' | 'first_name' | 'last_name' | 'email';
 interface FieldRow {
   value: string; factId: string; confirmed: true; user_id: string;
   provenance: string; confirmation_event_id: string; derived_from?: string[];
@@ -32,9 +32,19 @@ function derivationIds(f: any): string[] | undefined | null {
   }
   return present ? [...ids] : undefined;
 }
+// MASS APPLY CONVERSATIONS (2026-11-16, eval MA05): the contact line of a resume the person confirmed word for word
+// (career_router_evidence.ts evidenceResumeHeader: kind "profile", name "Full name" / "First name" / "Last name" / "Email",
+// each with its own fact_confirmed event). Only those exact names, and only a value that reads as one.
+const EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
+const NAME = /^[\p{L}][\p{L}'’.-]*(?: [\p{L}][\p{L}'’.-]*){0,5}$/u;
+const CONTACT: [RegExp, Key, (v: string) => string | null][] = [
+  [/^full name$/i, 'full_name', (v) => (NAME.test(v) ? v : null)], [/^first name$/i, 'first_name', (v) => (NAME.test(v) && !v.includes(' ') ? v : null)],
+  [/^last name$/i, 'last_name', (v) => (NAME.test(v) && !v.includes(' ') ? v : null)], [/^email$/i, 'email', (v) => (EMAIL.test(v) ? v : null)],
+];
 function fieldOf(f: any): { key: Key; value: string } | null {
   const t = clean(f.text), name = clean(f.name || f.title);
   let m: RegExpMatchArray | null;
+  if (f.kind === 'profile') for (const [re, key, ok] of CONTACT) if (re.test(name)) { const value = ok(String(f.value ?? '').trim()); return value ? { key, value } : null; }
   if ((f.kind === 'profile' && /^country$/i.test(name)) || (m = t.match(/^my country(?: of residence)? is (.+)$/i))) {
     const value = countryValue(clean(f.kind === 'profile' && /^country$/i.test(name) ? f.value : m![1]));
     return value ? { key: 'country', value } : null;

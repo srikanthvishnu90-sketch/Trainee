@@ -270,6 +270,10 @@ function STATE(qs) {
       case "combobox": {
         const w = el.closest(".select-shell, .select__container, .field-wrapper, [class*='combobox' i]") || el.parentElement;
         const v = w && w.querySelector(".select__single-value, [class*='single-value' i], [class*='singleValue' i], [data-combobox-value]");
+        // A multi-select (Greenhouse's react-select for "mark all that apply" and many custom lists; CI 44021741347: 10 Greenhouse rows
+        // "picked: ... | shows: ''") shows each choice as its own chip: what it holds is those chips' words, in order.
+        const chips = !v && w ? [...w.querySelectorAll(".select__multi-value__label, [class*='multi-value__label' i], [class*='multiValue' i] > [class*='label' i]")].map((c) => squash(c.textContent)).filter(Boolean) : [];
+        if (chips.length) return { q: d.q, filled: true, text: chips.join(", ") };
         // Ashby's location autocomplete has no value chip: the place picked from its list is written into the box itself
         // (strict benchmark run 42719264485). Read from the box only there, and only once its list is closed.
         const ash = !v && el.classList.contains("ashby-application-form-input-autocomplete") && el.getAttribute("aria-expanded") !== "true";
@@ -678,7 +682,10 @@ async function menuSelected(page, d, ctl0) {
   await input.press("ArrowDown").catch(() => {});
   await page.waitForTimeout(120);
   const ctl = (await input.getAttribute("aria-controls").catch(() => null)) || ctl0;
-  const loc = ctl ? page.locator(`[id="${ctl.replace(/"/g, "")}"] [role="option"][aria-selected="true"]`) : shell.locator('[role="option"][aria-selected="true"]');
+  // react-select marks the chosen option by its class (select__option--is-selected) and, in its newer builds, not by aria-selected
+  // (job-boards.greenhouse.io, 2026-11-16: "picked: United States +1 | shows: +1 | menu selected: ''").
+  const SELECTED = '[role="option"][aria-selected="true"], [role="option"].select__option--is-selected';
+  const loc = ctl ? page.locator(`[id="${ctl.replace(/"/g, "")}"]`).locator(SELECTED) : shell.locator(SELECTED);
   const held = (await loc.allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
   await input.press("Escape").catch(() => {});
   return held;
@@ -735,7 +742,9 @@ async function fillCombo(page, d, value, pick, phone, country) {
   // A country picker lists every country: the confirmed name is typed so the site's own filter narrows it before matching.
   // Ashby's place box fills its list from a lookup as you type: it gets up to 3 seconds to show. Any other box, 150 ms.
   const lookup = ashPlaces || pick === "place" || (await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => false));
-  if ((!list.length || d.phoneCountry) && pick !== "decline") { await input.fill(String(value).slice(0, 40)); list = []; for (let i = 0; i < (lookup ? 20 : 1) && !list.length; i++) { await page.waitForTimeout(150); list = await optionsNow(); } }
+  // The phone's country picker filters its long list after typing; it gets the same 3 seconds (the list came back empty at 150 ms on a
+  // busy machine: "Country: options_not_readable", job-boards.greenhouse.io/anc, 2026-11-16).
+  if ((!list.length || d.phoneCountry) && pick !== "decline") { await input.fill(String(value).slice(0, 40)); list = []; for (let i = 0; i < (lookup || d.phoneCountry ? 20 : 1) && !list.length; i++) { await page.waitForTimeout(150); list = await optionsNow(); } }
   if (!list.length) {
     // What the page drew as a list after typing, for the record (tags and classes only, cut short): never an answer.
     const seen = await page.evaluate(() => [...document.querySelectorAll("[role=listbox], [role=option], [class*='option' i], [class*='suggest' i], [class*='result' i], [class*='menu' i]")]

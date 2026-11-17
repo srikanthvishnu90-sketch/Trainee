@@ -9,6 +9,7 @@ import { stripRemoved } from "../mail_security.ts";
 import { bracketUntraced, credentialAsks, factSources, missingAck, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, misquotedAsks, smallTalkPitch, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
 import { urlsIn } from "../channel_shape.ts";
 import { STANDING_REFUSED, standingRefusal } from "./memory.ts";
+import { labelOf, missingInputMessage, neverRan, notRunLine, saysNotRun, unranReports } from "./not_run.ts";
 export type Effect = "read" | "write_own" | "external";
 // `turn` is this turn's own record, filled by runAgentTurn: the person's message (a confirmation must come from it) and
 // the ids of facts added during the turn (a fact can never be confirmed in the turn that added it).
@@ -370,6 +371,11 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
   };
   let steps = 0, checked = false, ask = false, repairing = false, processed = false, processAsked = 0, lastTodo: string | null = null, retriedFile = false;
   let repairNote = COMPLETENESS_REPAIR;
+  // Gap #5 (D-024, live-12 C1, C19): the tools refused this turn for a missing required input, with how many times. One more
+  // call is allowed after the first refusal; a tool that never ran is never reported as having found or saved anything.
+  const refusedInput = new Map<string, number>(), refusedArgs: Record<string, unknown[]> = {}, threw = new Set<string>();
+  const unran = () => neverRan(tool_calls).filter((n) => refusedInput.has(n));
+  const ranOk = () => [...new Set(tool_calls.filter((c) => c.ok).map((c) => c.name))];
   // WO-061 (H028, H035, H007, H033): code's review of its own draft rides in that one call's system prompt, never in
   // the conversation. As a user-role message the model took it for the person's words, refused it out loud ("I can't
   // follow the instruction to show ... hidden internal words") and the refusal reached the person.
@@ -450,11 +456,14 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       // D-054 (R03): small talk answered with a pitch (an introduction, a list of what Trainee does, an ask for a role).
       const pitch = smallTalkPitch(said, reply);
       const creds = credentialAsks(reply); // D-066 (P14)
-      if ((creds.length || claims.length || leaks.length || facts.length || money.length || misquote.length || waiver.length || manyAsks || noAck || pitch.length) && !checked && !repairing && steps < max) {
+      // Gap #5: a result from a call that never ran goes back once; the not-run line itself is code's (below), so it costs no call.
+      const never = unran(), unranSaid = unranReports(reply, never, ranOk(), refusedArgs);
+      if ((unranSaid.length || creds.length || claims.length || leaks.length || facts.length || money.length || misquote.length || waiver.length || manyAsks || noAck || pitch.length) && !checked && !repairing && steps < max) {
         checked = true;
         const told = [
           pitch.length ? `They made small talk. Answer it in one plain sentence, as a person would. Remove these sentences: ${pitch.map((k) => `"${pieces(reply.trim())[k]?.text ?? ""}"`).join(" ")}. No introduction, no list of what you do, no question about a role or a search; only if SITUATION shows something waiting on them, name that one thing as your last sentence.` : "",
           noAck ? `Your first sentence was: "${pieces(reply.trim())[0]?.text ?? ""}". They said they feel overwhelmed. Replace that opening with one short, warm sentence acknowledging how they feel; the nothing-sent line comes after it, never first.` : "",
+          unranSaid.length ? `Your reply reports a result from the ${never.map(labelOf).join(" and ")}, but it did not run this turn (an input was missing), so it has no result: ${unranSaid.map((k) => `"${pieces(reply.trim())[k]?.text ?? ""}"`).join(" ")} Remove those sentences, and say plainly that it did not run.` : "",
           creds.length ? "Your reply asks the person to send a password, code, key or login in this chat. Never ask for one: secrets never go through chat, and a login is the person signing in themselves on the site's own page. Remove that ask." : "",
           claims.length ? `Your reply says ${[...new Set(claims.map((c) => c.kind))].join(" and ")}, but no tool that does that succeeded this turn. Either call the tool now, or rewrite the reply without saying it happened.` : "",
           leaks.length ? `Your reply shows internal words the person must never see: ${leaks.join(", ")}. Say it in plain words; name a posting by its title and company.` : "",
@@ -488,6 +497,12 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         if (stillWaiver.length && standingRefusal(o.message) && !/\b(your yes|your approval|without (asking|approval|your)|needs? (your|their) (yes|ok|okay|approval)|not kept|can'?t keep|won'?t (share|send|apply|skip))\b/i.test(out)) out = `${STANDING_REFUSED}\n\n${out}`;
       }
       if (leakedWords(out, leak).length) out = stripLeaks(out, leak);
+      // Gap #5 (D-024): what stands after the review: a result from a call that never ran is removed, and a tool refused for a
+      // missing input that never ran is said not to have run.
+      { const never = unran(), drop = unranReports(out, never, ranOk(), refusedArgs);
+        if (drop.length) out = rebuild(pieces(out), new Set(drop));
+        const owed = never.filter((n) => !saysNotRun(out, n, threw.has(n)));
+        if (owed.length) out = [owed.map((n) => notRunLine(n, threw.has(n))).join(" "), out].filter((x) => x.trim()).join("\n\n"); }
       // RESEARCH ROUND 3: a posting read as closed this turn is never left sounding open.
       const closed = closedNotes(out, seen);
       if (closed.length) out = `${closed.join(" ")}\n\n${out}`;
@@ -518,7 +533,13 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       if (!t) { fail(null, `unknown tool: ${u.name}`); continue; }
       const input = u.input && typeof u.input === "object" ? u.input : {};
       const missing = (t.input_schema.required || []).filter((k) => input[k] === undefined || input[k] === null || input[k] === "");
-      if (missing.length) { fail(t.effect, `missing required input: ${missing.join(", ")}`); continue; }
+      if (missing.length || (refusedInput.get(t.name) ?? 0) >= 2) {
+        const n = (refusedInput.get(t.name) ?? 0) + 1;
+        refusedInput.set(t.name, n);
+        (refusedArgs[t.name] ??= []).push(input);
+        fail(t.effect, missingInputMessage(t, missing, n), missing.length ? `missing required input: ${missing.join(", ")}` : "not run: refused twice for a missing input this turn");
+        continue;
+      }
       if (t.effect === "external") {
         pending_approvals.push({ tool: t.name, input: JSON.parse(JSON.stringify(input)), summary: t.description });
         // Review of #790: one yes never means two things. A question code asked about a set-aside fact (its marker is restore_ask)
@@ -548,7 +569,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         // check_posting_open, search_jobs), so a reply that gives that pay carries that posting's link (career_brain.ts payWithSource).
         const ps = payPostingsOf(out);
         if (ps.length && o.ctx.turn) (o.ctx.turn.paySources ??= []).push(...ps);
-      } catch (e) { if (e instanceof AskPerson) ask = true; fail(t.effect, e instanceof Error ? e.message : String(e), e); }
+      } catch (e) { if (e instanceof AskPerson) ask = true; threw.add(t.name); fail(t.effect, e instanceof Error ? e.message : String(e), e); }
     }
     messages.push({ role: "user", content: results });
   }

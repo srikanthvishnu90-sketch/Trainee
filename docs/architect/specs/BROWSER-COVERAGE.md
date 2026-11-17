@@ -140,11 +140,16 @@ answered. The headline is unchanged and never counts it.
 **Dry-run guard, proved with its first wall removed.** `tests/career-browser-strict-guard.test.cjs` takes away the stop before the
 click and lets the production runner press Submit on local pages (a native submit; a board script that fetches, beacons, opens a
 WebSocket and calls `form.submit()`): the local employer receives nothing. Without the bench's gate and page script the same test
-receives `POST /submit`. `STRICT_INIT` now also replaces `WebSocket` (a socket is not a request the gate sees) in the page and,
-since the review of 2026-11-17 (probe p01-worker-ws-bench), in every Worker and SharedWorker the page starts (a bootstrap that installs
-the same refusal before the page's worker script runs, for nested workers too); WebTransport and peer connections are refused. Before
-that review fix, a socket opened from the page's own worker did reach the employer: the earlier claim that sockets never open held
-for the page only. Stated limit: a GET that carries typed values in its address to another host is still a GET and passes the gate
+receives `POST /submit`. `STRICT_INIT` also refuses the channels the gate does not see (review and delta review of 2026-11-17, probes p01-worker-ws-bench,
+p01-iframe-wsstream-bench, p01-worker-runs), in the page, in every same-origin frame (reached through `contentWindow` /
+`contentDocument` or when it is inserted) and in every Worker and SharedWorker any of them starts: `WebSocket` never opens;
+`WebSocketStream`, WebTransport and `RTCPeerConnection` are refused; `window.open` returns null; service workers are blocked. A
+worker gets a bootstrap, built from a real function, that installs the same refusal before the page's worker script runs; relative
+addresses inside it (fetch, `importScripts`, a nested worker, a module import) resolve against the worker's own script address as
+without the bootstrap. The page's workers really run under the bench: a positive control in the guard test sees each worker's GET
+reach the local employer (before the delta-review fix a quoting error made every page worker fail to start, so the worker tests
+passed without the wrapper running). Before the first review fix, a socket opened from the page's own worker did reach the employer:
+the earlier claim that sockets never open held for the page only. Stated limit: a GET that carries typed values in its address to another host is still a GET and passes the gate
 (images are not fetched); the bench does not prove that no answer can leave through a GET's address.
 
 | run | trunk / head | headline pass | ready if answered | answered: reached Submit (+ upload simulated) |
@@ -162,10 +167,13 @@ board says closed 11, sent to job list 3); upload simulated but not taken (Green
 Execution failures the answered column found and this branch fixed (each with a fixture test that fails on its parent):
 Personio's disabled-until-valid Submit and `(erforderlich)` required marks (19); a box and a choice under one label (Ashby's
 Phone over the texting consent: 5); a dropdown's floating list (Ashby); a Submit held by an unissued invisible Turnstile is that
-check, handed off (Personio); Teamtailor's `candidate[resume_remote_url]` box carrying the stored resume (9); a styled radio /
+check, handed off (Personio); Teamtailor's `candidate[resume_remote_url]` box carrying the stored resume (9; since the delta review of 2026-11-17 only on positive evidence that this run's file set put it there: the box was empty just before the resume was set, the file was then sent, as a multipart part with its own name, to the very host the https address names, and the address ends in the file's name; any other value there is asked); a styled radio /
 tick box whose input takes no click at its point (8). Two of these move the answered column less than their count on the live run:
 Ashby's iwoca dropdown still reads no options (its list is not a `role=listbox`; the fixture's is), and Teamtailor's next stop
-after the resume box is a page-set "Search" / "Sök" value (the job id) and its `range-custom_number` box.
+after the resume box is a page-set "Search" / "Sök" value (the job id) and its `range-custom_number` box. The job id fix (round 2 below) drops a
+neighbouring container's widget for a hidden value only when that container holds several questions and the widget is a phone
+box's own country picker (inside the intl-tel-input shell of a tel box, Teamtailor's "Search"); since the delta review of
+2026-11-17 it never keys on how the hidden value looks, so an id-valued page-set value beside any other widget is asked.
 
 Left, named: Workable's drawn Yes/No radios read back unheld after a full form (11); Greenhouse react-select boxes in other
 languages whose options do not open or match (9); Breezy page-set hidden controls with no label (2) and its `salaryCurrency` (3);
@@ -226,9 +234,17 @@ value as shown. Answered = reached Submit (+ upload simulated).
 
 Open only: sample 7 / 196 headline, 37 (+40) answered; held-out 12 / 191 headline, 38 (+46) answered. D-072: 173 and 172 of 220.
 The bracketed rows had their resume upload simulated and are never a pass. The Recruitee gains (held-out headline 0 → 5, answered
-0 → 13) depend on rs-11's fix (a phone box reset to a bare dial code is set again); that fix was tightened after this run by the review
-of 2026-11-17 (the re-set must read back as exactly the approved number, and national digits beside another named country refuse,
-rs-00), so the Recruitee rows were measured before that tightening and may fall where a widget strips the approved country code.
+0 → 13) depend on rs-11's fix (a phone box reset to a bare dial code is set again); that fix was tightened after this run by the review and delta
+review of 2026-11-17: the re-set must read back as exactly the approved number, and a box holding only the approved number's
+national digits (its country code gone) holds that number only when the phone's own shell shows the approved dial code, or the form
+has no country notion at all (rs-00, default-deny: a shell naming another country by flag class, image alt, data attribute, hidden
+country field or prefix select, or naming the person's own country without showing its code, is refused). So the Recruitee rows were
+measured before that tightening and may fall where a widget strips the approved country code.
 Left: Workable `no_submit_control` (3 and 4; not reproduced locally: the same postings reach Submit in a local dry run), Ashby's own
 dropdowns (an `ashby-application-form-input-autocomplete` list that drew no options after typing in a local dry run; no request was
 made), Recruitee 8 sample `field_not_filled`, Greenhouse 1 to 2. Throughput not re-measured: the machine's load average stayed 14 to 106.
+
+Every pass on this page (2026-11-16, rounds 1 to 3) was measured before the review fixes of 2026-11-17 (rs-00 phone country,
+rs-01 worker bootstrap and WebSocketStream, rs-05 resume box evidence, rs-07 phone-picker-only widget drop, rs-11 phone reset). Those
+fixes were not re-measured: rs-00, rs-05, rs-07 and rs-11 refuse more (Teamtailor and Recruitee rows may fall), and rs-01 lets
+page workers run under the bench as they do in production. The counts above are not the current runner's until the bench is run again.

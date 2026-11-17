@@ -31,6 +31,7 @@ import { type BrainName, checkExpect, HARNESS, type ModelFn, outcomeOf, searchSt
 import { isClaude, JUDGE_A_MAX_TOKENS, JUDGE_A_MODEL, JUDGE_A_SYSTEM, JUDGE_B_MAX_TOKENS, JUDGE_B_MODEL, JUDGE_B_SYSTEM, judgeBPrompt, judgeFingerprint, judgeModelProblem, parseJudgeB } from "./judges.ts";
 import { attribute, attributionLines } from "./attribution.ts";
 import * as RC from "../../supabase/functions/agent-chat/release_config.ts";
+import { inCi } from "../subscription/claude_cli.ts";
 import { budgetTargets, claudeSpentUsd, ledgerSpentUsd, openGate, preflight, quoteRun, spendLine } from "./eval_budget.ts";
 // stop: asked before each item; a reason ends the run there (the spend cap), and the items not run are not scored.
 export async function runEval(items: EvalItem[], brain: Brain, judge: Judge, stop?: () => string | null): Promise<EvalResult> {
@@ -268,13 +269,30 @@ export function redactSealed(r: EvalResult): EvalResult {
 // CAREER_BRAIN_ROUTER_INTENTS, CAREER_MODEL, CAREER_REPLY_MODEL, CAREER_REPLY_WRITER, CAREER_JUDGE, ANTHROPIC_EFFORT,
 // ANTHROPIC_MODEL, ANTHROPIC_BASE_URL, MODEL_PROVIDER, MODEL_BUDGET_*, EVAL_JUDGE_MODEL(_2), EVAL_SEALED_PATH, ...) and every
 // switch named in agent-chat/release_config.ts. The keys this runner removes itself before any call are not overrides.
-export const BRAIN_ENV_PREFIXES: readonly string[] = ["CAREER_", "ANTHROPIC_", "MODEL_", "EVAL_", "TRAINEE_", "UPMORE_", "CHANNEL_", "WHATSAPP_", "APPLY_", "CLOUD_RUNNER"];
+// EVAL_SEALED_PATH is refused too, so --set sealed cannot run in subscription mode yet.
+export const BRAIN_ENV_PREFIXES: readonly string[] = ["CAREER_", "ANTHROPIC_", "MODEL_", "EVAL_", "TRAINEE_", "UPMORE_", "CHANNEL_", "WHATSAPP_", "APPLY_", "CLOUD_RUNNER", "RESEARCH_", "BRAVE_"];
 export const BRAIN_ENV_REMOVED: readonly string[] = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "EVAL_LEDGER"];
 export const BRAIN_ENV_NAMES: readonly string[] = [...new Set([RC.ROLLBACK_ENV, RC.APPLY_ALL_YES_ENV, ...Object.keys(RC.RELEASE_FLAGS), ...Object.keys(RC.RELEASE_PENDING),
   ...RC.RELEASE_NEVER_ON, ...Object.keys(RC.RELEASE_DB_SWITCHES)])].sort();
 export const brainEnvCheck = () => ({ prefixes: [...BRAIN_ENV_PREFIXES], names: [...BRAIN_ENV_NAMES], removed: [...BRAIN_ENV_REMOVED] });
 export function brainEnvOverrides(env: Record<string, string>): string[] {
   return Object.keys(env).filter((k) => !BRAIN_ENV_REMOVED.includes(k) && (BRAIN_ENV_NAMES.includes(k) || BRAIN_ENV_PREFIXES.some((p) => k.startsWith(p)))).sort();
+}
+// The process environment under --subscription: the real key, the auth token, the database and the shared ledger are removed
+// (no request can reach the API or a database with them), and a placeholder key is set only for the product's "configured"
+// check; the bridge never sends it anywhere (the child CLI's environment is claude_cli.ts CHILD_ENV).
+export const SUBSCRIPTION_PLACEHOLDER_KEY = "sk-subscription-mode-not-a-key";
+export const SUBSCRIPTION_CLEARED: readonly string[] = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "EVAL_LEDGER"];
+export function enterSubscriptionEnv(env: { delete(k: string): void; set(k: string, v: string): void }): void {
+  for (const k of SUBSCRIPTION_CLEARED) env.delete(k);
+  env.set("ANTHROPIC_API_KEY", SUBSCRIPTION_PLACEHOLDER_KEY);
+}
+// fetch under --subscription: a request to the Messages endpoint itself goes to the CLI; everything else to `below`.
+export function subscriptionFetch(toCli: (req: Request) => Promise<Response>, isMessages: (url: string) => boolean, below: typeof fetch): typeof fetch {
+  return (async (input: Request | URL | string, init?: RequestInit) => {
+    const req = input instanceof Request && !init ? input : new Request(input as any, init);
+    return isMessages(req.url) ? await toCli(req) : await below(req);
+  }) as typeof fetch;
 }
 
 // ---------------------------------------------------------------------------------------------------- CLI
@@ -287,20 +305,15 @@ if (import.meta.main) {
   const envOverrides = subscription ? brainEnvOverrides(Deno.env.toObject()) : [];
   if (subscription) {
     if (envOverrides.length) { console.log(`NOT RUN: --subscription measures the committed code, but the environment sets ${envOverrides.join(", ")} (brain, model, gateway, judge or switch); unset them (D-089).`); Deno.exit(2); }
-    if (Deno.env.get("CI")) { console.log("NOT RUN: --subscription never runs in CI (D-089)."); Deno.exit(2); }
+    if (inCi()) { console.log("NOT RUN: --subscription never runs in CI (D-089)."); Deno.exit(2); }
     // D-091: a subscription measurement stands for the committed SHA, so the code it runs must be exactly that commit's.
     const dirty = await new Deno.Command("git", { args: ["status", "--porcelain", "--", "supabase", "packages", "evals", ":!evals/career/results"], stdout: "piped" }).output();
     if (!dirty.success || new TextDecoder().decode(dirty.stdout).trim()) { console.log("NOT RUN: --subscription needs a clean checkout (no change under supabase/, packages/ or evals/ outside evals/career/results/)."); Deno.exit(2); }
     const cli = await import("../subscription/claude_cli.ts");
     await cli.preflight();
     cliStats = cli.stats;
-    for (const k of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "EVAL_LEDGER"]) Deno.env.delete(k);
-    Deno.env.set("ANTHROPIC_API_KEY", "sk-subscription-mode-not-a-key"); // the product's "configured" check; the request never leaves this process
-    const below = globalThis.fetch;
-    globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
-      const req = input instanceof Request && !init ? input : new Request(input as any, init);
-      return cli.isMessagesUrl(req.url) ? await cli.cliFetch(req) : await below(req);
-    }) as typeof fetch;
+    enterSubscriptionEnv(Deno.env);
+    globalThis.fetch = subscriptionFetch(cli.cliFetch, cli.isMessagesUrl, globalThis.fetch);
     console.log("subscription mode (D-089): model calls go to the claude CLI on the subscription; apiKeySource none checked");
   }
   const get = (k: string) => Deno.env.get(k);

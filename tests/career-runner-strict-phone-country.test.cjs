@@ -37,6 +37,13 @@ const SHELLS = {
   "hidden-phone-region": ["refuse", `${BOX}<input type="hidden" name="phone[region]" value="NL">`],
   "outside-form-select": ["refuse", `${BOX}</form><select form="F" name="phone_country"><option value="US">US</option><option value="NL" selected>Netherlands +31</option></select><form>`],
   "hint-plus1-with-NL": ["refuse", `<div class="phone-field">${BOX}<small>Example: +1 202 555 0100</small></div><input type="hidden" name="candidate.phone_country" value="NL">`],
+  // Third review of rs-00 (2026-11-17): another phone widget's +1 in a parent beside the box, the box's own +1 beside a hidden NL,
+  // a form-associated element posting NL, and a select whose words say +1 but whose value is NL.
+  "other-widget-in-parent+hidden-NL": ["refuse", `<div class="phones"><div class="iti"><div class="iti__selected-flag" title="United States: +1"><div class="iti__selected-dial-code">+1</div></div><input type="tel" name="candidate.work_phone" aria-label="Work phone"></div>${BOX}</div><input type="hidden" name="candidate.phone_iso" value="NL">`],
+  "sibling-widget-no-wrapper+hidden-NL": ["refuse", `<div><span class="iti"><span class="iti__selected-dial-code">+1</span><input type="tel" name="candidate.home_phone" aria-label="Home phone"></span>${BOX}</div><input type="hidden" name="candidate.phone_iso" value="NL">`],
+  "form-associated-element-NL": ["refuse", `${BOX}<x-reg name="candidate.phone_reg"></x-reg><script>customElements.define("x-reg", class extends HTMLElement { static formAssociated = true; constructor() { super(); this.i = this.attachInternals(); this.i.setFormValue("NL"); } });</script>`],
+  "display+1-but-hidden-NL": ["refuse", `<div class="iti"><div class="iti__selected-flag" title="United States: +1"><div class="iti__selected-dial-code">+1</div></div>${BOX}</div><input type="hidden" name="candidate.phone_iso" value="NL">`],
+  "select-text+1-value-NL": ["refuse", `<div class="iti"><select name="candidate.cc" style="display:none"><option value="NL" selected>+1</option><option value="US">+1 </option></select>${BOX}</div>`],
 };
 const page = (shell) => `<!doctype html><html><body><h1>Apply</h1><form id="F" action="/apply" method="post">
 <label for="n">Full name *</label><input id="n" name="candidate.name" required><label for="e">Email address *</label><input id="e" type="email" name="candidate.email" required>

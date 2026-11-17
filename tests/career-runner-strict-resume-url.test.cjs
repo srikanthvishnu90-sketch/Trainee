@@ -1,8 +1,9 @@
 "use strict";
 // Teamtailor's upload script stores the chosen resume and writes where it stored it into a box of the form,
 // candidate[resume_remote_url] (answered run of 2026-11-16: 9 Teamtailor postings stopped on it as "set by the page, not confirmed
-// by you"). That box carries the approved resume itself: an https address ending in the resume's own file name. Any other value
-// the page puts there (another file, a plain http address) is still asked. Local page and mock employer.
+// by you"). That box carries the approved resume itself only on positive evidence that this run's file set put it there (delta
+// review of rs-05, default-deny): the box was empty just before the file was set, the file was then sent to the host the address
+// names, and the address ends in the file's own name. Anything else the page puts there is still asked. Local page and mock employer.
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -14,26 +15,47 @@ const { applyOne, payloadHash, sha256 } = require("../workers/career-browser/par
 let pw = null;
 for (const id of [process.env.UPMORE_PLAYWRIGHT_PATH, "playwright", "/opt/npm-tools/node_modules/playwright"].filter(Boolean)) { try { pw = require(id); break; } catch { /* next */ } }
 const skip = pw ? false : "PLAYWRIGHT_UNRESOLVABLE: set UPMORE_PLAYWRIGHT_PATH";
-const page = (stored, prefill) => `<!doctype html><html><body><h1>Apply</h1><form id="f" action="/applications" method="post">
+// A form whose resume box holds `prefill` at load, and whose page script is `js`. up(host) sends the chosen file to that host as a
+// board's upload script does (multipart, the file's own name); the request fails (no such host), what the page writes is the same.
+const STALE = "https://attacker-or-stale.example/someone-else/Casey-Example-Resume.pdf";
+const BOX = "[name='candidate[resume_remote_url]']";
+const form = (prefill, js) => `<!doctype html><html><body><h1>Apply</h1><form id="f" action="/applications" method="post">
 <label>First name <input name="candidate[first_name]" required></label><label>Last name <input name="candidate[last_name]" required></label>
 <label>Email <input type="email" name="candidate[email]" required></label>
 <label>Resume <input type="file" id="cv" name="candidate[resume]"></label>
-<input type="text" name="candidate[resume_remote_url]" value="${prefill || ""}" style="position:absolute;left:-9999px" tabindex="-1" aria-hidden="true">
+${prefill === null ? "" : `<input type="text" name="candidate[resume_remote_url]" value="${prefill}" style="position:absolute;left:-9999px" tabindex="-1" aria-hidden="true">`}
 <button type="submit">Send application</button></form><script>
-document.getElementById("cv").addEventListener("change", (e) => { const f = e.target.files[0];
-  document.querySelector("[name='candidate[resume_remote_url]']").value = ${JSON.stringify(stored)}.replace("{name}", f ? f.name : ""); });
+const up = (host, file) => { const d = new FormData(); d.append("key", "uploads/7f3a/" + file.name); d.append("file", file); return fetch("https://" + host + "/", { method: "POST", body: d }).catch(() => {}); };
+const onFile = (fn) => document.getElementById("cv").addEventListener("change", (e) => fn(e.target.files[0]));
+${js}
 </script></body></html>`;
+// The board's own flow: the chosen file is sent to its storage, then the stored address is written into the box.
+const stores = (address) => `onFile((f) => up("storage.example", f).then(() => { document.querySelector("${BOX}").value = ${JSON.stringify(address)}.replace("{name}", f.name); }));`;
+const PAGES = {
+  own: form("", stores("https://storage.example/uploads/7f3a/{name}")),
+  other: form("", stores("https://storage.example/uploads/7f3a/someone-else.pdf")),
+  // Review probe p05-resume-url-stale: the page itself puts another file's address there at load; this run's upload leaves it.
+  stale: form(STALE, `onFile((f) => up("storage.example", f));`),
+  // Delta review probe p05-resume-url-variants: the box empty at load, then set by the page in ways the file set did not cause.
+  "late-set-after-load": form("", `onFile((f) => up("storage.example", f)); setTimeout(() => { document.querySelector("${BOX}").value = ${JSON.stringify(STALE)}; }, 1500);`),
+  "set-on-first-input": form("", `onFile((f) => up("storage.example", f)); document.addEventListener("input", () => { document.querySelector("${BOX}").value = ${JSON.stringify(STALE)}; }, { once: true, capture: true });`),
+  "created-later": form(null, `onFile((f) => up("storage.example", f)); setTimeout(() => { const i = document.createElement("input"); i.type = "text"; i.name = "candidate[resume_remote_url]"; i.value = "https://storage.example/uploads/7f3a/Casey-Example-Resume.pdf"; i.style.cssText = "position:absolute;left:-9999px"; document.getElementById("f").appendChild(i); }, 800);`),
+  "prefilled-emptied-refilled": form("https://storage.example/uploads/old/Casey-Example-Resume.pdf", `onFile((f) => { const b = document.querySelector("${BOX}"); const was = b.value; b.value = ""; up("storage.example", f).then(() => { b.value = was; }); });`),
+  // the file went to the board's storage, but the address names another host
+  "third-party-host": form("", `onFile((f) => up("storage.example", f).then(() => { document.querySelector("${BOX}").value = "https://attacker-or-stale.example/x/" + f.name; }));`),
+  // the address is written on the file change, but the file was never sent anywhere
+  "written-without-upload": form("", `onFile((f) => { document.querySelector("${BOX}").value = "https://storage.example/uploads/7f3a/" + f.name; });`),
+  // a file of that name was sent to that host by the page at load, before this run set the resume
+  "upload-before-set": form("", `up("storage.example", new File(["x"], "Casey-Example-Resume.pdf", { type: "application/pdf" })); onFile((f) => { document.querySelector("${BOX}").value = "https://storage.example/uploads/7f3a/" + f.name; });`),
+};
 let server, base, browser, resume, rsha;
 const posts = [];
 before(async () => {
   if (skip) return;
   server = http.createServer((req, res) => {
     if (req.method === "POST") { const c = []; req.on("data", (x) => c.push(x)); req.on("end", () => { posts.push({ url: req.url, body: Buffer.concat(c).toString() }); res.writeHead(200, { "content-type": "text/html" }).end("<h1>Thank you for applying</h1>"); }); return; }
-    if (req.url === "/own") return res.writeHead(200, { "content-type": "text/html" }).end(page("https://storage.example/uploads/7f3a/{name}"));
-    // Review probe p05-resume-url-stale: the page itself puts another file's address there at load (no upload by this run), one
-    // that merely ends in the approved file's name; this run's upload then leaves it as it is.
-    if (req.url === "/stale") return res.writeHead(200, { "content-type": "text/html" }).end(page("", "https://attacker-or-stale.example/someone-else/Casey-Example-Resume.pdf").replace(/document\.getElementById\("cv"\)\.addEventListener[\s\S]*?\}\);/, ""));
-    if (req.url === "/other") return res.writeHead(200, { "content-type": "text/html" }).end(page("https://storage.example/uploads/7f3a/someone-else.pdf"));
+    const k = req.url.slice(1);
+    if (PAGES[k]) return res.writeHead(200, { "content-type": "text/html" }).end(PAGES[k]);
     res.writeHead(404).end();
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -65,3 +87,13 @@ test("an address the page put in that box at load is never the resume, even with
   assert.ok((r.needs || []).some((x) => /set by the page/.test(x.detail || "")), JSON.stringify(r.needs));
   assert.equal(posts.length, n);
 });
+
+for (const k of ["late-set-after-load", "set-on-first-input", "created-later", "prefilled-emptied-refilled", "third-party-host", "written-without-upload", "upload-before-set"]) {
+  test(`delta review of rs-05, ${k}: an address the file set did not put there is never the resume: asked, nothing sent`, { skip, timeout: 60000 }, async () => {
+    const n = posts.length;
+    const r = await applyOne(browser, job(k), { stepTimeoutMs: 8000, retries: 0 });
+    assert.equal(r.status, "not_submitted", JSON.stringify(r));
+    assert.ok((r.needs || []).some((x) => /set by the page/.test(x.detail || "")), JSON.stringify(r.needs));
+    assert.equal(posts.length, n);
+  });
+}

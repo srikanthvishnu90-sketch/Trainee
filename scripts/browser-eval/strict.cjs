@@ -145,8 +145,10 @@ function strictStop() {
   };
 }
 // The page script of the dry run: every form submit, form.submit() and requestSubmit() is cancelled (eval-lib SUBMIT_TRAP's
-// rule). A WebSocket opened from the page or from a worker it starts never opens (a socket is not a request the gate sees): it
-// reports closed and sends nothing; WebTransport and peer connections are refused. Stated limit: a GET that carries typed values
+// rule). A WebSocket opened from the page, a same-origin frame of it, or a worker any of them starts never opens (a socket is not
+// a request the gate sees): it reports closed and sends nothing; WebSocketStream, WebTransport and peer connections are refused there
+// too, and a popup is never opened. tests/career-browser-strict-guard.test.cjs carries a positive control (the page's own workers
+// really run under this script). Stated limit: a GET that carries typed values
 // in its address to another host (an image beacon, a script URL) is a GET, and the gate lets GETs through; images are not fetched,
 // but other GETs are, so the bench does not prove that no answer can leave through a GET's address.
 function STRICT_INIT() {
@@ -155,44 +157,78 @@ function STRICT_INIT() {
   window.addEventListener("submit", (e) => { e.preventDefault(); e.stopImmediatePropagation(); hit(); }, true);
   HTMLFormElement.prototype.submit = function () { hit(); };
   HTMLFormElement.prototype.requestSubmit = function () { hit(); };
-  class NoSocket extends EventTarget {
-    constructor(url) { super(); this.url = String(url); this.readyState = 3; window.__strictSockets = (window.__strictSockets || 0) + 1; setTimeout(() => { const e = new Event("close"); if (typeof this.onclose === "function") this.onclose(e); this.dispatchEvent(e); }, 0); }
-    send() { /* never sent */ }
-    close() { /* already closed */ }
-  }
-  NoSocket.CONNECTING = 0; NoSocket.OPEN = 1; NoSocket.CLOSING = 2; NoSocket.CLOSED = 3;
-  window.WebSocket = NoSocket;
-  // Other channels the request gate does not see are refused outright: WebTransport and peer connections (a data channel through a
-  // relay server), in the page and in every worker below.
-  const refuse = (what) => function () { throw new DOMException(`${what} is refused by the dry run`, "SecurityError"); };
-  for (const k of ["WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection"]) if (k in window) window[k] = refuse(k);
-  // Review of the rs-01 split (probe p01-worker-ws-bench): a page script's own Worker or SharedWorker runs outside this page script,
-  // so a socket it opened reached the employer while the bench reported a pass. Every worker the page starts now starts from a
-  // bootstrap that first installs the same refusals (WebSocket, WebTransport, peer connections; and the same bootstrap for any worker
-  // it starts itself), then loads the page's own worker script (importScripts, or a dynamic import for a module worker).
-  const PRELUDE = `(() => {
+  // Default-deny for the channels the request gate does not see (review of the rs-01 split, 2026-11-17: probes p01-worker-ws-bench,
+  // p01-iframe-wsstream-bench, p01-worker-runs, p01-modes). In this window, in every same-origin frame it holds, and in every worker
+  // any of them starts (and any worker such a worker starts): WebSocket never opens (it reports closed and sends nothing), and
+  // WebSocketStream, WebTransport and RTCPeerConnection are refused. A worker starts from a bootstrap that installs the same refusals,
+  // makes the worker's relative addresses resolve against its real script address (as they would without the bootstrap: location,
+  // fetch, Request, XMLHttpRequest, EventSource, importScripts, nested workers), then loads the page's own worker script
+  // (importScripts, or a dynamic import for a module worker). A popup is never opened (window.open returns null).
+  function workerPrelude(BASE, PRELUDE_SRC) {
+    const g = self, resolve = (u) => { try { return new URL(String(u), BASE).href; } catch { return u; } };
+    const deny = (k) => function () { throw new DOMException(k + " is refused by the dry run", "SecurityError"); };
     class NoSocket { constructor(u) { this.url = String(u); this.readyState = 3; setTimeout(() => { if (typeof this.onclose === "function") this.onclose({ type: "close" }); }, 0); }
       send() {} close() {} addEventListener() {} removeEventListener() {} dispatchEvent() { return false; } }
     NoSocket.CONNECTING = 0; NoSocket.OPEN = 1; NoSocket.CLOSING = 2; NoSocket.CLOSED = 3;
-    self.WebSocket = NoSocket;
-    for (const k of ["WebTransport", "RTCPeerConnection"]) if (k in self) self[k] = function () { throw new Error(k + " is refused by the dry run"); };
-    const P = __PRELUDE__;
-    for (const k of ["Worker", "SharedWorker"]) { const O = self[k]; if (typeof O !== "function") continue;
-      self[k] = function (u, o) { const abs = new URL(u, self.location.href).href, mod = o && o.type === "module";
-        const src = P.replace("__PRELUDE__", JSON.stringify(P)) + (mod ? "\nawait import(" + JSON.stringify(abs) + ");" : "\nimportScripts(" + JSON.stringify(abs) + ");");
-        return new O(URL.createObjectURL(new Blob([src], { type: "text/javascript" })), o); }; }
-  })();`;
-  for (const k of ["Worker", "SharedWorker"]) {
-    const O = window[k]; if (typeof O !== "function") continue;
-    const W = function (u, o) {
-      const abs = new URL(u, location.href).href, mod = o && o.type === "module";
-      window.__strictWorkers = (window.__strictWorkers || 0) + 1;
-      const src = PRELUDE.replace("__PRELUDE__", JSON.stringify(PRELUDE)) + (mod ? `\nawait import(${JSON.stringify(abs)});` : `\nimportScripts(${JSON.stringify(abs)});`);
-      return new O(URL.createObjectURL(new Blob([src], { type: "text/javascript" })), o);
-    };
-    W.prototype = O.prototype;
-    window[k] = W;
+    g.WebSocket = NoSocket;
+    for (const k of ["WebSocketStream", "WebTransport", "RTCPeerConnection"]) if (k in g) g[k] = deny(k);
+    let loc = null; try { loc = new URL(BASE); } catch { /* an opaque address: left as it is */ }
+    if (loc && /^https?:$/.test(loc.protocol)) try { Object.defineProperty(g, "location", { configurable: true, get: () => loc }); } catch { /* kept */ }
+    const rel = (i) => (typeof i === "string" || i instanceof URL ? resolve(i) : i);
+    if (g.fetch) { const f0 = g.fetch; g.fetch = function (i, o) { return f0.call(this, rel(i), o); }; }
+    if (g.Request) { const R0 = g.Request; const R = function (i, o) { return new R0(rel(i), o); }; R.prototype = R0.prototype; g.Request = R; }
+    if (g.XMLHttpRequest) { const o0 = g.XMLHttpRequest.prototype.open; g.XMLHttpRequest.prototype.open = function (m, u, ...r) { return o0.call(this, m, resolve(u), ...r); }; }
+    if (g.EventSource) { const E0 = g.EventSource; const E = function (u, o) { return new E0(resolve(u), o); }; E.prototype = E0.prototype; g.EventSource = E; }
+    if (g.importScripts) { const i0 = g.importScripts; g.importScripts = function (...us) { return i0.apply(this, us.map(resolve)); }; }
+    const boot = (abs, o) => { const mod = !!(o && o.type === "module");
+      const src = "(" + PRELUDE_SRC + ")(" + JSON.stringify(abs) + ", " + JSON.stringify(PRELUDE_SRC) + ");\n" + (mod ? "await import(" + JSON.stringify(abs) + ");\n" : "importScripts(" + JSON.stringify(abs) + ");\n");
+      return URL.createObjectURL(new Blob([src], { type: "text/javascript" })); };
+    for (const k of ["Worker", "SharedWorker"]) { const O = g[k]; if (typeof O !== "function") continue;
+      const W = function (u, o) { return new O(boot(resolve(u), o), o); }; W.prototype = O.prototype; g[k] = W; }
   }
+  const PRELUDE_SRC = workerPrelude.toString();
+  const install = (w) => {
+    try {
+      if (!w || w.__strictInstalled) return;
+      w.__strictInstalled = true;
+      class NoSocket extends w.EventTarget {
+        constructor(url) { super(); this.url = String(url); this.readyState = 3; window.__strictSockets = (window.__strictSockets || 0) + 1; setTimeout(() => { const e = new w.Event("close"); if (typeof this.onclose === "function") this.onclose(e); this.dispatchEvent(e); }, 0); }
+        send() { /* never sent */ }
+        close() { /* already closed */ }
+      }
+      NoSocket.CONNECTING = 0; NoSocket.OPEN = 1; NoSocket.CLOSING = 2; NoSocket.CLOSED = 3;
+      w.WebSocket = NoSocket;
+      for (const k of ["WebSocketStream", "WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection"]) if (k in w) w[k] = function () { throw new w.DOMException(`${k} is refused by the dry run`, "SecurityError"); };
+      w.open = function () { return null; };
+      for (const k of ["Worker", "SharedWorker"]) {
+        const O = w[k]; if (typeof O !== "function") continue;
+        const W = function (u, o) {
+          const abs = new w.URL(u, w.document.baseURI || w.location.href).href, mod = !!(o && o.type === "module");
+          window.__strictWorkers = (window.__strictWorkers || 0) + 1;
+          const src = "(" + PRELUDE_SRC + ")(" + JSON.stringify(abs) + ", " + JSON.stringify(PRELUDE_SRC) + ");\n" + (mod ? "await import(" + JSON.stringify(abs) + ");\n" : "importScripts(" + JSON.stringify(abs) + ");\n");
+          return new O(w.URL.createObjectURL(new w.Blob([src], { type: "text/javascript" })), o);
+        };
+        W.prototype = O.prototype;
+        w[k] = W;
+      }
+      // A same-origin frame of this window gets the same refusals the moment it is reached: by its element (contentWindow,
+      // contentDocument) or when it is put in the page (every insertion that may carry a frame).
+      const P = w.HTMLIFrameElement && w.HTMLIFrameElement.prototype;
+      for (const E of [w.HTMLIFrameElement, w.HTMLFrameElement]) {
+        if (!E) continue;
+        const cw = Object.getOwnPropertyDescriptor(E.prototype, "contentWindow"), cd = Object.getOwnPropertyDescriptor(E.prototype, "contentDocument");
+        if (cw && cw.get) Object.defineProperty(E.prototype, "contentWindow", { configurable: true, get() { const x = cw.get.call(this); install(x); return x; } });
+        if (cd && cd.get) Object.defineProperty(E.prototype, "contentDocument", { configurable: true, get() { const x = cd.get.call(this); if (x) install(x.defaultView); return x; } });
+      }
+      const sweep = (n) => { try { if (n && n.nodeType === 1 && (/^(IFRAME|FRAME)$/.test(n.tagName) || (n.querySelector && n.querySelector("iframe, frame")))) for (const f of w.document.querySelectorAll("iframe, frame")) install(f.contentWindow); } catch { /* cross-origin: its own init script */ } };
+      const after = (C, names) => { for (const m of names) { const o = C && C.prototype[m]; if (typeof o !== "function") continue; C.prototype[m] = function (...a) { const r = o.apply(this, a); for (const x of a) sweep(x); sweep(this); return r; }; } };
+      after(w.Node, ["appendChild", "insertBefore", "replaceChild"]);
+      after(w.Element, ["append", "prepend", "after", "before", "replaceWith", "replaceChildren", "insertAdjacentElement", "insertAdjacentHTML"]);
+      for (const k of ["innerHTML", "outerHTML"]) { const d = Object.getOwnPropertyDescriptor(w.Element.prototype, k); if (d && d.set) Object.defineProperty(w.Element.prototype, k, { configurable: true, get: d.get, set(v) { const p = this.parentNode; d.set.call(this, v); sweep(this.isConnected ? this : p); } }); }
+      void P;
+    } catch { /* a frame that cannot be reached is another origin's, with this init script of its own */ }
+  };
+  install(window);
   // A board's own resume upload is answered inside the browser (SIMULATED_UPLOADS), so its body never goes over the wire and the
   // browser fires no upload progress for it. Greenhouse's job-boards upload shows the file only once its upload reached 100%
   // (strict runs 43276162667 and CI 44021741347: 19 'Attach' rows, progress bar left at 0%). For those same addresses only, the

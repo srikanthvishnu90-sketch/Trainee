@@ -1,5 +1,5 @@
 // ag/ma-07-yes-route (2026-11-17; source: ag/mass-apply-10 997634ed7, which said one route for the whole person). The reply to
-// a card's yes says what will actually happen to EACH approved application (D-024): Trainee's cloud sends it; it goes from
+// a card's yes says what will actually happen to EACH approved application (D-024): Trainee's cloud should send it (said as not yet confirmed: a forecast, the receipt is the proof); it goes from
 // their computer (the cloud is off for them); or the cloud can't send it because <reason>, so it goes from their computer.
 // What cannot be read is said as unconfirmed. Before: every approved line read "approved; it is sent next, from your
 // computer or, if you turned it on, the cloud", whatever the posting's board.
@@ -53,7 +53,7 @@ const yes = async (a: ReturnType<typeof admin>, cloudOn: boolean | null = true, 
 
 Deno.test("a mixed batch: the Greenhouse application goes by the cloud; the Workday one can't, and says why and how it goes", async () => {
   const reply = await yes(admin());
-  assert(/^1\. Lumen: approved; Trainee's cloud sends it, on its own/m.test(reply), reply);
+  assert(/^1\. Lumen: approved; Trainee's cloud should send it, on its own, but that is not confirmed yet/m.test(reply), reply);
   assert(/^2\. Acme: approved; the cloud can't send it because Trainee's cloud does not submit on acme\.wd5\.myworkdayjobs\.com \(it submits on Greenhouse, Lever, Ashby and SmartRecruiters\), so it is sent from your computer/m.test(reply), reply);
   assert(!/if you turned it on, the cloud/.test(reply), "never the one line for everyone");
   assert(/^2 approved exactly as shown\. Nothing has gone to an employer yet\./.test(reply), reply);
@@ -70,7 +70,7 @@ Deno.test("the cloud off for them: each goes from their computer; the gate is ne
 Deno.test("why the cloud can't: switches off, a family not open yet (a waiver with sends left opens it), a form only they can submit", async () => {
   assert(/^1\. Lumen: approved; the cloud can't send it because Trainee's cloud sending is switched off right now/m.test(await yes(admin(), false)));
   assert(/^1\. Lumen: approved; the cloud can't send it because Trainee's cloud is not open for Greenhouse applications yet/m.test(await yes(admin({ gate: {} }))));
-  assert(/^1\. Lumen: approved; Trainee's cloud sends it/m.test(await yes(admin({ gate: {}, waiver: 3 }))));
+  assert(/^1\. Lumen: approved; Trainee's cloud should send it/m.test(await yes(admin({ gate: {}, waiver: 3 }))));
   const formOnly = await yes(admin({ prepared: [{ ...PREPARED[0], destination: "" as string }, PREPARED[1]] }));
   assert(/^1\. Lumen: approved; the cloud can't send it because the employer's form there is one only you can submit/m.test(formOnly), formOnly);
 });
@@ -78,10 +78,10 @@ Deno.test("why the cloud can't: switches off, a family not open yet (a waiver wi
 Deno.test("unreadable: said as unconfirmed, never guessed; only what was approved gets a route", async () => {
   for (const r of [await yes(admin({ optIn: "error" })), await yes(admin(), null), await yes(admin({ prepared: "error" }))]) {
     assert(/^1\. Lumen: approved; how it is sent is unconfirmed right now/m.test(r), r);
-    assert(!/Trainee's cloud sends it/.test(r), r);
+    assert(!/Trainee's cloud should send it/.test(r), r);
   }
   const only = await yes(admin(), true, "yes except 2");
-  assert(/^1\. Lumen: approved; Trainee's cloud sends it/m.test(only) && /^2\. Acme: not sent: you left it out/m.test(only), only);
+  assert(/^1\. Lumen: approved; Trainee's cloud should send it/m.test(only) && /^2\. Acme: not sent: you left it out/m.test(only), only);
   // No route reader at all (another caller): exactly as before.
   assert(/1\. Lumen: approved; it is sent next, from your computer or, if you turned it on, the cloud/.test(answerText([{ n: 1, company: "Lumen", result: "queued" }])));
 });

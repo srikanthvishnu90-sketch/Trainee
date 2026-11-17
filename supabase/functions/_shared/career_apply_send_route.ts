@@ -57,7 +57,10 @@ export function routeOf(f: RouteFacts): ItemRoute {
 const FROM_COMPUTER = "it is sent from your computer the next time Trainee's extension or desktop app is open there";
 export function routeLine(r: ItemRoute | null | undefined): string {
   if (!r || r.via === "unknown") return "approved; how it is sent is unconfirmed right now (from your computer, or the cloud if you turned it on)";
-  if (r.via === "cloud") return "approved; Trainee's cloud sends it, on its own; ask \"did they go through?\" for its receipt";
+  // A forecast, not proof (D-024): the cloud's claim checks more at send time than this reads (the resume in the cloud, a
+  // stale application, a closed posting, pauses, the daily pace, the 24-hour approval window), so it is said as not yet
+  // confirmed; the receipt is the proof.
+  if (r.via === "cloud") return "approved; Trainee's cloud should send it, on its own, but that is not confirmed yet (it checks the application again before it sends); ask \"did they go through?\" for its receipt";
   if (r.via === "computer") return `approved; ${FROM_COMPUTER} (the cloud is off for you)`;
   return `approved; the cloud can't send it because ${r.why}, so ${FROM_COMPUTER}`;
 }
@@ -72,8 +75,9 @@ export async function supabaseSendRoutes(admin: any, userId: string, preparedIds
   if (!ids.length) return out;
   const optIn = await admin.rpc("career_apply_cloud_optin_get", { p_user: userId }).then((r: any) => r?.error ? null : r?.data?.enabled === true, () => null);
   const cloudOn = optIn === true ? await o.cloudOn().catch(() => null) : null;
-  const rows = await admin.from("career_apply_prepared").select("id,url,destination:payload->>destination").eq("user_id", userId).in("id", ids)
-    .then((r: any) => (r?.error ? null : (r?.data ?? []) as { id: string; url: string | null; destination: string | null }[]), () => null);
+  type PreparedRow = { id: string; url: string | null; destination: string | null };
+  const rows: PreparedRow[] | null = await admin.from("career_apply_prepared").select("id,url,destination:payload->>destination").eq("user_id", userId).in("id", ids)
+    .then((r: any) => (r?.error ? null : (r?.data ?? []) as PreparedRow[]), () => null);
   // The applications unreadable: only "the cloud is off for you" is still known.
   if (!rows) {
     if (optIn === false) for (const id of ids) out.set(id, { via: "computer" });
@@ -82,7 +86,8 @@ export async function supabaseSendRoutes(admin: any, userId: string, preparedIds
   // The gate, once per family on this card (at most four reads, and none unless the cloud could take it).
   const gate = new Map<string, boolean | null>();
   if (optIn === true && cloudOn === true) {
-    for (const fam of new Set(rows.map((r) => portalOf(r.url)).filter((f): f is string => !!f))) {
+    const families = new Set<string>(rows.map((r: PreparedRow) => portalOf(r.url)).filter((f: string | null): f is string => !!f));
+    for (const fam of families) {
       const open = await admin.rpc("career_apply_cloud_open", { p_portal: fam }).then((r: any) => (r?.error ? null : r?.data === true), () => null);
       const left = open === false
         ? await admin.rpc("career_apply_cloud_waiver_left", { p_user: userId, p_portal: fam, p_now: new Date(o.now).toISOString() }).then((r: any) => (r?.error ? null : Number(r?.data)), () => null)

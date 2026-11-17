@@ -543,6 +543,9 @@ async function fillCheckbox(page, d) {
   await checkOption(page, page.locator(sel(d.q)).first());
   return (await stateOf(page, d)).filled ? { ok: true } : { ok: false, reason: "readback_mismatch" };
 }
+// Every time this run set the resume file on a page: when (runner clock) and what the resume-named boxes held just before.
+const RESUME_SETS = new WeakMap();
+const resumeSetsOf = (page) => (RESUME_SETS.get(page) || []).slice();
 async function fillFile(page, d, path) {
   // The upload's own block (the input's nearest ancestor that holds no other question), marked before the file is set: a board
   // that swaps the input for a chip naming the file once it has it (Greenhouse's "Attach": the input is replaced, strict
@@ -559,6 +562,15 @@ async function fillFile(page, d, path) {
       box = up;
     }
   }, [d.q]).catch(() => {});
+  // Delta review of rs-05 (probe p05-resume-url-variants, 2026-11-17): what each box named for the resume holds immediately before
+  // this run sets the resume file, kept in the runner (never in the page). Only a box empty here can later carry the stored resume's
+  // address (handoff.cjs carriesResume; the upload itself is seen by parallel-apply).
+  if (d.role === "resume") {
+    const before = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("input:not([type=file]):not([type=checkbox]):not([type=radio]), textarea")]
+      .filter((e) => e.name && /resume|\bcv\b|curriculum|lebenslauf/i.test(e.name)).map((e) => [e.name, String(e.value || "")]))).catch(() => ({}));
+    if (!RESUME_SETS.has(page)) RESUME_SETS.set(page, []);
+    RESUME_SETS.get(page).push({ at: Date.now(), before });
+  }
   await page.locator(sel(d.q)).first().setInputFiles(path);
   const name = require("node:path").basename(path);
   for (let i = 0; i < 20; i++) {
@@ -1117,4 +1129,4 @@ function holdsApproved(f, want, facts = {}) {
   if (key === "state") return !matchState([held], want).error;
   return false;
 }
-module.exports = { PLACEHOLDER_OPTION, isPlaceholderOption, driftedFills, isHoneypot, MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };
+module.exports = { resumeSetsOf, PLACEHOLDER_OPTION, isPlaceholderOption, driftedFills, isHoneypot, MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };

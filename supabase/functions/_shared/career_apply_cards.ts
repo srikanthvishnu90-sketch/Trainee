@@ -444,14 +444,21 @@ const RESULT: Record<string, string> = {
 };
 // The answer in the person's words, from the database's own per-item results (never from what was asked). `declined`
 // says why an item the person did not approve was not sent.
-export function answerText(results: CardResult[], o: { declined?: "left_out" | "said_no" } = {}): string {
+// MASS APPLY CONVERSATIONS (2026-11-16): what happens next to an approved application, said by the route it will really take
+// (the person's cloud setting, career_apply_cloud_optin), not "from your computer or, if you turned it on, the cloud".
+export type SendRoute = "cloud" | "computer";
+const QUEUED_BY: Record<SendRoute, string> = {
+  cloud: "approved; Trainee's cloud sends it next, on its own; ask \"did they go through?\" for its receipt",
+  computer: "approved; it is sent from your computer the next time Trainee's extension or desktop app is open there (the cloud is off for you)",
+};
+export function answerText(results: CardResult[], o: { declined?: "left_out" | "said_no"; route?: SendRoute | null } = {}): string {
   const queued = results.filter((r) => r.result === "queued").length;
   const notSent = results.length - queued;
   // WHOLE JOURNEYS R2: an item whose prepared application is gone (a newer resume or a corrected entry discarded it after the
   // card was shown) has no company in the database's result; it read "1. null: not sent: ...". Said plainly instead.
   const lines = results.map((r) =>
     `${r.n}. ${(r.company === null || r.company === undefined ? "" : String(r.company)).replace(/\s+/g, " ").trim().slice(0, 80) || "An application no longer on file"}: ${
-      r.said ?? (r.result === "declined" && o.declined ? RESULT[o.declined] : RESULT[r.result] ?? RESULT.refused)
+      r.said ?? (r.result === "declined" && o.declined ? RESULT[o.declined] : r.result === "queued" && o.route ? QUEUED_BY[o.route] : RESULT[r.result] ?? RESULT.refused)
     }`
   );
   const changed = results.filter((r) => r.result === "changed").length;
@@ -542,6 +549,8 @@ export async function cardTurn(
     // WO-G (fix 12): the review File of each application on the card (application_review.ts, built by code from the prepared
     // payloads): a line per application with its link, or null. A review that cannot be made never changes the card.
     review?: (shown: Prepared[]) => Promise<string | null>;
+    // The route an approved application takes (the person's cloud setting); absent or unreadable: said as before.
+    route?: () => Promise<SendRoute | null>;
   },
 ): Promise<{ reply: string; status: string; card_id?: string; parts?: string[] } | null> {
   const withReview = async (c: Batch, out: { reply: string; status: string; card_id?: string; parts?: string[] }) => {
@@ -734,7 +743,8 @@ export async function cardTurn(
       detail: { card: card.id, n: x.n, result: x.result },
       source: "card",
     })));
-    const reply = answerText(results, { declined: r.kind === "no" ? "said_no" : "left_out" });
+    const route = results.some((x) => x.result === "queued") && o.route ? await o.route().catch(() => null) : null;
+    const reply = answerText(results, { declined: r.kind === "no" ? "said_no" : "left_out", route });
     const parts = pagesOf(reply);
     return { reply, status: "answered", ...(parts.length ? { parts } : {}) };
   } catch (e: any) {

@@ -552,9 +552,17 @@ export function factCorrectionNote(lines: string[]): string {
 // question Trainee just asked in a practice session is a practice answer, reviewed verdict first.
 const PRACTICE_ASK = /\b(?:quiz|drill)\s+me\b|\bask me\b[^.?!]{0,80}\b(?:question|about a time)\b|\b(?:mock|practice|behavioral|technical|coding|real)\s+(?:interview\s+)?(?:round|question|interview)\b|\b(?:one|a|an|another)\s+(?:\w+\s+){0,3}(?:interview|practice)\s+question\b|\binterview\s+time\b|\b(?:harder|tougher)\s+(?:one|question|follow[- ]?up)\b/;
 export function practiceAskOf(message: string): boolean { return PRACTICE_ASK.test(lc(message)); }
+// 2026-11-16 (live-12 C22, "what's the going rate for swe interns in chicago, hourly", sent after a behavioral practice question):
+// a QUESTION or REQUEST about pay, salary or a going rate is a new ask, never an answer to the practice question. The shape
+// decides, not the words: a practice answer that tells a story about pay ("I negotiated the pay ... the market rate") is an answer.
+const ASK_SHAPE = /^(?:(?:ok(?:ay)?|so|also|and|hey|actually|wait|quick question|btw)[,:]?\s+)*(?:what|what's|whats|how|how's|hows|is|are|do|does|did|can|could|should|would|will|who|where|which|tell me|give me|show me|find|look up|check|pull up)\b|\?\s*$/;
+const PAY_OR_RATE_ASK = /\b(?:going|market|typical|average|usual|median|hourly|annual)\s+(?:hourly\s+)?(?:rate|pay|salary|salaries|wage|wages)\b|\b(?:pay|salary|salaries|compensation|wages?)\s+(?:for|in|at|range|band)\b|\bhow\s+much\s+(?:do|does|would|will|can|could)\b[^.?!]{0,40}\b(?:make|earn|pay|get\s+paid)\b/;
 export function practiceAnswerOf(message: string, history: Msg[]): boolean {
   const t = lc(message);
   if (!t || practiceAskOf(t)) return false;
+  // A short phrase with no first person ("typical hourly pay for nursing assistants") is a search typed as a request too.
+  const shaped = ASK_SHAPE.test(t) || (t.length <= 80 && !/\b(?:i|i'm|im|i've|i'd|my|me|we|our|us)\b/.test(t));
+  if (PAY_OR_RATE_ASK.test(t) && shaped && !CODE_LIKE.test(String(message ?? ""))) return false;
   const h = (history ?? []).filter((m) => m && typeof m.content === "string");
   const lastA = [...h].reverse().find((m) => m.role === "assistant"), lastU = [...h].reverse().find((m) => m.role === "user");
   if (!lastA || !lastU) return false;

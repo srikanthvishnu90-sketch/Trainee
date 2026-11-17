@@ -1,7 +1,8 @@
 // The 10/10 rubric's gap #8, tailoring half (2026-11-16; live-12 C10). Architect ruling: entries are never reordered inside a
 // section (RESUME-TEMPLATES E5); a resume tailored to one posting splits Experience into Relevant then Additional Experience.
 //   CU-2   the split, each section newest first; one section stays without the split, with fewer than four entries, or on an edit
-//   CU-2b  whole words and programming stack decide relevance; the changelog says the split only when the printed file shows it
+//   CU-2b  structured skill overlap decides relevance; the changelog says the split only when the printed file shows it
+//   CU-2c  (review rv3) no kind-of-work words: no skills on either side, no split; never "same as your base resume" with a split
 //   deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/pending/relevance-split-20261116.test.ts
 import assertNode from "node:assert/strict";
 import { CareerRouter, CareerTailor } from "../../../supabase/functions/_shared/router_core.career.js";
@@ -73,9 +74,13 @@ Deno.test("CU-2b the split reads whole words and stack; the changelog says it on
   const profile = { facts };
   const resume = { sections: [{ heading: "Experience", lines: facts.map((f) => ({ type: "entry", text: f.text, factIds: [f.id] })) }] };
   const heads = (r: any, h: string) => (r.sections.find((x: any) => x.heading === h)?.lines ?? []).map((l: any) => l.factIds[0]);
-  const swe = relevanceSplit(resume, CareerTailor.parseJD("Software Engineer Intern at Initech\n\nJava, Python, SQL."), profile);
-  ok(heads(swe, "Relevant Experience").includes("e2"), `Go and Kubernetes count for a Java and Python posting: ${JSON.stringify(swe.sections.map((x: any) => x.heading))}`);
+  // Architect direction (rv3): structured overlap only, so a posting that names Go and Kubernetes makes the Go entry relevant,
+  // and one that names only Java, Python and SQL makes nothing here relevant (no split).
+  const swe = relevanceSplit(resume, CareerTailor.parseJD("Software Engineer Intern at Initech\n\nGo, Kubernetes, Docker."), profile);
+  ok(heads(swe, "Relevant Experience").includes("e2"), `Go and Kubernetes named by the posting: ${JSON.stringify(swe.sections.map((x: any) => x.heading))}`);
   ok(heads(swe, "Additional Experience").includes("e1") && heads(swe, "Additional Experience").includes("e4"), JSON.stringify(heads(swe, "Additional Experience")));
+  const java = relevanceSplit(resume, CareerTailor.parseJD("Software Engineer Intern at Initech\n\nJava, Python, SQL."), profile);
+  eq(java.sections.map((x: any) => x.heading), ["Experience"], "no overlap, no split");
   const pm = relevanceSplit(resume, CareerTailor.parseJD("Product Manager Intern at Initech\n\nWork with engineering and design to define features."), profile);
   ok(!heads(pm, "Relevant Experience").includes("e3"), "'management' is not the word 'manager'");
   // Their own layout printed its own headings, without the split: the changelog does not say it was split.
@@ -96,25 +101,53 @@ Deno.test("CU-2b the split reads whole words and stack; the changelog says it on
   ok(/Split your experience for this posting/.test(String(plain.changelog)), String(plain.changelog));
 });
 
-// Review rv2 of ag/cd-d-relevance-split: ONE relevance judgement (relevantTo) for the split and the changelog, from skills, stack
-// and the kind of work in the entry's own words, never title-word overlap. A marketing posting at a software company makes the
-// go-to-market role relevant; a software posting makes the founder and AI-tooling roles relevant.
-Deno.test("CU-2c one judgement for the split and the changelog; the kind of work decides, not title words", async () => {
-  const profile = personaProfile();
-  const make = (title: string, desc: string) => tailorForPosting({ userId: "00000000-0000-4000-8000-000000001614", profile, posting: { text: `${title} at Acme\n\n${desc}`, job_id: "x", company: "Acme" }, deps: { render: edgeRenderer(), resumes: memoryResumeStore() }, now: NOW, reviewDraft: true, split: "relevance" } as any);
+// Review rv3 of ag/cd-d-relevance-split (probes-rv3-cd/d3_probe.ts), architect direction: relevance is structured skill overlap
+// only (the posting's own skills against each entry's named skills and tools, a framework counting for its language); no "kind of
+// work" word lists (they made a product-marketing entry relevant to a software posting and "data entry" relevant to data roles).
+// With no skills on either side there is no split. A split resume is never "the same as your base resume".
+const RES = `Jordan Lee
+Northfield University, BS Computer Science, Expected May 2028. GPA 3.7
+Skills: Python, Java, SQL, Excel
+Experience
+Brightline, Product Marketing Intern (June 2026 - August 2026): launched the developer platform's API campaign; built landing pages and content for our app; grew signups 30%.
+Corvid Labs, Software Engineering Intern (2025): built REST APIs in Java and Spring; deployed services to AWS.
+Kestrel Analytics, Data Analyst Intern (2024): SQL dashboards in Tableau; weekly metrics for the sales team.
+Northfield Library, Data Entry Assistant (2023): entered catalog data.
+Maple Cafe, Barista (2022 - 2023): served customers; trained new staff.
+Campus Research Lab, Research Assistant (2023): user research interviews and a literature review.`;
+const profileFrom = (resume: string) => { const ctx: any = { now: NOW, thread: {} }; CareerRouter.handleChat(`Here's my resume:\n${resume}`, ctx); CareerRouter.handleChat("Yes, that's my resume", ctx); return ctx.profile; };
+
+Deno.test("CU-2c structured skill overlap only: the one judgement for the split and the changelog; no skills, no split", async () => {
+  const profile = profileFrom(RES);
+  const make = (title: string, desc: string, prof = profile) => tailorForPosting({ userId: "00000000-0000-4000-8000-000000001614", profile: prof, posting: { text: `${title} at Acme\n\n${desc}`, job_id: "x", company: "Acme" }, deps: { render: edgeRenderer(), resumes: memoryResumeStore() }, now: NOW, reviewDraft: true, split: "relevance" } as any);
   const heads = (v: any, sec: string) => v.detail.doc.lines.filter((l: any) => l.section === sec && l.type === "entry").map((l: any) => String(l.text).split(",")[0]);
-  const mkt: any = await make("Software Marketing Intern", "Write launch content for our software products.");
-  ok(heads(mkt, "Relevant Experience").includes("Elmstead") && !heads(mkt, "Relevant Experience").includes("Pixelforge"), `marketing: ${heads(mkt, "Relevant Experience").join(" | ")}`);
-  const p = POSTINGS[0];
-  const swe: any = await make(p.title, p.description);
-  for (const e of ["Rallyup", "Waypoint", "Ondo", "Harbor Global", "Pixelforge", "Crestline Partners"]) ok(heads(swe, "Relevant Experience").includes(e), `software: ${e} is not relevant: ${heads(swe, "Relevant Experience").join(" | ")}`);
-  ok(heads(swe, "Additional Experience").includes("Elmstead"), heads(swe, "Additional Experience").join(" | "));
-  // One judgement: an entry is under Relevant Experience exactly when relevantTo says so.
-  const jd = CareerTailor.parseJD(`${p.title} at Acme\n\n${p.description}`);
+  const swe: any = await make("Software Engineer Intern", "Build backend services in Java. Strong CS fundamentals.");
+  eq(heads(swe, "Relevant Experience"), ["Corvid Labs"], "D1: the product-marketing entry is not relevant to a software posting");
+  ok(heads(swe, "Additional Experience").includes("Brightline"));
+  const mkt: any = await make("Marketing Analyst Intern", "Analyze campaign performance with SQL.");
+  eq(heads(mkt, "Relevant Experience"), ["Kestrel Analytics"], "D9: SQL, never 'data entry'");
+  ok(heads(mkt, "Additional Experience").includes("Northfield Library"));
+  for (const [t, d] of [["Product Marketing Manager Intern", "Own launches and messaging for our developer platform."], ["Software Marketing Intern", "Write launch content for our software products."], ["Strategy and Operations Associate", "Drive cross-functional projects; build dashboards; analysis."]]) {
+    const v: any = await make(t, d);
+    eq(heads(v, "Relevant Experience"), [], `${t}: no skills named, no split`);
+    ok(heads(v, "Experience").length === 6, `${t}: one Experience section`);
+  }
+  // The one judgement: an entry is under Relevant Experience exactly when relevantTo says so.
+  const jd = CareerTailor.parseJD("Software Engineer Intern at Acme\n\nBuild backend services in Java. Strong CS fundamentals.");
   const entries = swe.detail.doc.lines.filter((l: any) => l.type === "entry" && /Experience$/.test(l.section));
   const judged = relevantTo(jd, profile, entries.map((l: any) => String(l.factIds[0])));
   for (const l of entries) eq(l.section === "Relevant Experience", judged.has(String(l.factIds[0])), String(l.text).slice(0, 40));
-  // And the changelog does not call an entry under Relevant Experience one "this posting doesn't ask for".
-  ok(!/doesn't ask for/.test(String(swe.changelog)) && /Split your experience for this posting: 6 under Relevant Experience/.test(String(swe.changelog)), String(swe.changelog));
+  ok(!/doesn't ask for/.test(String(swe.changelog)), String(swe.changelog));
+  // A split resume is never "the same as your base resume" (D5 on the reviewed head said both).
+  const lean = profileFrom(`Jordan Lee
+Northfield University, BS Economics, Expected May 2028.
+Skills: SQL, Excel
+Experience
+Kestrel Analytics, Data Analyst Intern (2025): SQL dashboards in Tableau.
+Maple Cafe, Barista (2024): served customers.
+Northfield Library, Assistant (2023): shelved books.
+Campus Store, Cashier (2022): ran the register.`);
+  for (const v of [swe, mkt, await make("Data Analyst Intern", "Analyze data with SQL.", lean), await make("Growth Engineer Intern", "Build experiments in our web app in TypeScript.")] as any[]) {
+    ok(!(/Same as your base resume/.test(String(v.changelog)) && /Split your experience/.test(String(v.changelog))), String(v.changelog));
+  }
 });
-

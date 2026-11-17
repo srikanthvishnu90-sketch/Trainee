@@ -299,52 +299,24 @@ export function applyPersonaOrder(resume0: any, lead: string[]): any {
 // or none is, or the section has fewer than SPLIT_MIN entries, the single section stays. Entries and lines move whole, never
 // changed; the other sections keep their places.
 //
-// The judgement (review rv2: no title-word overlap): an entry is relevant when it shows the posting's skills (a framework counts
-// for its language), or, for a posting that asks for programming, any programming stack, or when the KIND OF WORK in the entry's
-// own text is the posting's kind. The posting's kind is read from its title's function word ("Software Marketing Intern" is
-// marketing; "Software Engineer" is engineering), or, with none, from its text.
+// The judgement (architect direction after review rv3: structured skill overlap only; the "kind of work" word lists let a
+// go-to-market role recur as relevant and counted "data entry" as data work): an entry is relevant when a skill or tool it names
+// (CareerTailor.skillsInText over its own title, text, bullets and listed skills) is one the posting's own requirements or skills
+// name (parseJD's must-have and nice-to-have skills), a framework counting for its language (React for JavaScript). If the posting
+// names no skills, or no entry names any, there is no judgement and no split.
 const FAMILY: Record<string, string[]> = {
   javascript: ["react", "node.js", "nodejs", "vue", "angular", "next.js", "typescript", "express"], python: ["django", "flask", "pandas", "numpy", "fastapi", "pytorch"],
   java: ["spring", "kotlin"], sql: ["postgresql", "postgres", "mysql", "sqlite"],
 };
-const STACK = new Set(["python", "java", "javascript", "typescript", "go", "rust", "c", "c++", "c#", "ruby", "kotlin", "swift", "scala", "php", "sql", "react", "node.js", "nodejs", "vue", "angular", "next.js", "django", "flask", "spring", "docker", "kubernetes", "aws", "gcp", "azure", "pytorch", "tensorflow", "machine learning", "git", "linux", "html", "css", "graphql", "postgresql", "postgres", "mysql", "data structures", "algorithms"]);
-export type WorkKind = "engineering" | "marketing" | "sales" | "research" | "data" | "finance" | "product" | "design";
-// The kind of work an entry's own words describe.
-const WORK: Record<WorkKind, RegExp> = {
-  engineering: /\b(?:built|build(?:s|ing)?|coded|code|coding|develop(?:s|ed|ing|er)?|engineer(?:ed|ing)?|software|tooling|apps?|websites?|apis?|platforms?|agents?|automation|pipelines?|deploy(?:ed|ing)?|programm\w*|backend|frontend|full[- ]stack|infrastructure)\b/i,
-  marketing: /\b(?:gtm|go[- ]to[- ]market|marketing|campaigns?|launch(?:es|ed)?|content|brand(?:ing)?|growth|social media|partner programs?|community|customer discovery)\b/i,
-  sales: /\b(?:sales|selling|account executives?|deals?|pipeline of customers|paying (?:teams|customers)|business development)\b/i,
-  research: /\b(?:research(?:er|ed|ing)?|stud(?:y|ies|ied)|experiments?|papers?)\b/i,
-  data: /\b(?:data|analytics?|analy[sz](?:is|ed|ing)|dashboards?|sql|excel|tableau|metrics)\b/i,
-  finance: /\b(?:investment|investing|banking|private equity|m&a|finance|financial|trading|valuation)\b/i,
-  product: /\b(?:product (?:manag\w*|roadmaps?|features?)|roadmaps?|user research|stakeholders?)\b/i,
-  design: /\b(?:design(?:ed|ing|er)?|figma|ux|ui|prototypes?)\b/i,
-};
-// The function a posting's title names (its role), before any domain word ("Software" in "Software Marketing Intern").
-const FUNCTION: [RegExp, WorkKind][] = [
-  [/\b(?:software engineer|engineer|developer|programmer|swe|sde)\b/i, "engineering"], [/\b(?:marketing|growth|brand|communications|content)\b/i, "marketing"],
-  [/\b(?:sales|account executive|business development)\b/i, "sales"], [/\bresearch(?:er)?\b/i, "research"], [/\b(?:data|analyst|analytics)\b/i, "data"],
-  [/\b(?:investment|banking|finance|trading|private equity)\b/i, "finance"], [/\bproduct manager\b/i, "product"], [/\bdesigner\b/i, "design"],
-];
-export function postingKinds(jd: any): WorkKind[] {
-  const title = String(jd?.title || String(jd?.rawText || "").split("\n")[0] || "").split(/\s+at\s+/i)[0];
-  const fromTitle = [...new Set(FUNCTION.filter(([re]) => re.test(title)).map(([, k]) => k))];
-  if (fromTitle.length) return fromTitle;
-  const body = String(jd?.rawText || "");
-  const counts = (Object.keys(WORK) as WorkKind[]).map((k) => [k, (body.match(new RegExp(WORK[k].source, "gi")) ?? []).length] as const).filter(([, n]) => n > 0).sort((x, y) => y[1] - x[1]);
-  return counts.length ? [counts[0][0]] : [];
-}
-// The one relevance judgement: the fact ids of the entries relevant to this posting.
+// The one relevance judgement: the fact ids of the entries relevant to this posting (empty when either side names no skills).
 export function relevantTo(jd: any, profile: any, factIds: string[]): Set<string> {
   const wanted = new Set(wantedOf(jd).map((x: string) => String(x).toLowerCase()));
   for (const [lang, kin] of Object.entries(FAMILY)) if (wanted.has(lang)) for (const k of kin) wanted.add(k);
-  const technical = [...wanted].some((x) => STACK.has(x)), kinds = postingKinds(jd);
   const out = new Set<string>();
+  if (!wanted.size) return out;
   for (const id of factIds) {
     const f = CareerProfile.getFact(profile, id);
-    if (!f) continue;
-    const own = corpusOf(f), skills = CareerTailor.skillsInText(own).map((x: string) => x.toLowerCase());
-    if (skills.some((x: string) => wanted.has(x)) || (technical && skills.some((x: string) => STACK.has(x))) || kinds.some((k) => WORK[k].test(own))) out.add(id);
+    if (f && CareerTailor.skillsInText(corpusOf(f)).some((x: string) => wanted.has(x.toLowerCase()))) out.add(id);
   }
   return out;
 }
@@ -1029,7 +1001,9 @@ export async function tailorForPosting(o: {
   // headings (their own layout prints its own headings, review of f7abd6c30).
   const printedText = r.lines?.length ? r.lines.join("\n") : ((CareerRender as any).sourceLines(doc) as { text: string }[]).map((l) => l.text).join("\n");
   const shows = (h: string) => new RegExp(`^\\s*${h}\\s*$`, "im").test(printedText);
-  if (split && shows(RELEVANT_HEADING) && shows(ADDITIONAL_HEADING)) log.line = `${log.line} Split your experience for this posting: ${rel} under ${RELEVANT_HEADING} (they show its skills or its kind of work), ${add} under ${ADDITIONAL_HEADING}, each newest first.`;
+  // Review rv3: a split resume is never "the same as your base resume".
+  if (split) log.line = log.line.replace(/^Same as your base resume; it already fits this posting\.\s*/, "").trim();
+  if (split && shows(RELEVANT_HEADING) && shows(ADDITIONAL_HEADING)) log.line = `${log.line} Split your experience for this posting: ${rel} under ${RELEVANT_HEADING} (they name skills the posting asks for), ${add} under ${ADDITIONAL_HEADING}, each newest first.`;
   const selected = new Set(doc.lines.flatMap((l: any) => l.factIds));
   // What the person reads, the same on every channel: plain words, and the link alone on its own line so any texting app
   // makes it tappable.

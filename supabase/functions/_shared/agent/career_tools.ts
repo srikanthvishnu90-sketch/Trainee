@@ -787,7 +787,7 @@ export function careerTools(deps: {
     },
     {
       name: "queue_applications", effect: "write_own",
-      description: "Start applying: put the postings the person chose (from search_jobs, with job_id) in their own apply queue, up to their daily limit. Code checks each against the posting on file, the employer they named or were shown, the 30-day rule and their current employer. Nothing is sent: each goes only after they approve its card in the Trainee extension. Say what was queued, what was refused and why.",
+      description: "Start applying: put the postings the person chose (from search_jobs, with job_id) in their own apply queue, up to their daily limit. Code checks each against the posting on file, the employer they named or were shown, the 30-day rule and their current employer. Nothing is sent: what is queued goes only on their yes to the card that shows it, as HOW APPROVAL WORKS says. Say what was queued, what was refused and why.",
       input_schema: obj({ postings: { type: "array", description: "The postings to apply to, from search_jobs", items: obj({ url: str("The posting's link as search_jobs returned it"), job_id: str("The posting's job_id as search_jobs returned it (always pass it: an employer's own careers-page link is opened at its board's form)"), company: str("Employer"), title: str("Job title") }, ["url"]) } }, ["postings"]),
       run: async (i, c) => {
         if (!deps.wants) throw new Error("applying from chat is not connected here; say so, and that the person can paste posting links into the Trainee extension's queue");

@@ -552,9 +552,13 @@ export function factCorrectionNote(lines: string[]): string {
 // question Trainee just asked in a practice session is a practice answer, reviewed verdict first.
 const PRACTICE_ASK = /\b(?:quiz|drill)\s+me\b|\bask me\b[^.?!]{0,80}\b(?:question|about a time)\b|\b(?:mock|practice|behavioral|technical|coding|real)\s+(?:interview\s+)?(?:round|question|interview)\b|\b(?:one|a|an|another)\s+(?:\w+\s+){0,3}(?:interview|practice)\s+question\b|\binterview\s+time\b|\b(?:harder|tougher)\s+(?:one|question|follow[- ]?up)\b/;
 export function practiceAskOf(message: string): boolean { return PRACTICE_ASK.test(lc(message)); }
+// 2026-11-16 (live-12 C22, "what's the going rate for swe interns in chicago, hourly", sent after a behavioral practice question):
+// a question about pay, salary or a going rate is a new ask, never an answer to the practice question.
+const PAY_OR_RATE_ASK = /\b(?:going|market|typical|average|usual|median|hourly|annual)\s+(?:hourly\s+)?(?:rate|pay|salary|salaries|wage|wages)\b|\b(?:pay|salary|salaries|compensation|wages?)\s+(?:for|in|at|range|band)\b|\bhow\s+much\s+(?:do|does|would|will|can|could)\b[^.?!]{0,40}\b(?:make|earn|pay|get\s+paid)\b/;
 export function practiceAnswerOf(message: string, history: Msg[]): boolean {
   const t = lc(message);
   if (!t || practiceAskOf(t)) return false;
+  if (PAY_OR_RATE_ASK.test(t) && !CODE_LIKE.test(String(message ?? ""))) return false;
   const h = (history ?? []).filter((m) => m && typeof m.content === "string");
   const lastA = [...h].reverse().find((m) => m.role === "assistant"), lastU = [...h].reverse().find((m) => m.role === "user");
   if (!lastA || !lastU) return false;

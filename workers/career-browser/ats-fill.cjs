@@ -755,6 +755,21 @@ function decide(d, ctx) {
   const sameLabel = ctx.labelNames && ctx.labelNames.get(labelKey(d));
   const standard = (sameLabel || []).filter((n) => BOARD_STANDARD.test(n));
   const boardOwn = standard.length === 1 && BOARD_STANDARD.test(String(d.name || ""));
+  // A box and a choice under one label (Ashby's "Phone" over the number box and a texting-consent Yes/No; strict answered run of
+  // 2026-11-16: 2 of 20 Ashby postings stopped label_on_form_twice once the consent was answered): an approved answer that is exactly
+  // one of the choice's own options is that choice's answer, and the box takes its confirmed fact as when nothing was answered. Any
+  // other pairing (two boxes, two choices, an answer that is no option of the choice) stays as below.
+  const twins = ctx.labelQs && ctx.labelQs.get(labelKey(d));
+  if (twins && twins.length === 2 && !boardOwn) {
+    const ans = answerFor(d.label, answers);
+    const choice = twins.filter((x) => ["radio", "buttons", "select"].includes(x.kind) && Array.isArray(x.options)), box = twins.filter((x) => ["text", "textarea"].includes(x.kind));
+    if (!blank(ans) && choice.length === 1 && box.length === 1 && !matchOption(choice[0].options.map((o) => o.label), ans).error) {
+      if (d.q === choice[0].q) return { status: "fill", value: String(ans), source: "answer" };
+      // The choice's answer is never the box's fact (factsFrom would read an approved "Phone" answer as the phone).
+      const f0 = factValue(d.label, facts || {}), f = !blank(f0) && String(f0).trim() !== String(ans).trim() ? f0 : undefined;
+      if (d.q === box[0].q) return !blank(f) ? { status: "fill", value: String(f), source: "fact" } : d.required ? { status: "ask", reason: "no_confirmed_answer" } : { status: "skip", reason: "optional_left_blank" };
+    }
+  }
   if (ctx.labelCount && (ctx.labelCount.get(labelKey(d)) || 0) > 1 && !boardOwn && standard.length === 1 && blank(answerFor(d.label, answers))) return { status: "ask", reason: "no_confirmed_answer" };
   if (ctx.labelCount && (ctx.labelCount.get(labelKey(d)) || 0) > 1 && !boardOwn) {
     if (!blank(answerFor(d.label, answers))) return { status: "ask", reason: "label_on_form_twice" };
@@ -849,6 +864,7 @@ async function fillForm(page, ctx0) {
     ctx.labelCount = labelCounts(qs);
     ctx.labelKinds = labelKinds(qs);
     ctx.labelNames = labelNames(qs);
+    ctx.labelQs = new Map(); for (const x of qs) if (x.kind !== "file") { const k = labelKey(x); if (!ctx.labelQs.has(k)) ctx.labelQs.set(k, []); ctx.labelQs.get(k).push(x); }
     ctx.siblings = qs.map((x) => x.label);
     const fresh = qs.filter((d) => !handled.has(`${d.label}|${d.kind}|${d.name}`));
     if (!fresh.length) break;

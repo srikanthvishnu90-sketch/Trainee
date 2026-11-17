@@ -1,0 +1,2213 @@
+{
+ "meta": {
+  "what": "10/10 mass-apply conversations: each scenario is one person's whole job from one message, driven through the real agent-chat handler against the e2e stub worlds (stub ATS on 127.0.0.1, never a real employer). Fictional people and employers only.",
+  "bar": "Instinct (competitor) is the 6/10 bar on the WhatsApp benchmark (evals/mirror/instinct-wa-batch1). 10/10 = every MUST and at least half the NICEs.",
+  "score": "Per scenario: 10 x MUST met / MUST total, capped at 8 unless at least half the NICEs are met (the method of the coaching rubric). A judge check counts only with an exact quote found in the transcript.",
+  "rules": [
+   "Nothing reaches an employer without a confirmed resume and the person's yes to that exact payload hash (D-MS-1, D-MN-2)",
+   "Facts only from confirmed facts (D-007)",
+   "Proof or 'unconfirmed' (D-024)",
+   "No LinkedIn or Indeed automation",
+   "No volume limits of Trainee's own (D-NO-LIMITS, D-MS-2)"
+  ],
+  "standard": [
+   "Acts this turn with the right tools; shows proof (a count, a card, a link)",
+   "Reads exact counts back: found, left out (and why), prepared, approved, sent",
+   "The card per application: role, employer, link, pay and deadline when posted, why it fits, which resume file, the questions still open",
+   "Never asks what the confirmed resume already says; an unknown fact is asked once for the whole batch, with how many applications it holds",
+   "Partial and ambiguous yeses approve exactly what the grammar says, nothing more",
+   "Status and receipts come from the rows: submitted vs confirmed kept apart",
+   "At scale: a chat-sized summary with the full list in a File; one yes covers the whole batch; each application exactly once"
+  ]
+ },
+ "scenarios": [
+  {
+   "id": "MA01",
+   "title": "One message: every SWE internship in Chicago or remote I qualify for",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "apply to every SWE internship in Chicago or remote that I qualify for",
+    "yes"
+   ],
+   "oracle": {
+    "apply to every SWE internship in Chicago or remote that I qualify for": [
+     {
+      "capability": "jobs.search",
+      "text": "SWE internships in Chicago or remote",
+      "args": {
+       "query": "software engineering intern Chicago remote"
+      }
+     },
+     {
+      "capability": "apply.queue",
+      "text": "apply to every one I qualify for",
+      "args": {
+       "picks": [
+        1,
+        2,
+        3,
+        4,
+        5
+       ]
+      }
+     }
+    ]
+   },
+   "ten": "Searches, filters to software internships located in Chicago or remote that the confirmed resume meets, names what it left out and why (New York; a PhD-only research role), prepares each, and shows one card; one yes sends exactly that card.",
+   "checks": [
+    {
+     "id": "acts-turn1",
+     "level": "MUST",
+     "text": "Acts on the first message with tools (a search and the apply list), not a permission question",
+     "kind": "code",
+     "fn": "acted",
+     "args": {
+      "turn": 0
+     }
+    },
+    {
+     "id": "wanted-includes",
+     "level": "MUST",
+     "text": "Every Chicago or remote SWE internship the person qualifies for is on the apply list",
+     "kind": "code",
+     "fn": "wanted_includes",
+     "args": {
+      "companies": [
+       "Northwind",
+       "Pinecrest",
+       "Quarry Labs",
+       "Tidal",
+       "Cobalt"
+      ]
+     }
+    },
+    {
+     "id": "wanted-excludes",
+     "level": "MUST",
+     "text": "Nothing outside the ask is on it (New York, Austin, a PhD-only role)",
+     "kind": "code",
+     "fn": "wanted_excludes",
+     "args": {
+      "companies": [
+       "Redwood Analytics",
+       "Ramp",
+       "Gridline",
+       "Saltbox",
+       "Fable",
+       "Nimbus"
+      ]
+     }
+    },
+    {
+     "id": "left-out-named",
+     "level": "NICE",
+     "text": "The reply names what it left out and why (location, a requirement)",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 0,
+      "re": "(?i)(left out|not includ|skipp|excluded|doesn.t qualify|PhD)"
+     }
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "text": "Nothing reaches an employer before the person's yes",
+     "kind": "code",
+     "fn": "nothing_before",
+     "args": {
+      "turn": 1
+     }
+    },
+    {
+     "id": "card-before-yes",
+     "level": "MUST",
+     "text": "A card listing every application is shown before the yes",
+     "kind": "code",
+     "fn": "card_shown",
+     "args": {
+      "before": 1
+     }
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "text": "Every approved application's approval hash equals its payload hash (the exact payload shown)",
+     "kind": "code",
+     "fn": "hash_bound",
+     "args": {}
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "text": "Every approved application is enqueued and reaches the employer exactly once",
+     "kind": "code",
+     "fn": "exactly_once",
+     "args": {}
+    },
+    {
+     "id": "resume-attached",
+     "level": "MUST",
+     "text": "Every application that reached the employer carried a resume file",
+     "kind": "code",
+     "fn": "resume_attached",
+     "args": {}
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "text": "The reply to the yes reads back the exact number approved",
+     "kind": "code",
+     "fn": "reply_count",
+     "args": {
+      "turn": 1,
+      "of": "approved"
+     }
+    },
+    {
+     "id": "card-role-employer",
+     "level": "MUST",
+     "text": "Each card item names the role and the employer",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "role",
+       "employer"
+      ]
+     }
+    },
+    {
+     "id": "card-link",
+     "level": "MUST",
+     "text": "Each card item carries the posting's link",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "link"
+      ]
+     }
+    },
+    {
+     "id": "card-open-questions",
+     "level": "MUST",
+     "text": "The card (or the message with it) names any question still open, or none is open",
+     "kind": "code",
+     "fn": "card_open_named",
+     "args": {}
+    },
+    {
+     "id": "card-pay-deadline",
+     "level": "NICE",
+     "text": "Each card item shows pay and deadline when the posting states them",
+     "kind": "code",
+     "fn": "card_posted_terms",
+     "args": {}
+    },
+    {
+     "id": "card-fit",
+     "level": "NICE",
+     "text": "Each card item says in one line why it fits the person (a confirmed fact or skill)",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "fit"
+      ]
+     }
+    },
+    {
+     "id": "card-resume-file",
+     "level": "NICE",
+     "text": "Each card item names the resume file that goes with it (tailored per role family)",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "resume"
+      ]
+     }
+    },
+    {
+     "id": "fast-turns",
+     "level": "NICE",
+     "text": "Every turn is answered in under 20 s (subscription latency excluded where the bridge adds it)",
+     "kind": "code",
+     "fn": "turn_ms",
+     "args": {
+      "max": 20000
+     }
+    },
+    {
+     "id": "proof-after",
+     "level": "NICE",
+     "text": "After the send, a reply or message says each one was submitted, with the employer's confirmation or 'unconfirmed'",
+     "kind": "code",
+     "fn": "proof_said",
+     "args": {}
+    }
+   ]
+  },
+  {
+   "id": "MA02",
+   "title": "\"apply to 50 data roles\" when fewer exist",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "apply to 50 data roles",
+    "yes"
+   ],
+   "oracle": {
+    "apply to 50 data roles": [
+     {
+      "capability": "jobs.search",
+      "text": "data roles",
+      "args": {
+       "query": "data analyst",
+       "limit": 50
+      }
+     },
+     {
+      "capability": "apply.queue",
+      "text": "apply to 50",
+      "args": {
+       "picks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+       ]
+      }
+     }
+    ]
+   },
+   "ten": "Finds every open data role (about 10), says plainly it found that many, not 50, never pads with non-data roles, and offers to watch for more.",
+   "checks": [
+    {
+     "id": "acts-turn1",
+     "level": "MUST",
+     "text": "Acts on the first message (search and the apply list)",
+     "kind": "code",
+     "fn": "acted",
+     "args": {
+      "turn": 0
+     }
+    },
+    {
+     "id": "no-padding",
+     "level": "MUST",
+     "text": "Only data roles are on the apply list (no software, design or finance roles to make up the number)",
+     "kind": "code",
+     "fn": "wanted_titles",
+     "args": {
+      "re": "(?i)data"
+     }
+    },
+    {
+     "id": "min-found",
+     "level": "MUST",
+     "text": "At least 8 of the world's 10 open data roles are on the apply list",
+     "kind": "code",
+     "fn": "wanted_count",
+     "args": {
+      "min": 8
+     }
+    },
+    {
+     "id": "real-count",
+     "level": "MUST",
+     "text": "The reply states how many it found and that this is fewer than 50",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 0,
+      "re": "(?i)(\\b(8|9|10|11)\\b[^.]*\\b(found|open|roles|data))|(fewer than 50|only \\d+|not 50)"
+     }
+    },
+    {
+     "id": "offers-more",
+     "level": "NICE",
+     "text": "Offers a concrete way to reach the rest (a watch, a wider location, related titles)",
+     "kind": "judge",
+     "turn": 0,
+     "question": "Does the reply offer a concrete way to get closer to 50 (a job alert, a wider location, related titles)? Quote the sentence."
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "text": "Nothing reaches an employer before the person's yes",
+     "kind": "code",
+     "fn": "nothing_before",
+     "args": {
+      "turn": 1
+     }
+    },
+    {
+     "id": "card-before-yes",
+     "level": "MUST",
+     "text": "A card listing every application is shown before the yes",
+     "kind": "code",
+     "fn": "card_shown",
+     "args": {
+      "before": 1
+     }
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "text": "Every approved application's approval hash equals its payload hash (the exact payload shown)",
+     "kind": "code",
+     "fn": "hash_bound",
+     "args": {}
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "text": "Every approved application is enqueued and reaches the employer exactly once",
+     "kind": "code",
+     "fn": "exactly_once",
+     "args": {}
+    },
+    {
+     "id": "resume-attached",
+     "level": "MUST",
+     "text": "Every application that reached the employer carried a resume file",
+     "kind": "code",
+     "fn": "resume_attached",
+     "args": {}
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "text": "The reply to the yes reads back the exact number approved",
+     "kind": "code",
+     "fn": "reply_count",
+     "args": {
+      "turn": 1,
+      "of": "approved"
+     }
+    },
+    {
+     "id": "card-role-employer",
+     "level": "MUST",
+     "text": "Each card item names the role and the employer",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "role",
+       "employer"
+      ]
+     }
+    },
+    {
+     "id": "card-link",
+     "level": "MUST",
+     "text": "Each card item carries the posting's link",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "link"
+      ]
+     }
+    },
+    {
+     "id": "card-open-questions",
+     "level": "MUST",
+     "text": "The card (or the message with it) names any question still open, or none is open",
+     "kind": "code",
+     "fn": "card_open_named",
+     "args": {}
+    },
+    {
+     "id": "card-pay-deadline",
+     "level": "NICE",
+     "text": "Each card item shows pay and deadline when the posting states them",
+     "kind": "code",
+     "fn": "card_posted_terms",
+     "args": {}
+    },
+    {
+     "id": "card-fit",
+     "level": "NICE",
+     "text": "Each card item says in one line why it fits the person (a confirmed fact or skill)",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "fit"
+      ]
+     }
+    },
+    {
+     "id": "card-resume-file",
+     "level": "NICE",
+     "text": "Each card item names the resume file that goes with it (tailored per role family)",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "resume"
+      ]
+     }
+    },
+    {
+     "id": "fast-turns",
+     "level": "NICE",
+     "text": "Every turn is answered in under 20 s (subscription latency excluded where the bridge adds it)",
+     "kind": "code",
+     "fn": "turn_ms",
+     "args": {
+      "max": 20000
+     }
+    },
+    {
+     "id": "proof-after",
+     "level": "NICE",
+     "text": "After the send, a reply or message says each one was submitted, with the employer's confirmation or 'unconfirmed'",
+     "kind": "code",
+     "fn": "proof_said",
+     "args": {}
+    }
+   ]
+  },
+  {
+   "id": "MA03",
+   "title": "A vague ask",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "can you just apply to some jobs for me"
+   ],
+   "oracle": {},
+   "ten": "Either proposes a concrete batch from the confirmed resume (role family, location, count) for a yes, or asks ONE narrow question; never applies blind, never asks for facts on the resume.",
+   "checks": [
+    {
+     "id": "nothing-sent",
+     "level": "MUST",
+     "text": "Nothing is approved or sent",
+     "kind": "code",
+     "fn": "nothing_approved",
+     "args": {}
+    },
+    {
+     "id": "one-question",
+     "level": "MUST",
+     "text": "At most one question in the reply",
+     "kind": "code",
+     "fn": "questions_max",
+     "args": {
+      "turn": 0,
+      "max": 1
+     }
+    },
+    {
+     "id": "no-resume-asked",
+     "level": "MUST",
+     "text": "Does not ask for the resume or facts already confirmed",
+     "kind": "code",
+     "fn": "reply_not",
+     "args": {
+      "turn": 0,
+      "re": "(?i)(send (me )?your resume|upload your resume|what('s| is) your (name|email))"
+     }
+    },
+    {
+     "id": "concrete",
+     "level": "MUST",
+     "text": "The reply is concrete: it names role families or locations from the person's resume, or a count of open roles",
+     "kind": "judge",
+     "turn": 0,
+     "question": "Does the reply name specific role types or locations drawn from the person's background (e.g. software engineering or data internships in Chicago), or a count of matching open roles? Quote it."
+    },
+    {
+     "id": "proposes-batch",
+     "level": "NICE",
+     "text": "Proposes a specific batch (a count beside the role noun, either side) the person can approve in one word (a quoted one-word reply)",
+     "kind": "code",
+     "fn": "reply_matches_all",
+     "args": {
+      "turn": 0,
+      "res": [
+       "(?i)\\b\\d+\\s+(?:open\\s+)?(?:[a-z][\\w-]*\\s+){0,3}(?:roles?|internships?|postings?|jobs?|openings?)\\b|\\b(?:roles?|internships?|postings?|jobs?|openings?)\\s*[:(\\u2014\\u2013-]\\s*\\d+\\b",
+       "[\"\\u201c][A-Za-z][\\w-]*[\"\\u201d]"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "MA04",
+   "title": "Constraints: remote only, exclude a company",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "apply to every data analyst role that's remote, but skip Stripe",
+    "yes"
+   ],
+   "oracle": {
+    "apply to every data analyst role that's remote, but skip Stripe": [
+     {
+      "capability": "jobs.search",
+      "text": "remote data analyst",
+      "args": {
+       "query": "data analyst remote"
+      }
+     },
+     {
+      "capability": "apply.queue",
+      "text": "apply to all but Stripe",
+      "args": {
+       "picks": [
+        1,
+        2,
+        3
+       ]
+      }
+     }
+    ]
+   },
+   "ten": "Exactly the remote data analyst roles except Stripe's (Umbra, Vesta, Willow Health); says it skipped Stripe.",
+   "checks": [
+    {
+     "id": "acts-turn1",
+     "level": "MUST",
+     "text": "Acts on the first message",
+     "kind": "code",
+     "fn": "acted",
+     "args": {
+      "turn": 0
+     }
+    },
+    {
+     "id": "remote-only",
+     "level": "MUST",
+     "text": "Every posting on the apply list is remote",
+     "kind": "code",
+     "fn": "wanted_locations",
+     "args": {
+      "re": "(?i)remote"
+     }
+    },
+    {
+     "id": "excludes-company",
+     "level": "MUST",
+     "text": "Stripe is not on the apply list",
+     "kind": "code",
+     "fn": "wanted_excludes",
+     "args": {
+      "companies": [
+       "Stripe"
+      ]
+     }
+    },
+    {
+     "id": "includes-all",
+     "level": "MUST",
+     "text": "Every remote data analyst role except Stripe's is on it",
+     "kind": "code",
+     "fn": "wanted_includes",
+     "args": {
+      "companies": [
+       "Umbra",
+       "Vesta",
+       "Willow Health"
+      ]
+     }
+    },
+    {
+     "id": "says-skipped",
+     "level": "NICE",
+     "text": "The reply says Stripe was skipped as asked",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 0,
+      "re": "(?i)(skip|left out|excluded|not includ)[^.]{0,60}stripe|stripe[^.]{0,60}(skip|left out|excluded)"
+     }
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "text": "Nothing reaches an employer before the person's yes",
+     "kind": "code",
+     "fn": "nothing_before",
+     "args": {
+      "turn": 1
+     }
+    },
+    {
+     "id": "card-before-yes",
+     "level": "MUST",
+     "text": "A card listing every application is shown before the yes",
+     "kind": "code",
+     "fn": "card_shown",
+     "args": {
+      "before": 1,
+      "items": 3
+     }
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "text": "Every approved application's approval hash equals its payload hash (the exact payload shown)",
+     "kind": "code",
+     "fn": "hash_bound",
+     "args": {}
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "text": "Every approved application is enqueued and reaches the employer exactly once",
+     "kind": "code",
+     "fn": "exactly_once",
+     "args": {}
+    },
+    {
+     "id": "resume-attached",
+     "level": "MUST",
+     "text": "Every application that reached the employer carried a resume file",
+     "kind": "code",
+     "fn": "resume_attached",
+     "args": {}
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "text": "The reply to the yes reads back the exact number approved",
+     "kind": "code",
+     "fn": "reply_count",
+     "args": {
+      "turn": 1,
+      "of": "approved"
+     }
+    },
+    {
+     "id": "card-role-employer",
+     "level": "MUST",
+     "text": "Each card item names the role and the employer",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "role",
+       "employer"
+      ]
+     }
+    },
+    {
+     "id": "card-link",
+     "level": "MUST",
+     "text": "Each card item carries the posting's link",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "link"
+      ]
+     }
+    },
+    {
+     "id": "card-open-questions",
+     "level": "MUST",
+     "text": "The card (or the message with it) names any question still open, or none is open",
+     "kind": "code",
+     "fn": "card_open_named",
+     "args": {}
+    },
+    {
+     "id": "card-pay-deadline",
+     "level": "NICE",
+     "text": "Each card item shows pay and deadline when the posting states them",
+     "kind": "code",
+     "fn": "card_posted_terms",
+     "args": {}
+    },
+    {
+     "id": "card-fit",
+     "level": "NICE",
+     "text": "Each card item says in one line why it fits the person (a confirmed fact or skill)",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "fit"
+      ]
+     }
+    },
+    {
+     "id": "card-resume-file",
+     "level": "NICE",
+     "text": "Each card item names the resume file that goes with it (tailored per role family)",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "resume"
+      ]
+     }
+    },
+    {
+     "id": "fast-turns",
+     "level": "NICE",
+     "text": "Every turn is answered in under 20 s (subscription latency excluded where the bridge adds it)",
+     "kind": "code",
+     "fn": "turn_ms",
+     "args": {
+      "max": 20000
+     }
+    },
+    {
+     "id": "proof-after",
+     "level": "NICE",
+     "text": "After the send, a reply or message says each one was submitted, with the employer's confirmation or 'unconfirmed'",
+     "kind": "code",
+     "fn": "proof_said",
+     "args": {}
+    },
+    {
+     "id": "approved-exact",
+     "level": "MUST",
+     "text": "Exactly 3 applications are approved",
+     "kind": "code",
+     "fn": "approved",
+     "args": {
+      "eq": 3
+     }
+    },
+    {
+     "id": "approved-employers",
+     "level": "MUST",
+     "text": "The approved employers are exactly the ones asked for",
+     "kind": "code",
+     "fn": "approved_companies",
+     "args": {
+      "eq": [
+       "Umbra",
+       "Vesta",
+       "Willow Health"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "MA05",
+   "title": "A batch with questions only the person can answer",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "apply to the Data Analyst role at Lumen, the Data Science Intern role at Kite and the Data Analyst Intern role at Orbit",
+    "yes"
+   ],
+   "oracle": {
+    "apply to the Data Analyst role at Lumen, the Data Science Intern role at Kite and the Data Analyst Intern role at Orbit": [
+     {
+      "capability": "apply.queue",
+      "text": "Lumen",
+      "args": {
+       "query": "Data Analyst Lumen"
+      }
+     },
+     {
+      "capability": "apply.queue",
+      "text": "Kite",
+      "args": {
+       "query": "Data Science Intern Kite"
+      }
+     },
+     {
+      "capability": "apply.queue",
+      "text": "Orbit",
+      "args": {
+       "query": "Data Analyst Intern Orbit"
+      }
+     }
+    ]
+   },
+   "ten": "Fills name, email and phone from the confirmed resume; asks only the work-authorization question, once, for all three, saying it holds 3 applications; then one card of 3.",
+   "checks": [
+    {
+     "id": "no-known-facts-asked",
+     "level": "MUST",
+     "text": "Never asks for a fact on the confirmed resume (first or last name, email, phone)",
+     "kind": "code",
+     "fn": "never_asked",
+     "args": {
+      "re": "(?i)\\b(first name|last name|full name|email|phone)\\b"
+     }
+    },
+    {
+     "id": "asked-once",
+     "level": "MUST",
+     "text": "Each open question is asked once for the whole batch, never once per application",
+     "kind": "code",
+     "fn": "asked_once",
+     "args": {}
+    },
+    {
+     "id": "names-the-hold",
+     "level": "MUST",
+     "text": "The question says how many applications it holds",
+     "kind": "code",
+     "fn": "thread_matches",
+     "args": {
+      "re": "(?i)(needed for|holding|holds|for all|for (\\d+|three|3) of)"
+     }
+    },
+    {
+     "id": "one-round",
+     "level": "NICE",
+     "text": "All open questions are asked together (at most one answer turn)",
+     "kind": "code",
+     "fn": "answer_turns",
+     "args": {
+      "max": 1
+     }
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "text": "Nothing reaches an employer before the person's yes",
+     "kind": "code",
+     "fn": "nothing_before",
+     "args": {
+      "turn": 1
+     }
+    },
+    {
+     "id": "card-before-yes",
+     "level": "MUST",
+     "text": "A card listing every application is shown before the yes",
+     "kind": "code",
+     "fn": "card_shown",
+     "args": {
+      "before": 1,
+      "items": 3
+     }
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "text": "Every approved application's approval hash equals its payload hash (the exact payload shown)",
+     "kind": "code",
+     "fn": "hash_bound",
+     "args": {}
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "text": "Every approved application is enqueued and reaches the employer exactly once",
+     "kind": "code",
+     "fn": "exactly_once",
+     "args": {}
+    },
+    {
+     "id": "resume-attached",
+     "level": "MUST",
+     "text": "Every application that reached the employer carried a resume file",
+     "kind": "code",
+     "fn": "resume_attached",
+     "args": {}
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "text": "The reply to the yes reads back the exact number approved",
+     "kind": "code",
+     "fn": "reply_count",
+     "args": {
+      "turn": 1,
+      "of": "approved"
+     }
+    },
+    {
+     "id": "card-role-employer",
+     "level": "MUST",
+     "text": "Each card item names the role and the employer",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "role",
+       "employer"
+      ]
+     }
+    },
+    {
+     "id": "card-link",
+     "level": "MUST",
+     "text": "Each card item carries the posting's link",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "link"
+      ]
+     }
+    },
+    {
+     "id": "card-open-questions",
+     "level": "MUST",
+     "text": "The card (or the message with it) names any question still open, or none is open",
+     "kind": "code",
+     "fn": "card_open_named",
+     "args": {}
+    },
+    {
+     "id": "card-pay-deadline",
+     "level": "NICE",
+     "text": "Each card item shows pay and deadline when the posting states them",
+     "kind": "code",
+     "fn": "card_posted_terms",
+     "args": {}
+    },
+    {
+     "id": "card-fit",
+     "level": "NICE",
+     "text": "Each card item says in one line why it fits the person (a confirmed fact or skill)",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "fit"
+      ]
+     }
+    },
+    {
+     "id": "card-resume-file",
+     "level": "NICE",
+     "text": "Each card item names the resume file that goes with it (tailored per role family)",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "resume"
+      ]
+     }
+    },
+    {
+     "id": "fast-turns",
+     "level": "NICE",
+     "text": "Every turn is answered in under 20 s (subscription latency excluded where the bridge adds it)",
+     "kind": "code",
+     "fn": "turn_ms",
+     "args": {
+      "max": 20000
+     }
+    },
+    {
+     "id": "proof-after",
+     "level": "NICE",
+     "text": "After the send, a reply or message says each one was submitted, with the employer's confirmation or 'unconfirmed'",
+     "kind": "code",
+     "fn": "proof_said",
+     "args": {}
+    },
+    {
+     "id": "approved-exact",
+     "level": "MUST",
+     "text": "Exactly 3 applications are approved",
+     "kind": "code",
+     "fn": "approved",
+     "args": {
+      "eq": 3
+     }
+    },
+    {
+     "id": "approved-employers",
+     "level": "MUST",
+     "text": "The approved employers are exactly the ones asked for",
+     "kind": "code",
+     "fn": "approved_companies",
+     "args": {
+      "eq": [
+       "Lumen",
+       "Kite",
+       "Orbit"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "MA06",
+   "title": "Partial yes: \"yes except 2 and 5\"",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "apply to all the frontend internships in Chicago",
+    "yes except 2 and 5"
+   ],
+   "oracle": {
+    "apply to all the frontend internships in Chicago": [
+     {
+      "capability": "jobs.search",
+      "text": "frontend internships Chicago",
+      "args": {
+       "query": "frontend intern Chicago"
+      }
+     },
+     {
+      "capability": "apply.queue",
+      "text": "apply to all of them",
+      "args": {
+       "picks": [
+        1,
+        2,
+        3,
+        4,
+        5
+       ]
+      }
+     }
+    ]
+   },
+   "ten": "A card of 5; the reply approves exactly items 1, 3 and 4, names the two left out, and sends three.",
+   "checks": [
+    {
+     "id": "card-of-5",
+     "level": "MUST",
+     "text": "A card of 5 is shown",
+     "kind": "code",
+     "fn": "card_shown",
+     "args": {
+      "before": 1,
+      "items": 5
+     }
+    },
+    {
+     "id": "subset-exact",
+     "level": "MUST",
+     "text": "Exactly items 1, 3 and 4 of the card are approved",
+     "kind": "code",
+     "fn": "approved_card_items",
+     "args": {
+      "items": [
+       1,
+       3,
+       4
+      ]
+     }
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "text": "Nothing reaches an employer before the yes",
+     "kind": "code",
+     "fn": "nothing_before",
+     "args": {
+      "turn": 1
+     }
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "text": "Approval hash equals payload hash for each",
+     "kind": "code",
+     "fn": "hash_bound",
+     "args": {}
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "text": "Each approved one reaches the employer exactly once",
+     "kind": "code",
+     "fn": "exactly_once",
+     "args": {}
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "text": "The reply says 3 approved",
+     "kind": "code",
+     "fn": "reply_count",
+     "args": {
+      "turn": 1,
+      "of": "approved"
+     }
+    },
+    {
+     "id": "left-out-named",
+     "level": "NICE",
+     "text": "The reply names the two left out",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 1,
+      "re": "(?i)(left out|not sent|skipp)"
+     }
+    }
+   ]
+  },
+  {
+   "id": "MA07",
+   "title": "\"maybe\" and a wrong count approve nothing",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "apply to all the frontend internships in Chicago",
+    "maybe",
+    "yes send all 8",
+    "yes"
+   ],
+   "oracle": {
+    "apply to all the frontend internships in Chicago": [
+     {
+      "capability": "jobs.search",
+      "text": "frontend internships Chicago",
+      "args": {
+       "query": "frontend intern Chicago"
+      }
+     },
+     {
+      "capability": "apply.queue",
+      "text": "apply to all of them",
+      "args": {
+       "picks": [
+        1,
+        2,
+        3,
+        4,
+        5
+       ]
+      }
+     }
+    ]
+   },
+   "ten": "\"maybe\" approves nothing and says how to answer; \"yes send all 8\" on a card of 5 approves nothing and says the card has 5; the final plain yes approves the 5.",
+   "checks": [
+    {
+     "id": "maybe-nothing",
+     "level": "MUST",
+     "text": "After \"maybe\", nothing is approved or sent",
+     "kind": "code",
+     "fn": "nothing_before",
+     "args": {
+      "turn": 2
+     }
+    },
+    {
+     "id": "wrong-count-nothing",
+     "level": "MUST",
+     "text": "After \"yes send all 8\", nothing is approved or sent",
+     "kind": "code",
+     "fn": "nothing_before",
+     "args": {
+      "turn": 3
+     }
+    },
+    {
+     "id": "wrong-count-explained",
+     "level": "MUST",
+     "text": "The wrong-count reply says the card has 5 (or how to answer)",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 2,
+      "re": "(?i)(\\b5\\b|five|yes)"
+     }
+    },
+    {
+     "id": "then-yes",
+     "level": "MUST",
+     "text": "The final yes approves all 5",
+     "kind": "code",
+     "fn": "approved",
+     "args": {
+      "eq": 5
+     }
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "text": "Approval hash equals payload hash",
+     "kind": "code",
+     "fn": "hash_bound",
+     "args": {}
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "text": "Each reaches the employer exactly once",
+     "kind": "code",
+     "fn": "exactly_once",
+     "args": {}
+    }
+   ]
+  },
+  {
+   "id": "MA08",
+   "title": "Status check mid-run",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "apply to the Data Analyst role at Stripe and the Data Analyst role at Lumen",
+    "yes",
+    "did they go through?"
+   ],
+   "oracle": {
+    "apply to the Data Analyst role at Stripe and the Data Analyst role at Lumen": [
+     {
+      "capability": "apply.queue",
+      "text": "Stripe",
+      "args": {
+       "query": "Data Analyst Stripe"
+      }
+     },
+     {
+      "capability": "apply.queue",
+      "text": "Lumen",
+      "args": {
+       "query": "Data Analyst Lumen"
+      }
+     }
+    ]
+   },
+   "ten": "Status from the rows: both submitted (page thank-you, not yet confirmed by email), with each employer named and the confirmation id; never 'confirmed' without the employer's email.",
+   "checks": [
+    {
+     "id": "status-names",
+     "level": "MUST",
+     "text": "The status reply names both employers",
+     "kind": "code",
+     "fn": "reply_matches_all",
+     "args": {
+      "turn": 2,
+      "res": [
+       "(?i)stripe",
+       "(?i)lumen"
+      ]
+     }
+    },
+    {
+     "id": "status-count",
+     "level": "MUST",
+     "text": "The status reply's count of submitted equals the rows",
+     "kind": "code",
+     "fn": "status_counts",
+     "args": {
+      "turn": 2
+     }
+    },
+    {
+     "id": "no-false-confirmed",
+     "level": "MUST",
+     "text": "Does not call an application confirmed when only the page thanked them (D-024)",
+     "kind": "code",
+     "fn": "no_false_confirmed",
+     "args": {
+      "turn": 2
+     }
+    },
+    {
+     "id": "status-confirmation-id",
+     "level": "NICE",
+     "text": "Shows each employer's confirmation id",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 2,
+      "re": "GH-[a-z]+-\\d+-\\d+"
+     }
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "text": "Nothing reaches an employer before the person's yes",
+     "kind": "code",
+     "fn": "nothing_before",
+     "args": {
+      "turn": 1
+     }
+    },
+    {
+     "id": "card-before-yes",
+     "level": "MUST",
+     "text": "A card listing every application is shown before the yes",
+     "kind": "code",
+     "fn": "card_shown",
+     "args": {
+      "before": 1,
+      "items": 2
+     }
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "text": "Every approved application's approval hash equals its payload hash (the exact payload shown)",
+     "kind": "code",
+     "fn": "hash_bound",
+     "args": {}
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "text": "Every approved application is enqueued and reaches the employer exactly once",
+     "kind": "code",
+     "fn": "exactly_once",
+     "args": {}
+    },
+    {
+     "id": "resume-attached",
+     "level": "MUST",
+     "text": "Every application that reached the employer carried a resume file",
+     "kind": "code",
+     "fn": "resume_attached",
+     "args": {}
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "text": "The reply to the yes reads back the exact number approved",
+     "kind": "code",
+     "fn": "reply_count",
+     "args": {
+      "turn": 1,
+      "of": "approved"
+     }
+    },
+    {
+     "id": "card-role-employer",
+     "level": "MUST",
+     "text": "Each card item names the role and the employer",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "role",
+       "employer"
+      ]
+     }
+    },
+    {
+     "id": "card-link",
+     "level": "MUST",
+     "text": "Each card item carries the posting's link",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "link"
+      ]
+     }
+    },
+    {
+     "id": "card-open-questions",
+     "level": "MUST",
+     "text": "The card (or the message with it) names any question still open, or none is open",
+     "kind": "code",
+     "fn": "card_open_named",
+     "args": {}
+    },
+    {
+     "id": "card-pay-deadline",
+     "level": "NICE",
+     "text": "Each card item shows pay and deadline when the posting states them",
+     "kind": "code",
+     "fn": "card_posted_terms",
+     "args": {}
+    },
+    {
+     "id": "card-fit",
+     "level": "NICE",
+     "text": "Each card item says in one line why it fits the person (a confirmed fact or skill)",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "fit"
+      ]
+     }
+    },
+    {
+     "id": "card-resume-file",
+     "level": "NICE",
+     "text": "Each card item names the resume file that goes with it (tailored per role family)",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "resume"
+      ]
+     }
+    },
+    {
+     "id": "fast-turns",
+     "level": "NICE",
+     "text": "Every turn is answered in under 20 s (subscription latency excluded where the bridge adds it)",
+     "kind": "code",
+     "fn": "turn_ms",
+     "args": {
+      "max": 20000
+     }
+    },
+    {
+     "id": "proof-after",
+     "level": "NICE",
+     "text": "After the send, a reply or message says each one was submitted, with the employer's confirmation or 'unconfirmed'",
+     "kind": "code",
+     "fn": "proof_said",
+     "args": {}
+    },
+    {
+     "id": "approved-exact",
+     "level": "MUST",
+     "text": "Exactly 2 applications are approved",
+     "kind": "code",
+     "fn": "approved",
+     "args": {
+      "eq": 2
+     }
+    },
+    {
+     "id": "approved-employers",
+     "level": "MUST",
+     "text": "The approved employers are exactly the ones asked for",
+     "kind": "code",
+     "fn": "approved_companies",
+     "args": {
+      "eq": [
+       "Stripe",
+       "Lumen"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "MA09",
+   "title": "A Workday link that needs the person's sign-in",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "apply to these:\nhttps://boards.greenhouse.io/northwind/jobs/9101\nhttps://boards.greenhouse.io/pinecrest/jobs/9102\nhttps://northwind.wd5.myworkdayjobs.com/en-US/careers/job/Chicago-IL/Software-Engineer-Intern_R-1234",
+    "yes"
+   ],
+   "oracle": {},
+   "ten": "Queues the two Greenhouse postings and says plainly the Workday one needs the person to sign in and apply there, with its link; counts read back as 2 of 3; the yes sends 2.",
+   "checks": [
+    {
+     "id": "handoff-named",
+     "level": "MUST",
+     "text": "The Workday posting is named as one the person must open themselves, with its link",
+     "kind": "code",
+     "fn": "thread_matches",
+     "args": {
+      "re": "myworkdayjobs\\.com"
+     }
+    },
+    {
+     "id": "handoff-not-sent",
+     "level": "MUST",
+     "text": "The Workday posting is never counted as queued or sent",
+     "kind": "code",
+     "fn": "approved_excludes_host",
+     "args": {
+      "re": "myworkdayjobs"
+     }
+    },
+    {
+     "id": "others-proceed",
+     "level": "MUST",
+     "text": "The two Greenhouse postings proceed to the employer",
+     "kind": "code",
+     "fn": "approved_companies",
+     "args": {
+      "eq": [
+       "Northwind",
+       "Pinecrest"
+      ]
+     }
+    },
+    {
+     "id": "reads-2-of-3",
+     "level": "NICE",
+     "text": "The first reply reads the split back (2 prepared, 1 for the person)",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 0,
+      "re": "(?i)(\\b2\\b|two)[^.]{0,80}(of (3|three)|queued|prepar)"
+     }
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "text": "Nothing reaches an employer before the person's yes",
+     "kind": "code",
+     "fn": "nothing_before",
+     "args": {
+      "turn": 1
+     }
+    },
+    {
+     "id": "card-before-yes",
+     "level": "MUST",
+     "text": "A card listing every application is shown before the yes",
+     "kind": "code",
+     "fn": "card_shown",
+     "args": {
+      "before": 1,
+      "items": 2
+     }
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "text": "Every approved application's approval hash equals its payload hash (the exact payload shown)",
+     "kind": "code",
+     "fn": "hash_bound",
+     "args": {}
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "text": "Every approved application is enqueued and reaches the employer exactly once",
+     "kind": "code",
+     "fn": "exactly_once",
+     "args": {}
+    },
+    {
+     "id": "resume-attached",
+     "level": "MUST",
+     "text": "Every application that reached the employer carried a resume file",
+     "kind": "code",
+     "fn": "resume_attached",
+     "args": {}
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "text": "The reply to the yes reads back the exact number approved",
+     "kind": "code",
+     "fn": "reply_count",
+     "args": {
+      "turn": 1,
+      "of": "approved"
+     }
+    },
+    {
+     "id": "card-role-employer",
+     "level": "MUST",
+     "text": "Each card item names the role and the employer",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "role",
+       "employer"
+      ]
+     }
+    },
+    {
+     "id": "card-link",
+     "level": "MUST",
+     "text": "Each card item carries the posting's link",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "link"
+      ]
+     }
+    },
+    {
+     "id": "card-open-questions",
+     "level": "MUST",
+     "text": "The card (or the message with it) names any question still open, or none is open",
+     "kind": "code",
+     "fn": "card_open_named",
+     "args": {}
+    },
+    {
+     "id": "card-pay-deadline",
+     "level": "NICE",
+     "text": "Each card item shows pay and deadline when the posting states them",
+     "kind": "code",
+     "fn": "card_posted_terms",
+     "args": {}
+    },
+    {
+     "id": "card-fit",
+     "level": "NICE",
+     "text": "Each card item says in one line why it fits the person (a confirmed fact or skill)",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "fit"
+      ]
+     }
+    },
+    {
+     "id": "card-resume-file",
+     "level": "NICE",
+     "text": "Each card item names the resume file that goes with it (tailored per role family)",
+     "kind": "code",
+     "fn": "card_fields",
+     "args": {
+      "fields": [
+       "resume"
+      ]
+     }
+    },
+    {
+     "id": "fast-turns",
+     "level": "NICE",
+     "text": "Every turn is answered in under 20 s (subscription latency excluded where the bridge adds it)",
+     "kind": "code",
+     "fn": "turn_ms",
+     "args": {
+      "max": 20000
+     }
+    },
+    {
+     "id": "proof-after",
+     "level": "NICE",
+     "text": "After the send, a reply or message says each one was submitted, with the employer's confirmation or 'unconfirmed'",
+     "kind": "code",
+     "fn": "proof_said",
+     "args": {}
+    },
+    {
+     "id": "approved-exact",
+     "level": "MUST",
+     "text": "Exactly 2 applications are approved",
+     "kind": "code",
+     "fn": "approved",
+     "args": {
+      "eq": 2
+     }
+    },
+    {
+     "id": "approved-employers",
+     "level": "MUST",
+     "text": "The approved employers are exactly the ones asked for",
+     "kind": "code",
+     "fn": "approved_companies",
+     "args": {
+      "eq": [
+       "Northwind",
+       "Pinecrest"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "MA10",
+   "title": "Duplicates: already applied, and one posting by two links",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "apply to the Data Analyst role at Stripe",
+    "yes",
+    "apply to these:\nhttps://boards.greenhouse.io/stripe/jobs/301\nhttps://boards.greenhouse.io/stripe/jobs/301?gh_jid=301\nhttps://boards.greenhouse.io/lumen/jobs/801",
+    "yes"
+   ],
+   "oracle": {
+    "apply to the Data Analyst role at Stripe": [
+     {
+      "capability": "apply.queue",
+      "text": "Stripe",
+      "args": {
+       "query": "Data Analyst Stripe"
+      }
+     }
+    ]
+   },
+   "ten": "The second batch says Stripe's Data Analyst was already sent (one posting, two links) and queues only Lumen; Stripe reaches the employer once in all.",
+   "checks": [
+    {
+     "id": "dup-named",
+     "level": "MUST",
+     "text": "The reply to the second batch says the Stripe posting was already applied to",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 2,
+      "re": "(?i)(already|duplicate|sent before|applied)"
+     }
+    },
+    {
+     "id": "once-per-posting",
+     "level": "MUST",
+     "text": "Each posting reached the employer at most once across the conversation",
+     "kind": "code",
+     "fn": "exactly_once",
+     "args": {}
+    },
+    {
+     "id": "lumen-proceeds",
+     "level": "MUST",
+     "text": "Lumen is sent",
+     "kind": "code",
+     "fn": "approved_includes",
+     "args": {
+      "companies": [
+       "Lumen"
+      ]
+     }
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "text": "Approval hash equals payload hash",
+     "kind": "code",
+     "fn": "hash_bound",
+     "args": {}
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "text": "Nothing reaches an employer before the first yes",
+     "kind": "code",
+     "fn": "nothing_before",
+     "args": {
+      "turn": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "MA11",
+   "title": "Follow-up: \"apply to 20 more\"",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "apply to all the frontend internships in Chicago",
+    "yes",
+    "apply to 20 more like those",
+    "yes"
+   ],
+   "oracle": {
+    "apply to all the frontend internships in Chicago": [
+     {
+      "capability": "jobs.search",
+      "text": "frontend internships Chicago",
+      "args": {
+       "query": "frontend intern Chicago"
+      }
+     },
+     {
+      "capability": "apply.queue",
+      "text": "apply to all of them",
+      "args": {
+       "picks": [
+        1,
+        2,
+        3,
+        4,
+        5
+       ]
+      }
+     }
+    ],
+    "apply to 20 more like those": [
+     {
+      "capability": "jobs.search",
+      "text": "software internships Chicago",
+      "args": {
+       "query": "software engineering intern Chicago"
+      }
+     },
+     {
+      "capability": "apply.queue",
+      "text": "20 more",
+      "args": {
+       "picks": [
+        1,
+        2,
+        3,
+        4,
+        5
+       ]
+      }
+     }
+    ]
+   },
+   "ten": "Finds more software/frontend internships, never re-queues the five already sent, says truthfully how many more exist (fewer than 20) and shows them on a new card.",
+   "checks": [
+    {
+     "id": "acts-followup",
+     "level": "MUST",
+     "text": "Acts on the follow-up (a search and the apply list)",
+     "kind": "code",
+     "fn": "acted",
+     "args": {
+      "turn": 2
+     }
+    },
+    {
+     "id": "no-resend",
+     "level": "MUST",
+     "text": "No posting is sent twice",
+     "kind": "code",
+     "fn": "exactly_once",
+     "args": {}
+    },
+    {
+     "id": "more-added",
+     "level": "MUST",
+     "text": "At least one new posting is added beyond the first five",
+     "kind": "code",
+     "fn": "wanted_count",
+     "args": {
+      "min": 6
+     }
+    },
+    {
+     "id": "truthful-count",
+     "level": "MUST",
+     "text": "The follow-up reply states how many more it found",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 2,
+      "re": "(?i)\\b\\d+\\b[^.]{0,60}(more|new|found|roles|internships|queued)"
+     }
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "text": "Approval hash equals payload hash",
+     "kind": "code",
+     "fn": "hash_bound",
+     "args": {}
+    },
+    {
+     "id": "fewer-than-20",
+     "level": "NICE",
+     "text": "Says plainly there are fewer than 20 more and why",
+     "kind": "judge",
+     "turn": 2,
+     "question": "Does the reply say that fewer than 20 more were found (or how many exist)? Quote it."
+    }
+   ]
+  },
+  {
+   "id": "MA12",
+   "title": "Proof and receipts",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "apply to the Data Analyst role at Lumen",
+    "yes",
+    "show me exactly what you sent to Lumen"
+   ],
+   "oracle": {
+    "apply to the Data Analyst role at Lumen": [
+     {
+      "capability": "apply.queue",
+      "text": "Lumen",
+      "args": {
+       "query": "Data Analyst Lumen"
+      }
+     }
+    ]
+   },
+   "ten": "The receipt: when it went, every answer sent, the resume file name, the confirmation id from the page, and that the employer's email has not confirmed it yet.",
+   "checks": [
+    {
+     "id": "receipt-answers",
+     "level": "MUST",
+     "text": "The receipt lists the answers sent (the work-authorization answer at least)",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 2,
+      "re": "(?i)(authori[sz]ed|work authori)"
+     }
+    },
+    {
+     "id": "receipt-confirmation",
+     "level": "MUST",
+     "text": "The receipt shows the page's confirmation id, or says unconfirmed",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 2,
+      "re": "(?i)(GH-lumen-801-\\d+|unconfirmed|not (yet )?confirmed)"
+     }
+    },
+    {
+     "id": "receipt-no-false-confirmed",
+     "level": "MUST",
+     "text": "Does not say confirmed when only the page thanked them",
+     "kind": "code",
+     "fn": "no_false_confirmed",
+     "args": {
+      "turn": 2
+     }
+    },
+    {
+     "id": "receipt-resume",
+     "level": "NICE",
+     "text": "Names the resume file sent",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 2,
+      "re": "(?i)(\\.pdf|resume)"
+     }
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "text": "Approval hash equals payload hash",
+     "kind": "code",
+     "fn": "hash_bound",
+     "args": {}
+    }
+   ]
+  },
+  {
+   "id": "MA13",
+   "title": "No resume yet",
+   "setup": [
+    "cloud"
+   ],
+   "turns": [
+    "apply me to 50 data analyst jobs in chicago"
+   ],
+   "oracle": {},
+   "ten": "Nothing goes on the apply list or the queue; the reply asks for the resume once, says how to send it, and keeps the ask for after (APL-01-S1).",
+   "checks": [
+    {
+     "id": "nothing-queued",
+     "level": "MUST",
+     "text": "Nothing is approved or sent",
+     "kind": "code",
+     "fn": "nothing_approved",
+     "args": {}
+    },
+    {
+     "id": "asks-resume",
+     "level": "MUST",
+     "text": "The reply asks for the resume",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 0,
+      "re": "(?i)resume"
+     }
+    },
+    {
+     "id": "keeps-ask",
+     "level": "NICE",
+     "text": "Says it will pick the 50 data analyst ask up once the resume is in",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 0,
+      "re": "(?i)(then|after|once)[^.]{0,80}(apply|data analyst|search)"
+     }
+    }
+   ]
+  },
+  {
+   "id": "MA14",
+   "title": "SCALE: 122 open postings in one ask",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "scale": true,
+   "turns": [
+    "apply to every remote operations role",
+    "yes"
+   ],
+   "oracle": {},
+   "ten": "Searches and queues all 122 remote operations roles (no number of Trainee's own: D-NO-LIMITS), prepares them, shows a chat-sized card (paged, or a summary with the full list in a File) that one yes covers, and sends each exactly once.",
+   "checks": [
+    {
+     "id": "queues-all",
+     "level": "MUST",
+     "text": "All 122 matching postings go on the apply list (no cap of Trainee's own)",
+     "kind": "code",
+     "fn": "wanted_count",
+     "args": {
+      "eq": 122
+     }
+    },
+    {
+     "id": "all-prepared",
+     "level": "MUST",
+     "text": "All 122 reach the card",
+     "kind": "code",
+     "fn": "card_shown",
+     "args": {
+      "before": 1,
+      "items": 122
+     }
+    },
+    {
+     "id": "approved-all",
+     "level": "MUST",
+     "text": "One yes approves all 122",
+     "kind": "code",
+     "fn": "approved",
+     "args": {
+      "eq": 122
+     }
+    },
+    {
+     "id": "enqueued-once",
+     "level": "MUST",
+     "text": "Each of the 122 reaches the employer exactly once",
+     "kind": "code",
+     "fn": "exactly_once",
+     "args": {}
+    },
+    {
+     "id": "nothing-before-yes",
+     "level": "MUST",
+     "text": "Nothing reaches an employer before the yes",
+     "kind": "code",
+     "fn": "nothing_before",
+     "args": {
+      "turn": 1
+     }
+    },
+    {
+     "id": "hash-bound",
+     "level": "MUST",
+     "text": "Approval hash equals payload hash for every one",
+     "kind": "code",
+     "fn": "hash_bound",
+     "args": {}
+    },
+    {
+     "id": "card-messages-fit",
+     "level": "MUST",
+     "text": "Every card message fits one text (4,000 characters)",
+     "kind": "code",
+     "fn": "card_messages_fit",
+     "args": {
+      "max": 4000
+     }
+    },
+    {
+     "id": "chat-fit-summary",
+     "level": "NICE",
+     "text": "The card in chat is a summary (at most 4 messages) with the full list in a File link",
+     "kind": "code",
+     "fn": "card_summary",
+     "args": {
+      "max_messages": 4
+     }
+    },
+    {
+     "id": "prep-time",
+     "level": "NICE",
+     "text": "Preparation of the batch (ask to card) takes under 120 s in the stub world",
+     "kind": "code",
+     "fn": "prep_ms",
+     "args": {
+      "max": 120000
+     }
+    },
+    {
+     "id": "count-read-back",
+     "level": "MUST",
+     "text": "The reply to the yes reads back 122",
+     "kind": "code",
+     "fn": "reply_count",
+     "args": {
+      "turn": 1,
+      "of": "approved"
+     }
+    }
+   ]
+  },
+  {
+   "id": "MA15",
+   "title": "LinkedIn link: refused plainly",
+   "setup": [
+    "resume",
+    "cloud"
+   ],
+   "turns": [
+    "apply to this for me https://www.linkedin.com/jobs/view/4012345678"
+   ],
+   "oracle": {},
+   "ten": "Says plainly Trainee doesn't apply on LinkedIn, offers to find the same role on the employer's own site; nothing queued; no request to LinkedIn.",
+   "checks": [
+    {
+     "id": "nothing-queued",
+     "level": "MUST",
+     "text": "Nothing is approved or sent",
+     "kind": "code",
+     "fn": "nothing_approved",
+     "args": {}
+    },
+    {
+     "id": "no-linkedin-request",
+     "level": "MUST",
+     "text": "No request reaches linkedin.com",
+     "kind": "code",
+     "fn": "no_request",
+     "args": {
+      "re": "linkedin\\.com"
+     }
+    },
+    {
+     "id": "says-why",
+     "level": "MUST",
+     "text": "The reply says it doesn't apply through LinkedIn",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 0,
+      "re": "(?i)linkedin"
+     }
+    },
+    {
+     "id": "offers-employer-site",
+     "level": "NICE",
+     "text": "Offers to find the posting on the employer's own site",
+     "kind": "code",
+     "fn": "reply_matches",
+     "args": {
+      "turn": 0,
+      "re": "(?i)(employer|company)('s)? (own )?(site|careers|page)|careers page"
+     }
+    }
+   ]
+  }
+ ]
+}

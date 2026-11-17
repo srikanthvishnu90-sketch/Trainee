@@ -12,7 +12,7 @@
 //
 // Nothing here approves, queues or sends an application: the card does, on the person's own tap of its exact contents.
 import { withLinks } from "./application_review.ts";
-import { batchFor, CARD_HARD_LIMIT, cardFor } from "./career_apply_cards.ts";
+import { batchFor, batchSummaryText, CARD_HARD_LIMIT, cardFor } from "./career_apply_cards.ts";
 import { type OpenQuestion, questionsText } from "./career_apply_questions.ts";
 import { type Rpc, type SandboxHost, withRetry } from "./cloud_runner.ts";
 import { preparedCardProblem } from "./career_prepared_card.ts";
@@ -132,7 +132,26 @@ export interface PrepareBridgeDeps {
   now?: () => number;
   // WO-G: the review File links for a card's applications (application_review_links.ts); absent, the card is as before.
   review?: (user: string, preparedIds: string[]) => Promise<string | null>;
+  // D-094: the File of a batch (application_review_links.ts supabaseBatchFile): every application of the batch with its exact
+  // payload. Present, a request's parts are ONE batch with ONE card (a summary plus this File) when the batch does not fit one
+  // card text; absent, every request shows its own card as before.
+  batchFile?: (user: string, rows: any[]) => Promise<{ id: string; url: string } | null>;
 }
+// D-094: every outcome a sandbox reports is read (before: the first 100), and the row keeps them within its bound (60,000 bytes,
+// 20261026230017): the details are shortened, then dropped, before any outcome is; past that, the counts by outcome stand in.
+export function storedOutcomes(all: { job_id: string; outcome: string; detail: string }[]): unknown[] | Record<string, unknown> {
+  const fits = (x: unknown) => JSON.stringify(x).length <= 50_000;
+  if (fits(all)) return all;
+  const short = all.map((o) => ({ ...o, detail: o.detail.slice(0, 60) }));
+  if (fits(short)) return short;
+  const bare = all.map(({ job_id, outcome }) => ({ job_id, outcome }));
+  if (fits(bare)) return bare;
+  const counts: Record<string, number> = {};
+  for (const o of all) counts[o.outcome] = (counts[o.outcome] ?? 0) + 1;
+  return { total: all.length, counts };
+}
+// D-094: a sanity bound on the outcomes one finish reads (the job_ids bound of 20261116140000), far above any one request.
+export const OUTCOMES_READ = 10000;
 const refuse = (status: number, error: string) => ({ status, body: { error } });
 // The resume one posting's application sends (R9-G2): the tailored file kept for that posting when there is one (its row
 // names the posting), else the kept resume, as before.
@@ -198,11 +217,20 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
         return refuse(403, "not a preparation call");
       }
       case "finish": {
-        const outcomes = Array.isArray(body?.outcomes) ? body.outcomes.slice(0, 100).map((o: any) => ({
+        // D-094: every outcome of the request (the first 100 were read before: a request of 122 lost 22).
+        const outcomes = Array.isArray(body?.outcomes) ? body.outcomes.slice(0, OUTCOMES_READ).map((o: any) => ({
           job_id: String(o?.job_id ?? "").slice(0, 300), outcome: String(o?.outcome ?? "").slice(0, 20), detail: String(o?.detail ?? "").slice(0, 300),
         })) : [];
-        // The card the person asked for, shown now: every application this request made ready, as the card shows them.
-        const ready = await d.rpc("career_apply_prepare_request_ready", { p_id: id, p_lease: lease });
+        // D-094: the parts of one request are one batch (20261116140000). Each part records that it finished; only the last part
+        // to finish shows the batch, all of it, on ONE card. The read failing (the migration not applied yet): as before.
+        let batch: { requests: number; open: number } | null = null;
+        if (d.batchFile) {
+          const b = await d.rpc("career_apply_prepare_batch_done", { p_id: id, p_lease: lease }).catch(() => null);
+          if (b && typeof b.open === "number" && typeof b.requests === "number") batch = { requests: b.requests, open: b.open };
+        }
+        const heldForBatch = !!batch && batch.open > 0, multi = !!batch && batch.requests > 1;
+        // The card the person asked for, shown now: every application this request (D-094: its batch) made ready.
+        let ready = heldForBatch ? [] : await d.rpc(batch ? "career_apply_prepare_batch_ready" : "career_apply_prepare_request_ready", { p_id: id, p_lease: lease });
         let card: string | null = null, push = "nothing_ready";
         const c = Array.isArray(ready) && ready.length ? cardFor(ready.filter((r: any) => { const one = cardFor([r]); return one !== null && "take" in one; })) : null;
         // MASS APPLY (2026-11-01): ONE card for the batch. While the person still has a question open (another posting of
@@ -223,7 +251,33 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
         // them on one card, in pages, with one Approve.
         const fits = Array.isArray(ready) ? ready.filter((r: any) => { const one = cardFor([r]); return one !== null && "take" in one; }).length : 0;
         const partial = !stillAsking && c && "take" in c && c.take.length < fits;
-        if (stillAsking) push = "held_for_answers";
+        // D-094: a batch that does not fit one text (it would need pages) or spans the parts of a request is ONE card: a short
+        // summary plus the File of every application, the yes bound to that File's hash (career_apply_card_push_batch_for). A
+        // batch that fits one text is shown inline exactly as before. When the File cannot be made or pushed, a one-request
+        // batch is shown as before (paged); a batch of several parts is told it is ready.
+        let fileFailed = false;
+        const fitting = c && "take" in c ? (ready as any[]).filter((r: any) => { const one = cardFor([r]); return one !== null && "take" in one; }) : [];
+        const whole = partial ? batchFor(fitting) : null;
+        const oneText = !!whole && !("tooLong" in whole) && whole.take.length === fitting.length && !whole.skipped.length && whole.parts.length < 2 && whole.text.length <= CARD_HARD_LIMIT;
+        if (heldForBatch) push = "held_for_batch";
+        else if (!stillAsking && d.batchFile && c && "take" in c && ((partial && !oneText) || multi)) {
+          const all = fitting;
+          const file = await d.batchFile(user, all).catch(() => null);
+          const text = file ? batchSummaryText(all, file.url) : null;
+          const pushed = file && text && text.length <= CARD_HARD_LIMIT ? await d.rpc("career_apply_card_push_batch_for", { p_user: user, p_request: id,
+            p_ids: all.map((p: any) => p.id), p_text: text, p_file: file.id, p_now: new Date(now).toISOString() })
+            .catch((e: unknown) => { console.error("batch card:", (e as Error)?.message ?? e); return undefined; }) : undefined;
+          if (typeof pushed === "string" && /^[0-9a-f-]{36}$/i.test(pushed)) { card = pushed; push = "shown_file"; }
+          else if (pushed === null) push = "held";
+          else fileFailed = true;
+        }
+        if (heldForBatch || push === "shown_file" || push === "held") { /* decided above */ }
+        else if (fileFailed && multi) {
+          const told = !!await d.rpc("career_apply_prepare_request_notice", { p_id: id, p_lease: lease,
+            p_text: `All ${fits} applications are ready. Say "show my applications" to see every one on one card and approve them with one tap. Nothing was sent.` });
+          push = told ? "told_ready" : "held";
+        }
+        else if (stillAsking) push = "held_for_answers";
         else if (partial) {
           // R9-G2 (E05, D-MS-1 paged): the whole batch as ONE card in numbered pages ("1/3", "2/3", "3/3"), each one text;
           // the card's one hash covers every application on it, and a yes approves only once every page was delivered
@@ -256,7 +310,7 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
             push = told ? "told_ready" : "held";
           }
         }
-        if (c && "take" in c && !stillAsking && !partial) {
+        if (c && "take" in c && !stillAsking && !partial && !heldForBatch && !multi && push !== "shown_file" && push !== "held") {
           const links = d.review ? await d.review(user, c.take.map((p) => p.id)).catch(() => null) : null;
           card = await d.rpc("career_apply_card_push_requested_for", { p_user: user, p_request: id, p_ids: c.take.map((p) => p.id), p_text: withLinks(c.text, links),
             p_now: new Date(now).toISOString() });
@@ -273,12 +327,12 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
         }
         // Nothing to show and nothing to ask: they are told why, in their words, once.
         let told = false;
-        if (!card && !questions && push !== "held" && push !== "held_for_answers" && push !== "told_ready" && !outcomes.some((o: { outcome: string }) => o.outcome === "asked" || o.outcome === "ready")) {
+        if (!card && !questions && push !== "held" && push !== "held_for_answers" && push !== "held_for_batch" && push !== "told_ready" && !outcomes.some((o: { outcome: string }) => o.outcome === "asked" || o.outcome === "ready")) {
           told = !!await d.rpc("career_apply_prepare_request_notice", { p_id: id, p_lease: lease, p_text: notPreparedText(outcomes) });
           if (told) push = "told";
         }
         const r = await d.rpc("career_apply_prepare_request_finish", { p_id: id, p_lease: lease, p_state: "done",
-          p_outcome: { outcomes, ready: Array.isArray(ready) ? ready.length : 0, card: push, questions }, p_card: card });
+          p_outcome: { outcomes: storedOutcomes(outcomes), ready: Array.isArray(ready) ? ready.length : 0, card: push, questions, ...(batch ? { batch } : {}) }, p_card: card });
         if (d.stop) await d.stop(sandbox).catch(() => {});
         return { status: 200, body: { state: r?.state ?? null, card, push, questions } };
       }

@@ -150,6 +150,8 @@ export function cardSourceOf(rec: CardRecord): { family: FamilyId; title: string
   const head = (s: string) => [s, [d.role, d.company].filter(Boolean).join(", ")].filter(Boolean).join(": ");
   switch (rec.kind) {
     case "application_review": {
+      // D-094: a batch File's items are its applications (held for an answer: needs you).
+      if (d.batch) return { family: "F-09", title: clean(d.title, 80) || "Applications to approve", items: arr(d.batch.items).map((it) => ({ state: arr(it?.unresolved).length ? "needs" as const : "ready" as const })) };
       const r = d.review ?? {};
       return { family: "F-09", title: head("Application review"), items: [...arr(r.answers).map(() => ({ state: "ready" as const })), ...arr(r.unresolved).map(() => ({ state: "needs" as const }))] };
     }

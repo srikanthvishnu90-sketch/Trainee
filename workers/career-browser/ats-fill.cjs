@@ -489,7 +489,7 @@ async function fillChoice(page, d, value, multi) {
     const loc = page.locator(sel(d.q, i)).first();
     // A drawn choice's tagged option (its shown words, see EXTRACT) is clicked as a person clicks it; check() would retarget
     // the click onto the hidden input, which such a board ignores. An option already chosen is not clicked again.
-    if (d.kind !== "buttons" && !d.drawn) await loc.check({ force: true });
+    if (d.kind !== "buttons" && !d.drawn) await checkOption(page, loc);
     else if (d.kind === "buttons" || !(await page.evaluate(STATE, [d]).then((x) => (x[0].picked || []).includes(String(i))).catch(() => false))) {
       if (d.drawn) {
         // The board may draw its own layer over the option's words (strict run 42780366348: a 20 s actionability wait). The
@@ -510,8 +510,16 @@ async function fillChoice(page, d, value, multi) {
   const want = idx.map(String).sort().join(","), got = (s.picked || []).slice().sort().join(",");
   return got === want ? { ok: true } : { ok: false, reason: "readback_mismatch" };
 }
+// A radio or tick box is checked as before; when the page swallows that click on its input ("Clicking the checkbox did not change
+// its state": a styled option whose input sits under the board's own decoration, answered run of 2026-11-16, 8 postings on
+// Teamtailor, Ashby, Lever and Recruitee) that same tagged input is clicked in the page (its own click and change events). Never any
+// other element; what it holds is read back by the caller as always.
+async function checkOption(page, loc) {
+  try { await loc.check({ force: true, timeout: 3000 }); return; } catch (e) { if (!/did not change its state/.test(String(e && e.message))) throw e; }
+  await loc.evaluate((e) => { if ((e.type === "radio" || e.type === "checkbox") && !e.checked) e.click(); }).catch(() => {});
+}
 async function fillCheckbox(page, d) {
-  await page.locator(sel(d.q)).first().check({ force: true });
+  await checkOption(page, page.locator(sel(d.q)).first());
   return (await stateOf(page, d)).filled ? { ok: true } : { ok: false, reason: "readback_mismatch" };
 }
 async function fillFile(page, d, path) {
@@ -662,6 +670,11 @@ async function menuSelected(page, d, ctl0) {
 // The listboxes shown before a box is opened are marked; after, the one new listbox (exactly one) is marked as this box's list.
 function LB_BEFORE() { for (const e of document.querySelectorAll("[data-upmore-lb-before], [data-upmore-lb-new]")) { e.removeAttribute("data-upmore-lb-before"); e.removeAttribute("data-upmore-lb-new"); }
   for (const e of document.querySelectorAll('[role="listbox"]')) if (e.offsetWidth || e.offsetHeight) e.setAttribute("data-upmore-lb-before", "1"); }
+// Opens a dropdown: the listboxes already shown are marked first (floatingList), then the question's own tagged box is clicked.
+async function openCombo(page, input) {
+  await page.evaluate(LB_BEFORE).catch(() => {});
+  await input.click();
+}
 async function floatingList(page) {
   return page.evaluate(() => { const fresh = [...document.querySelectorAll('[role="listbox"]:not([data-upmore-lb-before])')].filter((e) => (e.offsetWidth || e.offsetHeight) && e.querySelector('[role="option"]'));
     if (fresh.length !== 1) return false; fresh[0].setAttribute("data-upmore-lb-new", "1"); return true; }).catch(() => false);
@@ -674,9 +687,8 @@ async function comboOptions(page, d) {
   const shell = input.locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select__container") or @data-combobox or contains(@class,"ashby-application-form-field-entry")][1]');
   if (await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => true)) return [];
   const read = async (loc) => (await loc.allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
-  await page.evaluate(LB_BEFORE).catch(() => {});
   try {
-    await input.click({ timeout: 3000 });
+    await openCombo(page, input);
     await page.waitForTimeout(200);
     let list = ctl ? await read(page.locator(`[id="${ctl.replace(/"/g, "")}"] [role="option"]:visible`)) : await read(shell.locator('[role="option"]:visible'));
     if (!list.length && !ctl && (await floatingList(page))) list = await read(page.locator('[role="listbox"][data-upmore-lb-new] [role="option"]:visible'));
@@ -701,8 +713,7 @@ async function fillCombo(page, d, value, pick, phone, country) {
     : float ? page.locator('[role="listbox"][data-upmore-lb-new] [role="option"]:visible')
     : shell.locator('[role="option"]:visible'));
   const optionsNow = async () => { let l = (await opts().allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); if (!l.length && !ctl && !ashPlaces && !float && (float = await floatingList(page))) l = (await opts().allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); return l; };
-  await page.evaluate(LB_BEFORE).catch(() => {});
-  await input.click();
+  await openCombo(page, input);
   let list = await optionsNow();
   if (!list.length) { await page.waitForTimeout(120); list = await optionsNow(); }
   // A country picker lists every country: the confirmed name is typed so the site's own filter narrows it before matching.

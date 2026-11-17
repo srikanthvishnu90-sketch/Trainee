@@ -24,7 +24,8 @@ function EXTRACT() {
   // A form's own word for "required" after the label, usually beside its asterisk ("E-Mail* (erforderlich)": Personio's labels as
   // of 2026-11-16, the word in a span for screen readers): not part of the question's name, and a mark that it is required.
   const REQ_WORD = "required|erforderlich|pflichtfeld|obligatoire|requis|obligatorio|requerido|obrigat[oó]rio|obbligatorio|verplicht|vereist|obligatorisk|p[aå]kr[aæ]vet|kr[äa]vs|pakollinen|wymagane|povinn[éeý]|privalomas|oblig[aā]ts";
-  const REQ_TAIL = new RegExp(`\\s*[*✱]*\\s*\\((?:${REQ_WORD})\\)\\s*$`, "i");
+  // Teamtailor writes it without brackets after its asterisk ("...legislation?*Required", "...?*Obligatoriskt").
+  const REQ_TAIL = new RegExp(`\\s*(?:[*✱]*\\s*\\((?:${REQ_WORD})\\)|[*✱]\\s*(?:${REQ_WORD}))\\s*$`, "i");
   const clean = (s) => squash(s).replace(/\(required\)/i, "").replace(REQ_TAIL, "").replace(/\s*[*✱]+\s*$/, "").replace(/\s*[*✱]+\s*$/, "").trim();
   // An employee sign-in form (MARK_SIGNIN: Teamtailor's "Already working at X?") is never the application's scope or questions.
   // Review of #797: the form the runner marked as the application (parallel-apply MARK), so the form filled is the one whose Submit is pressed.
@@ -428,7 +429,19 @@ async function stateOf(page, d) { return (await page.evaluate(STATE, [d]))[0]; }
 
 async function fillText(page, d, value) {
   // A number box takes a number: an answer that is not one is handed back, not typed as something else.
-  if (d.inputType === "number" && !Number.isFinite(Number(String(value).trim()))) return { ok: false, reason: "answer_not_a_number" };
+  if ((d.inputType === "number" || d.inputType === "range") && !Number.isFinite(Number(String(value).trim()))) return { ok: false, reason: "answer_not_a_number" };
+  // A slider (Teamtailor's 1 to 10 scale questions; answered run of 2026-11-16) cannot be typed into: the approved number is set as
+  // its value with the page's own input and change events, only when it is within the slider's own min, max and step.
+  if (d.inputType === "range") {
+    const r = await page.locator(sel(d.q)).first().evaluate((e, v) => {
+      const n = Number(v), min = e.min === "" ? 0 : Number(e.min), max = e.max === "" ? 100 : Number(e.max), step = e.step === "" || e.step === "any" ? 1 : Number(e.step);
+      if (n < min || n > max || Math.abs((n - min) / step - Math.round((n - min) / step)) > 1e-9) return "out_of_range";
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(e, String(n));
+      e.dispatchEvent(new Event("input", { bubbles: true })); e.dispatchEvent(new Event("change", { bubbles: true }));
+      return Number(e.value) === n ? "ok" : "not_held";
+    }, String(value).trim()).catch(() => "fill_error");
+    return r === "ok" ? { ok: true } : { ok: false, reason: r === "out_of_range" ? "no_matching_option" : "readback_mismatch" };
+  }
   await page.locator(sel(d.q)).first().fill(String(value));
   const s = await stateOf(page, d);
   if (String(s.text).trim() === String(value).trim()) return { ok: true };
@@ -928,7 +941,9 @@ async function fillForm(page, ctx0) {
       if (dec.status === "skip") { entry.status = "skipped"; entry.reason = dec.reason; continue; }
       // A dropdown whose options only show once opened is read for them (comboOptions), so the question goes back with what it offers.
       if (dec.status === "ask" && d.kind === "combobox" && !d.options && !d.phoneCountry && !d.place) { const o = await comboOptions(page, d); if (o.length) d.options = o.map((label, i) => ({ i, label })); }
-      if (dec.status === "ask") { entry.status = "needs_user"; entry.reason = dec.reason; needsUser.push({ label: d.label, reason: dec.reason, kind: d.kind, ...(d.options ? { options: d.options.map((o) => o.label).slice(0, 40) } : {}) }); continue; }
+      // A number box or a slider goes back with its own bounds (what the person may answer), read from the page.
+      const bounds = dec.status === "ask" && (d.inputType === "range" || d.inputType === "number") ? await page.locator(sel(d.q)).first().evaluate((e) => ({ input: e.type, ...(e.min !== "" ? { min: e.min } : {}), ...(e.max !== "" ? { max: e.max } : {}) })).catch(() => null) : null;
+      if (dec.status === "ask") { entry.status = "needs_user"; entry.reason = dec.reason; needsUser.push({ label: d.label, reason: dec.reason, kind: d.kind, ...(bounds || {}), ...(d.options ? { options: d.options.map((o) => o.label).slice(0, 40) } : {}) }); continue; }
       let r;
       // Once the board has re-rendered (below), a question read before it is looked up again first, not waited on.
       if (ctx.retagged && !(await page.$(sel(d.q)).catch(() => null))) {

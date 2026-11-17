@@ -723,7 +723,11 @@ function CONTROLS(arg) {
   };
   const widgetOf = (e) => {
     const near = [e.previousElementSibling, e.previousElementSibling && e.previousElementSibling.previousElementSibling, e.nextElementSibling, e.parentElement !== root && e.parentElement.tagName !== "FORM" ? e.parentElement : null];
-    for (const n of near) { if (!n) continue; if (n.matches(WIDGET)) return n; const w = n.querySelector(WIDGET); if (w) return n.matches("[role=group], [role=radiogroup]") || n.hasAttribute("aria-label") ? n : w; }
+    // A container beside the hidden value is its widget's only when it holds at most one question: Teamtailor keeps the posting's
+    // job_id in the container of the whole form, which also holds the phone's country search box (role=combobox, "Search"); that
+    // box is not what the job_id is the value of (answered run of 2026-11-16: "Search: set by the page" on 9 postings).
+    const oneQuestion = (n) => new Set([...n.querySelectorAll("[data-upmore-q]")].map((x) => x.getAttribute("data-upmore-q"))).size <= 1;
+    for (const n of near) { if (!n) continue; if (n.matches(WIDGET)) return n; const w = n.querySelector(WIDGET); if (w && oneQuestion(n)) return n.matches("[role=group], [role=radiogroup]") || n.hasAttribute("aria-label") ? n : w; }
     return null;
   };
   const named = (w, value) => {
@@ -1178,7 +1182,7 @@ async function attempt(browser, p, opts, timing) {
       // A form that also shows a check (CHECK_IN_FORM) stops as that check, with the person's answers beside it: both are theirs.
       const e = answersOnly && checkInForm ? new NeedsUser("bot_check", p.url, "check_in_form") : new NeedsUser(answersOnly ? "missing_required_answer" : "field_not_filled", first.label);
       if (answersOnly && checkInForm) e.detail = checkInForm;
-      e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 400) } : {}), ...(Array.isArray(n.options) ? { options: n.options.slice(0, 60) } : {}) }));
+      e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.input ? { input: n.input } : {}), ...(n.min !== undefined ? { min: n.min } : {}), ...(n.max !== undefined ? { max: n.max } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 400) } : {}), ...(Array.isArray(n.options) ? { options: n.options.slice(0, 60) } : {}) }));
       throw e;
     }
     if (fr.invalid.length) { const e = new NeedsUser("field_not_filled", fr.invalid[0].name); e.needs = fr.invalid.map((n) => ({ label: n.name, reason: "form_rejects_value" })); throw e; }

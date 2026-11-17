@@ -427,6 +427,7 @@ async function fillText(page, d, value) {
   const s = await stateOf(page, d);
   if (String(s.text).trim() === String(value).trim()) return { ok: true };
   if (isPhone(d, value) && await phoneSame(page, d, value, s.text)) return { ok: true };
+  if (isPhone(d, value) && nationalOnly(value, s.text) && (await noCountryNotion(page, d)) && (await onlyRunnerFields(page, d, null))) return { ok: true };
   return { ok: false, reason: "readback_mismatch" };
 }
 // A phone box that reformats what is typed (Workable, intl-tel-input: "+1 312 555 0100" reads back as "(312) 555-0100" beside a
@@ -434,14 +435,24 @@ async function fillText(page, d, value) {
 // approved digits, or the approved digits less a dial code that the field's own country picker shows. Any other digit is a
 // mismatch: nothing but the approved number is ever accepted.
 const digitsOf = (v) => String(v || "").replace(/\D/g, "");
+// The approved number's national digits alone: its own "+NN" country code taken off, nothing else changed.
+const nationalOnly = (value, text) => { const cc = /^\s*\+(\d{1,3})[\s\-.(]/.exec(String(value)), got = digitsOf(text); return !!cc && !!got && digitsOf(value) === cc[1] + got; };
 const isPhone = (d, value) => (d.inputType === "tel" || /^(phone|mobile|telephone|cell|telefon|telefoon|handy|mobil)/.test(norm(d.label).replace(ASKED_AS, "")))
   && /^\+?[\d\s().\-\/]{6,}$/.test(String(value).trim());
-// Delta review of rs-00 (probe p00-phone-country-variants, 2026-11-17): reading which country a widget names (flags by class only,
-// img alt, data-country, hidden country_code / countryCode, a prefix select outside the shell, ...) can always miss one. The rule is
-// default-deny instead: a phone box holding the approved number's national digits (its own country code gone) holds that number only
-// with POSITIVE evidence of the approved code: the phone's own shell shows that dial code (phoneSame, below), or the form has no
-// country notion at all: no other field, element, attribute or option of the form that mentions a country, a dial or calling code, a
-// prefix, a flag, or a "+NN" code (a plain box the page only reformats, round 3's k28). Anything else refuses.
+// Delta review of rs-00 (probe p00-phone-country-variants, 2026-11-17) and its second delta review (2026-11-17: hidden phone_iso / cc /
+// phone[region] beside a plain box, a "+1" example in the help text beside an NL country field): reading which country a form names
+// can always miss one. Architect ruling, default-deny: a phone box holding only the approved number's national digits (its own
+// country code gone) holds that number only when
+//  (a) the phone widget's own selected dial-code display shows the approved code (phoneSame): intl-tel-input's selected dial code,
+//      its selected-country button's title or aria-label, or the selected option of a select inside the widget; never help or hint
+//      text, a flag, a placeholder or any other words beside the box; or
+//  (b) the form posts no field the runner did not fill itself (onlyRunnerFields): every other named, enabled control that would be
+//      sent is one this run filled, or sends nothing (empty, or an unticked box). Any page-set value (a hidden country, a token, a
+//      preset select) refuses; and the form shows no country notion at all either (noCountryNotion: no element, attribute, text or
+//      option mentioning a country, a dial code, a prefix, a flag or a "+NN" code), so a widget that shows +31 or a Dutch flag
+//      beside the box still refuses.
+// Otherwise the run hands off. While the form is still being filled (fillText) every question the runner tagged counts as its own;
+// the final read (driftedFills) holds the run to the questions it actually filled.
 async function noCountryNotion(page, d) {
   return page.evaluate(([q]) => {
     const el = document.querySelector(`[data-upmore-q="${q}"]`);
@@ -457,6 +468,25 @@ async function noCountryNotion(page, d) {
     return true;
   }, [d.q]).catch(() => false);
 }
+async function onlyRunnerFields(page, d, filledQs) {
+  return page.evaluate(([q, mine]) => {
+    const el = document.querySelector(`[data-upmore-q="${q}"]`);
+    if (!el) return false;
+    const form = el.form || el.closest("form");
+    const controls = form ? [...form.elements] : [...document.querySelectorAll("input, select, textarea")];
+    for (const c of controls) {
+      if (c === el || !c.name || c.disabled) continue;
+      const t = String(c.type || "").toLowerCase();
+      if (["submit", "button", "reset", "image"].includes(t) || c.tagName === "BUTTON" || c.tagName === "FIELDSET" || c.tagName === "OUTPUT" || c.tagName === "OBJECT") continue;
+      if ((t === "checkbox" || t === "radio") && !c.checked) continue;
+      const own = c.getAttribute("data-upmore-q");
+      if (own !== null && (mine === null || mine.includes(own))) continue;
+      const sent = c.tagName === "SELECT" ? [...c.selectedOptions].map((o) => o.value).join("") : t === "file" ? (c.files && c.files.length ? "file" : "") : String(c.value || "");
+      if (sent !== "") return false;
+    }
+    return true;
+  }, [d.q, filledQs === null ? null : (filledQs || []).map(String)]).catch(() => false);
+}
 async function phoneSame(page, d, value, text) {
   const want = digitsOf(value), got = digitsOf(text);
   if (!got) return false;
@@ -467,16 +497,16 @@ async function phoneSame(page, d, value, text) {
   const shown = await page.evaluate(([q]) => {
     const el = document.querySelector(`[data-upmore-q="${q}"]`);
     if (!el) return "";
-    // The phone field's own shell: never one that holds another question (its country picker is not one of ours).
-    let box = el.closest(".iti, [class*='phone' i]");
+    // The phone widget's own shell (never the box itself, never one that holds another question).
+    let box = el.parentElement && el.parentElement.closest(".iti, [class*='phone' i]");
     if (!box || box.querySelectorAll("[data-upmore-q]").length > 1) box = el.parentElement;
+    if (!box) return "";
+    const LIST = "ul, [role=listbox], .iti__country-list, .iti__dropdown-content";
     const bits = [];
-    for (const n of (box ? [box, ...box.querySelectorAll("*")] : [])) {
-      if (n === el || n.tagName === "OPTION") continue;
-      if (n.matches && n.matches("ul, [role=listbox], .iti__country-list, .iti__dropdown-content")) continue;
-      if (n.closest && n.closest("ul, [role=listbox], .iti__country-list, .iti__dropdown-content")) continue;
-      bits.push(n.getAttribute("aria-label") || "", n.getAttribute("title") || "", n.children.length ? "" : n.textContent || "", n.tagName === "SELECT" ? (n.options[n.selectedIndex] || {}).textContent || "" : "");
-    }
+    // Only the widget's selected dial-code display: never hint or help text, a flag, a placeholder, or other words beside the box.
+    for (const n of box.querySelectorAll(".iti__selected-dial-code, [class*='selected-dial-code' i]")) if (!n.closest(LIST)) bits.push(n.textContent || "");
+    for (const n of box.querySelectorAll(".iti__selected-flag, .iti__selected-country, [class*='selected-flag' i], [class*='selected-country' i]")) if (!n.closest(LIST)) bits.push(n.getAttribute("title") || "", n.getAttribute("aria-label") || "");
+    for (const n of box.querySelectorAll("select")) if (n !== el && !n.closest(LIST)) bits.push((n.options[n.selectedIndex] || {}).textContent || "");
     return bits.join(" | ");
   }, [d.q]).catch(() => "");
   return new RegExp(`\\+\\s?${dial}(?!\\d)`).test(shown);
@@ -1021,10 +1051,10 @@ async function driftedFills(page, filled, facts = {}) {
     // Round 3: a phone box that reformats on blur ("+1 415 555 0100" shown as "(415) 555-0100") holds the same number when its
     // digits are the approved ones, less only the approved number's own country code. Any other digit refuses.
     // Review of the rs-11 split (probes p11, p11b) and its delta review (p00-phone-country-variants, 2026-11-17): the national digits
-    // alone are the approved number only with positive evidence of the approved code (noCountryNotion, phoneSame); otherwise the
+    // alone are the approved number only with positive evidence of the approved code (phoneSame, onlyRunnerFields); otherwise the
     // employer may join another country with them (+31 312 555 0100), a number the person never approved.
     if (isPhone(f.d, f.value)) { const cc = /^\s*\+(\d{1,3})[\s\-.(]/.exec(String(f.value)), want = digitsOf(f.value), got = digitsOf(now);
-      if (got && (got === want || (cc && want === cc[1] + got && ((await phoneSame(page, f.d, f.value, now)) || (await noCountryNotion(page, f.d)))))) continue; }
+      if (got && (got === want || (cc && want === cc[1] + got && ((await phoneSame(page, f.d, f.value, now)) || ((await noCountryNotion(page, f.d)) && (await onlyRunnerFields(page, f.d, filled.map((x) => x.d && x.d.q)))))))) continue; }
     out.push(f.label);
   }
   return out;

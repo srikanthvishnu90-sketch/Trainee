@@ -2,7 +2,7 @@
 // The strict benchmark's dry-run guard holds even if its stop before the click failed. strictStop (onPhase "submitting" throws)
 // is the first wall; this test takes it away and lets the production runner press Submit on local pages, and proves the other
 // two walls still stop everything: the bench's request gate (strictGate: every request but GET/HEAD/OPTIONS aborted in the
-// browser) and its page script (STRICT_INIT: every form submit cancelled, no WebSocket opened). The local employer receives
+// browser) and its page script (STRICT_INIT: every form submit cancelled, no WebSocket opened from the page or a worker it starts). The local employer receives
 // 0 POSTs, 0 beacons, 0 sockets; nothing is reported as submitted. Local pages only; nothing leaves this machine.
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
@@ -40,9 +40,20 @@ before(async () => {
     if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS") { received.push(`${req.method} ${req.url}`); return res.writeHead(200).end("<h1>Thank you for applying</h1>"); }
     if (req.url === "/robots.txt") return res.writeHead(200, { "content-type": "text/plain" }).end("User-agent: *\nAllow: /\n");
     if (PAGES[req.url]) return res.writeHead(200, { "content-type": "text/html" }).end(`<!doctype html><title>Apply</title><h2>Apply</h2>${PAGES[req.url]}`);
+    // A board's own worker scripts (review probe p01-worker-ws-bench): each opens a socket and sends what the page posts to it;
+    // /wf.js also POSTs it with fetch; /wn.js starts a nested worker that does the socket.
+    const sock = `let s = new WebSocket("ws://" + self.location.host.replace(/^$/, "") + "/telemetry"); const q = []; s.onopen = () => { while (q.length) s.send(q.shift()); }; onmessage = (e) => { s.readyState === 1 ? s.send(e.data) : q.push(e.data); };`;
+    const host = req.headers.host;
+    const W = { "/w.js": sock.replace('self.location.host.replace(/^$/, "")', JSON.stringify(host)), "/wm.js": sock.replace('self.location.host.replace(/^$/, "")', JSON.stringify(host)),
+      "/wf.js": `onmessage = (e) => { fetch("http://${host}/api/apply", { method: "POST", body: e.data }).catch(() => {}); };`,
+      "/wn.js": `const inner = new Worker("http://${host}/w.js"); onmessage = (e) => inner.postMessage(e.data);` };
+    if (W[req.url]) return res.writeHead(200, { "content-type": "text/javascript" }).end(W[req.url]);
     res.writeHead(404).end();
   });
-  server.on("upgrade", (req, socket) => { wsUpgrades++; received.push(`UPGRADE ${req.url}`); socket.destroy(); });
+  // A socket upgrade is answered as a real server would (so a socket that got through would open and send): counted, and every frame.
+  server.on("upgrade", (req, socket) => { wsUpgrades++; received.push(`UPGRADE ${req.url}`);
+    socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + crypto.createHash("sha1").update(req.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64") + "\r\n\r\n");
+    socket.on("data", (d) => received.push(`WS-FRAME ${d.length}B`)); socket.on("error", () => {}); });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${server.address().port}`;
   browser = await pw.chromium.launch({ headless: true });
@@ -99,3 +110,20 @@ test("the bench's request gate on its own: only GET/HEAD/OPTIONS, a GraphQL read
   assert.ok(up && up.fulfill, "the board's resume upload is answered inside the browser, never sent");
   assert.equal(r.upload_simulated, 1);
 });
+
+// Review of the rs-01 split (probe p01-worker-ws-bench, 2026-11-17): a socket opened from the page's own dedicated worker reached the
+// employer (the upgrade and 4 frames) while the bench reported a pass. Each worker shape below is driven by the bench itself, all its
+// walls in place: nothing reaches the employer, no upgrade, no frame, no POST.
+const WORKER_PAGE = (start) => `<!doctype html><title>Apply</title><h2>Apply</h2><form action="/submit" method="post">${FIELDS}<button type="submit">Submit application</button></form>
+  <script>const w = ${start}; document.addEventListener("input", () => w${start.startsWith("new SharedWorker") ? ".port" : ""}.postMessage(new URLSearchParams(new FormData(document.querySelector("form"))).toString()), true);</script>`;
+for (const [k, start] of [["classic", 'new Worker("/w.js")'], ["module", 'new Worker("/wm.js", { type: "module" })'], ["nested", 'new Worker("/wn.js")'], ["fetch", 'new Worker("/wf.js")']]) {
+  test(`a ${k} worker the page starts sends nothing: no socket upgrade, no frame, no POST; the bench still passes at the instant before Submit`, { skip, timeout: 60000 }, async () => {
+    received.length = 0; wsUpgrades = 0;
+    PAGES[`/worker-${k}`] = WORKER_PAGE(start).replace(/^<!doctype html><title>Apply<\/title><h2>Apply<\/h2>/, "");
+    const x = await strictPosting(browser, { provider: "greenhouse", url: `${base}/worker-${k}` }, { robots: new Map(), pacer: lib.createPacer({ gapMs: 0 }), ua: "test", resumePath: resumePath(), openCheck: false });
+    await new Promise((r) => setTimeout(r, 600));
+    assert.equal(x.result, "pass", JSON.stringify({ reason: x.reason, error: x.error }));
+    assert.deepEqual(received, [], `the local employer received: ${received.join(", ")}`);
+    assert.equal(wsUpgrades, 0);
+  });
+}

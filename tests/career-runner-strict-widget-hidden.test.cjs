@@ -61,3 +61,32 @@ for (const k of ["office_id", "location_id", "officeId", "picker-a", "picker-off
     assert.equal(posts.length, n);
   });
 }
+
+// Round 3 of the rs-07 review (2026-11-17, probe p07-url): a long id in some other path segment of the page's address, under a name
+// that is not a posting id's, is never page structure: the listbox keeps it and it is asked. The posting's own id (a posting-id name
+// equal to /jobs/<id>-slug) is structure: Teamtailor's job_id tests.
+const URLCASES = [
+  ["/offices/40012/apply", "office_id", "40012", "Which office would you work from?", "Amsterdam office"],
+  ["/locations/10001/jobs/55555-engineer", "zip", "10001", "Your home ZIP code", "10001 New York"],
+  ["/jobs/120000-senior-engineer", "salary_expectation", "120000", "Desired yearly salary", "120,000"],
+  ["/req/0040012/apply", "office_id", "0040012", "Which office would you work from?", "Amsterdam office"],
+  ["/jobs/55555-engineer", "office_id", "55555", "Which office would you work from?", "Amsterdam office"],
+];
+const mkUrl = (name, val, lbl, opt) => `<!doctype html><html><body><h1>Apply</h1><form action="/applications" method="post">
+<label>First name <input name="first_name" required></label><label>Last name <input name="last_name" required></label>
+<label>Email <input type="email" name="email" required></label>
+<div class="section"><label>Nickname <input name="nickname"></label><label>Phone <input name="phone"></label>
+<span id="wl">${lbl}</span><div role="listbox" aria-labelledby="wl"><div role="option" aria-selected="true" data-id="${val}">${opt}</div><div role="option" aria-selected="false" data-id="9">Other</div></div></div>
+<input type="hidden" name="${name}" value="${val}">
+<button type="submit">Submit application</button></form></body></html>`;
+for (const [u, name, val, lbl, opt] of URLCASES) PAGES[u] = mkUrl(name, val, lbl, opt);
+for (const [u, name, val] of URLCASES) {
+  test(`review round 3 of rs-07: ${name}=${val} on ${u} is asked, never posted unconfirmed`, { skip, timeout: 60000 }, async () => {
+    const n = posts.length;
+    const p = { id: "u" + u, ats: "greenhouse", url: base + u, facts: { first_name: "Casey", last_name: "Example", email: "casey@example.invalid" }, answers: {}, resume: { path: resume, sha256: rsha, preparedWithSha256: rsha } };
+    p.approval = { approval_id: "a" + u, hash: payloadHash(p) };
+    const r = await applyOne(browser, p, { stepTimeoutMs: 8000, retries: 0 });
+    assert.equal(r.status, "not_submitted", JSON.stringify(r));
+    assert.equal(posts.length, n);
+  });
+}

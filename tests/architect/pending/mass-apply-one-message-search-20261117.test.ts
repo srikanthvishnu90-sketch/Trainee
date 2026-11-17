@@ -87,9 +87,12 @@ Deno.test("'that I qualify for': a degree the posting requires and their confirm
   const all = await world(rows, { facts });
   await all.turn("apply to every SWE internship in Chicago");
   eq(await all.companies(), ["Northwind", "Saltbox"]);
+  // Review rv-ma3: with no confirmed fact to check against, "that I qualify for" is never every posting, silently: nothing is
+  // queued and the reply says the filter could not be checked.
   const none = await world(rows);
-  await none.turn("apply to every SWE internship in Chicago that I qualify for");
-  eq(await none.companies(), ["Northwind", "Saltbox"]);
+  const unchecked = await none.turn("apply to every SWE internship in Chicago that I qualify for");
+  eq(await none.companies(), []);
+  assert(/couldn't check "that I qualify for"/.test(unchecked!.reply), unchecked!.reply);
 });
 
 // A place ruled out is a location exclusion (fix, 2026-11-17): "not Remote" was read as an employer called Remote to skip, and

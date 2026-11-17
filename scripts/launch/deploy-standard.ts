@@ -41,6 +41,13 @@
 //      tolerance needs a written owner ruling. --missing-measurement prints the SHA S3 still lacks a measurement for (the
 //      candidate first, then the deployed SHA on the candidate's set) and the brain to measure it with (that SHA's served
 //      brain), which deploy-production.yml then measures (scripts/launch/measure-reply.sh, MEASURE_BRAINS) before it judges.
+//      D-091 (owner, 2026-11-16: "Run it on subscription (Recommended)"): a candidate with no CI measurement may instead be
+//      measured on the owner's subscription (scripts/launch/s3-subscription.ts: append-only sittings
+//      evals/career/subscription/<sha>/<run_at>.json on ci/brain-eval; the FIRST one recorded for the candidate's reply-code
+//      and eval-code trees decides, re-derived here case by case, apiKeySource none, nothing overridden in the environment).
+//      It passes only when EVERY one of its five passes is >= 95% and, unless D-056 applies, its mean is >= the deployed
+//      SHA's own subscription measurement on the same set size and eval code (exact). An invalid, incomplete or BELOW first
+//      sitting FAILS, is never replaced by a later sitting, and never triggers a CI (API) measurement.
 //   S4 the Telegram acceptance suite (tests/architect/telegram-acceptance.test.ts) passed in CI on that SHA (its check,
 //      "acceptance (telegram)", concluded success: every step not in KNOWN_GAP passed), and its KNOWN_GAP list did not grow
 //      against the deployed SHA's (shrink-only), and its STEPS list did not lose a step (removing a failing step is not a
@@ -75,6 +82,7 @@
 import { parse as parseYaml } from "npm:yaml@2.9.1";
 import { REPLY_CODE as REPLY_CODE_PATHS } from "./reply-code.ts";
 import { parseProductionBrain, parseReleaseFlags, RELEASE_CONFIG_PATH } from "../../supabase/functions/agent-chat/release_config.ts";
+import { gitTree, meetsSubscriptionBar, type Sitting, S3_SUBSCRIPTION, SUBSCRIPTION_DIR, type SubMeasurement, subscriptionMeasurementOf } from "./s3-subscription.ts";
 
 export type CheckId = "S1" | "S2" | "S3" | "S4" | "S5" | "S6";
 export const ALL_CHECKS: CheckId[] = ["S1", "S2", "S3", "S4", "S5"];
@@ -108,6 +116,7 @@ export interface Sources {
   tree(sha: string, paths: readonly string[]): Promise<string | null>; // one identity of the content under the paths; null: none
   firstAdded(sha: string, path: string): Promise<string | null>; // the commit (on sha's history) that added path
   secretsAudit(): Promise<{ code: number; out: string }>;
+  subscriptionSittings?(): Promise<Sitting[]>; // D-091: every file ever added under evals/career/subscription/ on ci/brain-eval, as added, oldest first
 }
 export interface Result { id: CheckId; pass: boolean; summary: string; evidence: string[] }
 
@@ -439,7 +448,12 @@ export async function s3(src: Sources, sha: string, deployed: string | null): Pr
   const cf = await servedFlagsAt(src, sha), df = await servedFlagsAt(src, deployed);
   const served = `served brains (${RELEASE_CONFIG_PATH}): candidate ${short(sha)} ${cb}, deployed ${short(deployed)} ${db}; release flags on: candidate [${cf.join(", ")}], deployed [${df.join(", ")}]`;
   const cand = await measurementOf(src, sha, rows, cb);
-  if (!cand.m) return { id: "S3", pass: false, summary: `candidate: ${cand.why}`, evidence: [served] };
+  if (!cand.m) {
+    const sub = await subscriptionOf(src, sha, cb);
+    if (!sub.found) return { id: "S3", pass: false, summary: `candidate: ${cand.why}`, evidence: [served] };
+    if (!sub.m) return { id: "S3", pass: false, summary: `candidate: ${cand.why}; ${sub.why}`, evidence: [served] };
+    return await s3Subscription(src, sha, deployed, sub.m, cb, db, served);
+  }
   evidence.push(`candidate ${short(sha)}: ${(cand.m.rate * 100).toFixed(1)}% (${cb}, ${cand.m.set}/${cand.m.size}, mean of ${cand.m.passes} passes of CI run ${cand.m.run}, brain commit ${cand.m.commit})`);
   // The deployed side is measured on the candidate's set, size, harness and judges, with the brain it served: only those rows count.
   const dep = await measurementOf(src, deployed, comparable(rows, cand.m), db);
@@ -461,6 +475,26 @@ export async function s3(src: Sources, sha: string, deployed: string | null): Pr
   return { id: "S3", pass, summary: `${cb} pass rate ${(cand.m.rate * 100).toFixed(1)}% ${pass ? ">=" : "<"} deployed ${db === cb ? "" : `${db} `}${(dep.m.rate * 100).toFixed(1)}%`, evidence };
 }
 
+// D-091: the candidate's subscription measurement (verified), judged on the 95% bar for every pass; against a deployed SHA
+// other than D-056's, also not below the deployed SHA's own subscription measurement on the same set size and eval code
+// (the set, the judges, the harness, the runner: EVAL_CODE). The set name, harness and judge fingerprint need no comparison
+// here: the verifier holds both sides to the candidate's own.
+const subscriptionOf = async (src: Sources, sha: string, brain: string) => subscriptionMeasurementOf(src, sha, await sameReplyCode(src, sha), brain);
+const passesOf = (m: SubMeasurement) => `passes ${m.perPass.join(", ")} of ${m.size}`;
+async function s3Subscription(src: Sources, sha: string, deployed: string, m: SubMeasurement, cb: string, db: string, served: string): Promise<Result> {
+  const bar = meetsSubscriptionBar(m);
+  const evidence = [`candidate ${short(sha)}: SUBSCRIPTION (D-091) ${m.path}, measured ${short(m.sha)}, ${cb}, ${m.set}/${m.size}, ${passesOf(m)}, mean ${(m.rate * 100).toFixed(1)}%; the first sitting recorded for this reply code and eval code (later sittings never replace it); every case re-judged from its transcript and raw judge answers; apiKeySource none on every pass`, served];
+  const head = `SUBSCRIPTION (D-091): ${cb} worst pass ${m.worst}/${m.size} ${bar ? ">=" : "<"} ${S3_SUBSCRIPTION.barPercent}%`;
+  if (!bar || d056Applies(deployed)) return { id: "S3", pass: bar, summary: `${head}${d056Applies(deployed) ? ` (owner ruling D-056 for deployed ${short(deployed)})` : ""}`, evidence };
+  const dep = await subscriptionOf(src, deployed, db);
+  if (!dep.m || dep.m.size !== m.size || dep.m.evalTree !== m.evalTree) {
+    return { id: "S3", pass: false, summary: `${head}, but deployed ${short(deployed)} has no comparable subscription measurement${dep.why ? ` (${dep.why})` : ""}`, evidence };
+  }
+  evidence.push(`deployed  ${short(deployed)}: SUBSCRIPTION ${dep.m.path}, ${db}, ${passesOf(dep.m)}, mean ${(dep.m.rate * 100).toFixed(1)}%`);
+  const pass = m.passed * dep.m.passes >= dep.m.passed * m.passes; // exact, no tolerance
+  return { id: "S3", pass, summary: `${head}; subscription pass rate ${(m.rate * 100).toFixed(1)}% ${pass ? ">=" : "<"} deployed ${(dep.m.rate * 100).toFixed(1)}%`, evidence };
+}
+
 // The SHA S3 still needs a measurement for: the candidate when it has none; else the deployed SHA when it has none on the
 // candidate's set, size, harness and judge pair (so a harness change re-measures the deployed SHA); else null. With it,
 // the brain to measure it with: the brain that SHA serves (servedBrainAt). deploy-production.yml measures it
@@ -470,7 +504,12 @@ export async function missingMeasurement(src: Sources, sha: string, deployed: st
   const rows = log === null ? [] : parseScoreLog(log);
   const cb = await servedBrainAt(src, sha);
   const cand = await measurementOf(src, sha, rows, cb);
-  if (!cand.m) return { sha, brain: cb, why: `candidate: ${cand.why}` };
+  if (!cand.m) {
+    // D-091: evidence from the owner's subscription, valid or not, is never replaced by a CI (API) measurement here.
+    const sub = await subscriptionOf(src, sha, cb);
+    if (!sub.found) return { sha, brain: cb, why: `candidate: ${cand.why}` };
+    return { sha: null, brain: null, why: sub.m ? `candidate measured on the owner's subscription (D-091, ${sub.m.path}); S3 judges it and any deployed-side subscription measurement, which CI cannot make` : `candidate: ${sub.why}; re-measure on the owner's subscription (D-091)` };
+  }
   if (!deployed) return { sha: null, brain: null, why: "no successful production deploy found: S3 fails whatever is measured" };
   const db = await servedBrainAt(src, deployed);
   const dep = await measurementOf(src, deployed, comparable(rows, cand.m), db);
@@ -763,13 +802,24 @@ export function liveSources(o: { repo: string; token: string; excludeRun?: strin
       if (r.code > 1) throw new Error(`git diff ${short(a)} ${short(b)} failed`);
       return r.code === 1;
     },
-    async tree(sha, paths) {
-      // Every blob under the paths (mode, id, path): equal output is equal content. None of the paths at sha: null.
-      const r = await git(["ls-tree", "-r", "--full-tree", sha, "--", ...paths]);
-      if (r.code !== 0) throw new Error(`git ls-tree ${short(sha)} failed`);
-      if (!r.out.trim()) return null;
-      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(r.out));
-      return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    // Every blob under the paths (mode, id, path): equal output is equal content. None of the paths at sha: null. One digest,
+    // shared with the owner's subscription packer (s3-subscription.ts), so the trees it records are the ones checked here.
+    tree: gitTree,
+    // D-091 (review of #853, B2): every sitting file ever added on ci/brain-eval, in first-parent order (not commit dates,
+    // which the committer sets), each read at the commit that added it: a later edit or deletion changes nothing.
+    async subscriptionSittings() {
+      const ref = o.scoreRef ?? "origin/ci/brain-eval";
+      if ((await git(["rev-parse", "--verify", "-q", `${ref}^{commit}`])).code !== 0) return []; // no ci/brain-eval here: as scoreLog, nothing recorded
+      const r = await git(["log", "--first-parent", "--diff-merges=first-parent", "--reverse", "--diff-filter=A", "--format=@%H", "--name-only", ref, "--", SUBSCRIPTION_DIR]);
+      if (r.code !== 0) throw new Error(`git log ${ref} -- ${SUBSCRIPTION_DIR} failed`);
+      const out: Sitting[] = [];
+      let commit = "";
+      for (const line of r.out.split("\n").map((l) => l.trim()).filter(Boolean)) {
+        if (line.startsWith("@")) { commit = line.slice(1); continue; }
+        const f = await git(["show", `${commit}:${line}`]);
+        out.push({ path: line, text: f.code === 0 ? f.out : "" });
+      }
+      return out;
     },
     async firstAdded(sha, path) {
       const r = await git(["log", "--diff-filter=A", "--format=%H", sha, "--", path]);

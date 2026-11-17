@@ -731,9 +731,18 @@ function CONTROLS(arg) {
     // widget. Every other widget keeps its hidden value, which is asked as before.
     const oneQuestion = (n) => new Set([...n.querySelectorAll("[data-upmore-q]")].map((x) => x.getAttribute("data-upmore-q"))).size <= 1;
     const phoneCountryPicker = (w) => { const s = w.closest(".iti"); return !!s && !!s.querySelector("input[type=tel]"); };
-    for (const n of near) { if (!n) continue; if (n.matches(WIDGET)) return n; const w = n.querySelector(WIDGET); if (w && (oneQuestion(n) || !phoneCountryPicker(w))) return n.matches("[role=group], [role=radiogroup]") || n.hasAttribute("aria-label") ? n : w; }
+    // Second delta review of rs-07 (2026-11-17): the first widget alone is not the container's. A phone picker placed first must not
+    // hide the real listbox after it: a crowded container is dropped only when EVERY widget in it is a phone country picker; else its
+    // first widget that is not one is the hidden value's.
+    for (const n of near) {
+      if (!n) continue;
+      if (n.matches(WIDGET)) return n;
+      const w = oneQuestion(n) ? n.querySelector(WIDGET) : [...n.querySelectorAll(WIDGET)].find((x) => !phoneCountryPicker(x));
+      if (w) return n.matches("[role=group], [role=radiogroup]") || n.hasAttribute("aria-label") ? n : w;
+    }
     return null;
   };
+  const postingOwnId = (v) => /^\d{5,}$/.test(v) && location.pathname.split("/").some((seg) => seg.replace(/^(\d{5,})-.*$/, "$1") === v);
   const named = (w, value) => {
     const by = (w.getAttribute("aria-labelledby") || "").split(/\s+/).map((id) => (document.getElementById(id) || {}).innerText || "").join(" ");
     let t = squash(w.getAttribute("aria-label") || by || w.innerText).replace(/^[^\p{L}\p{N}]+/u, "");
@@ -756,7 +765,11 @@ function CONTROLS(arg) {
         if (head) label = `${head.slice(0, 160)} (${squash(e.name) || e.type || e.tagName.toLowerCase()})`; }
       if (hidden) {
         const v = String(e.value || "").trim();
-        const w = widgetOf(e);
+        // The posting's own id, as its address carries it (Teamtailor's candidate[job_applications_attributes][0][job_id] = 8544693 on
+        // /jobs/8544693-...): page structure, never a neighbouring widget's answer, whatever widget the form's container holds (second
+        // delta review of rs-07: the widget rule itself no longer drops a crowded container's real widget for it). Only that exact
+        // value: a 5+ digit path segment of this page's own address.
+        const w = postingOwnId(v) ? null : widgetOf(e);
         // The "off" value a form keeps beside its own tick box of the same name (Lever: consent[marketing]=0 beside the box, sent
         // when it is not ticked) is that box's unticked state, not an answer of its own: the box is the question.
         const offOfBox = /^(?:0|no|false|off|)$/i.test(v) && !!e.name && [...(e.form ? e.form.elements : document.querySelectorAll("input"))].some((x) => x !== e && x.name === e.name && (x.type === "checkbox" || x.type === "radio"));

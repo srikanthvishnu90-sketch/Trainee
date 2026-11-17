@@ -428,6 +428,36 @@ const NOTHING_SENT = (company: string, prepares = true) => prepares
   : `Nothing is sent and nothing is filled yet: it's in your queue to be prepared. The exact application goes to ${company} only when you approve it on the card that shows it exactly.`;
 
 const BARE_NUMBER = /^(?:please\s+)?apply\s+(?:me\s+)?(?:to|for)\s+(\d{1,2})(?:\s+please)?[.!]?$/i;
+// MASS APPLY CONVERSATIONS (eval MA03): "can you just apply to some jobs for me" names no role. With a confirmed resume, a
+// concrete proposal from the confirmed facts instead of an open question: the role families their confirmed facts mention (a
+// family's words in a confirmed fact), each with how many OPEN postings are on file (a count, never a claim that they fit:
+// the family is a keyword match, not a fit score), and ONE question to pick. Nothing is queued; no family mentioned: not this turn's.
+const VAGUE = /^(?:(?:ok(?:ay)?|so|hey|please|pls)[,\s]+)*(?:(?:can|could) you\s+(?:just\s+)?(?:please\s+)?)?(?:just\s+)?apply\s+(?:me\s+)?(?:to|for)\s+(?:some|a few|any|a bunch of|a couple of|more|a lot of|lots of)?\s*(?:jobs?|roles?|positions?|openings?|internships?)(?:\s+for\s+me)?(?:\s+please)?[.!?]*$/i;
+const FAMILIES: { label: string; words: string[]; signals: RegExp }[] = [
+  { label: "software engineering", words: ["software"], signals: /\b(?:react|python|go|java|typescript|javascript|kubernetes|software|computer science|backend|frontend)\b/i },
+  { label: "data", words: ["data"], signals: /\b(?:sql|data|statistics|analytics|dashboards?|tableau|python)\b/i },
+  { label: "finance", words: ["financial"], signals: /\b(?:finance|financial|excel|dcf|valuation|investment|banking)\b/i },
+];
+async function proposeBatch(o: ApplyChatDeps): Promise<ApplyChatResult | null> {
+  const said = (o.facts ?? []).map((f) => String(f?.text ?? f?.value ?? "")).join(" \n ");
+  const fams = FAMILIES.filter((f) => f.signals.test(said));
+  if (!fams.length) return null;
+  const found: { label: string; n: number; eg: string[] }[] = [];
+  for (const f of fams) {
+    try {
+      const { list } = await postingsFor(o, { role: f.label, words: f.words, place: null });
+      if (list.length) found.push({ label: f.label, n: list.length, eg: list.slice(0, 2).map(nameOf) });
+    } catch { /* a family that cannot be searched is left out */ }
+  }
+  if (!found.length) return null;
+  found.sort((a, b) => b.n - a.n);
+  const lines = found.map((f, i) => `${i + 1}. ${f.label} roles: ${f.n} open ${f.n === 1 ? "posting" : "postings"} on file (for example ${f.eg.join("; ")})`);
+  return { reply: [`Your confirmed facts mention these kinds of roles; here is how many open postings I have on file for each. Nothing is queued yet, and I haven't checked them against your facts.`, ...lines,
+    `Which should I apply you to: "${found[0].label}", "all of them", or name a role and a place?`].join("\n"), status: "none", intent: APPLY_QUEUE_INTENT, queued: [], refused: [] };
+}
+const resumeFirst = (message: string): ApplyChatResult => ({ reply: `I need your resume before I apply anywhere: I have no confirmed resume on file, so nothing was searched, queued or sent. ${NO_RESUME_NEXT} Then say "${String(message).trim().slice(0, 120)}" again and I'll take it from there.`, status: "no_resume", intent: APPLY_QUEUE_INTENT, queued: [], refused: [] });
+// An imperative ask to apply ("apply me to ...", "please apply to ...", "can you just apply me to ..."), never a question about applying.
+const APPLY_COMMAND = /^(?:(?:ok(?:ay)?|so|hey|please|pls)[,\s]+)*(?:(?:can|could) you\s+(?:just\s+)?(?:please\s+)?)?(?:just\s+)?apply\s+(?:me\s+)?(?:to|for)\s+\S/i;
 export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | null> {
   // FEATURE E2E: a pasted posting link, or a role named by the company's possessive, read from the ATS on demand
   // (career_apply_link.ts); only with the link deps wired (agent-chat), otherwise as before.
@@ -448,7 +478,18 @@ export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | nul
   const bare = BARE_NUMBER.exec(String(o.message ?? "").trim());
   if (bare && (o.shortlist ?? []).some((e) => e && (e.url || e.id))) return applyManyTurn({ ...o, message: `apply to #${bare[1]}` });
   const ask = applyAsk(o.message);
-  if (!ask) return null;
+  if (!ask) {
+    // MASS APPLY CONVERSATIONS (eval MA13; CLAUDE.md: never submit without a real confirmed resume): any other ask to apply
+    // ("apply me to 50 data analyst jobs in chicago", "can you just apply to some jobs for me") from someone with no confirmed
+    // resume on file asks for the resume first, before any search is shown. The resume is read for every apply command: only
+    // a confirmed one (false from noResume) gets the vague-ask proposal; missing asks for it; unknown is not this turn's.
+    const said = String(o.message ?? "").trim();
+    if (!(APPLY_COMMAND.test(said) || VAGUE.test(said)) || NOT_A_COMMAND.test(said)) return null;
+    const resume = await noResume(o);
+    if (resume === "missing") return resumeFirst(o.message);
+    if (resume === false && o.resumeOnFile && VAGUE.test(said)) return await proposeBatch(o);
+    return null;
+  }
   const intent = APPLY_QUEUE_INTENT;
   // Only an open posting on file (career_postings) is this turn's: when none matches, or the read fails, the turn is
   // not claimed, and the router answers the ask as it always has (its own served list, its honest named stop).
@@ -588,6 +629,9 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   // MASS APPLY: "the top N <role> in <place>" is searched for here, not read from the thread's last list.
   const what = ask.kind === "first" || ask.kind === "all" ? ask.what : undefined;
   let list: ShortlistEntry[], rankedBy: "fit" | "newest" = "newest";
+  // CLAUDE.md (never submit without a real confirmed resume): a searched ask from someone with no confirmed resume asks for it
+  // before anything is searched (eval MA13).
+  if (what && !given && await noResume(o) === "missing") return resumeFirst(o.message);
   if (what) {
     try { ({ list, rankedBy } = await postingsFor(o, what)); }
     catch { return { reply: `I couldn't search the postings just now, so nothing was queued. Ask again in a minute.`, status: "unreadable", intent, queued: [], refused: [] }; }

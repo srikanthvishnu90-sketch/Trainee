@@ -63,6 +63,7 @@ and no template rests on them alone.
 ### 1.2 What the evidence settles, and one rule that overrides it
 - **One column, no tables, no text boxes, contact in the body**: E1, E2, E3, E4. All fifteen are single-column.
 - **Margins 0.5–1 in, body 10–12 pt, one family, consistent formatting, reverse chronological**: E5, E6. Every template is inside those bounds.
+  A resume tailored to one posting from chat (`tailor_resume`, 2026-11-16, benchmark C10) puts the entries that show the posting's skills first in their section, then entries sharing the posting title's words, then the rest; each tier stays reverse chronological (`career_tailor.ts relevanceOrder`). The default of `tailorForPosting` stays strictly reverse chronological (D-071, pinned by D71-5); which one should hold everywhere is open for the architect.
 - **One page for students and early career; two pages for experienced people**: E6, E7 for one page. E10 says two pages are acceptable or preferred for experienced people. E20 caps federal resumes at two pages.
 - **Bold titles over bullets, clear headers, an overview at the top, white space**: E1.
 - **Quantified results**: E9. This is a content matter: Trainee never invents a number (D-007). The templates give results room, nothing more.

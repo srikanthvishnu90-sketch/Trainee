@@ -292,6 +292,45 @@ export function applyPersonaOrder(resume0: any, lead: string[]): any {
   return { ...resume, sections: ordered, lines: ordered.flatMap((s: any) => s.lines.filter((l: any) => l.type !== "note" && l.type !== "gap").map((l: any) => ({ ...l, section: s.heading }))) };
 }
 
+// Gap #8 (benchmark C10: a go-to-market role led a software resume because it was the newest): for one posting, the entries
+// that show the posting's skills lead their section, most first; then entries whose words share the posting title's (a
+// "software" product for a software role); entries that show neither follow. A framework counts for the language it is written
+// in (React for JavaScript). Within each tier the order is kept as it came (newest first, RESUME-TEMPLATES E5). Sections and
+// lines are moved whole, never changed. A lead the person chose (a persona) is never reordered by this (tailorForPosting).
+const FAMILY: Record<string, string[]> = {
+  javascript: ["react", "node.js", "nodejs", "vue", "angular", "next.js", "typescript", "express"], python: ["django", "flask", "pandas", "numpy", "fastapi", "pytorch"],
+  java: ["spring", "kotlin"], sql: ["postgresql", "postgres", "mysql", "sqlite"],
+};
+const TITLE_STOP = new Set(["intern", "internship", "interns", "summer", "team", "senior", "junior", "role", "with", "and", "the", "for", "new", "grad", "graduate", "program", "2025", "2026", "2027", "2028"]);
+const stem = (w: string) => w.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 6);
+export function relevanceOrder(resume: any, jd: any, profile: any): any {
+  const wanted = new Set(wantedOf(jd).map((x: string) => String(x).toLowerCase()));
+  for (const [lang, kin] of Object.entries(FAMILY)) if (wanted.has(lang)) for (const k of kin) wanted.add(k);
+  const title = String(jd?.title || String(jd?.rawText || "").split("\n")[0] || "").split(/\s+at\s+/i)[0];
+  const titleWords = new Set(title.split(/[^A-Za-z0-9]+/).filter((w) => w.length >= 5 && !TITLE_STOP.has(w.toLowerCase())).map(stem));
+  if ((!wanted.size && !titleWords.size) || !Array.isArray(resume?.sections)) return resume;
+  const score = (entry: any) => {
+    const f = CareerProfile.getFact(profile, (entry?.factIds || [])[0]);
+    if (!f) return 0;
+    const shown = new Set(CareerTailor.skillsInText(corpusOf(f)).map((x: string) => x.toLowerCase()).filter((x: string) => wanted.has(x))).size;
+    const shared = new Set(corpusOf(f).split(/[^A-Za-z0-9]+/).filter((w: string) => w.length >= 5).map(stem).filter((w: string) => titleWords.has(w))).size;
+    return shown * 10 + Math.min(shared, 9);
+  };
+  let moved = false;
+  const sections = resume.sections.map((sec: any) => {
+    const blocks: any[][] = [];
+    for (const l of sec.lines || []) { if (l?.type === "entry" || !blocks.length) blocks.push([l]); else blocks[blocks.length - 1].push(l); }
+    if (blocks.filter((b) => b[0]?.type === "entry").length < 2 || blocks[0][0]?.type !== "entry") return sec;
+    const keyed = blocks.map((b, i) => ({ b, i, r: score(b[0]) }));
+    const sorted = [...keyed].sort((x, y) => y.r - x.r || x.i - y.i);
+    if (sorted.every((x, i) => x.i === i)) return sec;
+    moved = true;
+    return { ...sec, lines: sorted.flatMap((x) => x.b) };
+  });
+  if (!moved) return resume;
+  return { ...resume, sections, lines: sections.flatMap((x: any) => (x.lines || []).filter((l: any) => l.type !== "note" && l.type !== "gap").map((l: any) => ({ ...l, section: x.heading }))) };
+}
+
 // The document that goes to an employer: the cited lines only. The tailor's eligibility verdict and gap notes are for
 // the person, not the employer, and are not facts; they never print on a submitted resume.
 export function submissionResume(resume: any): any {
@@ -805,6 +844,9 @@ export async function tailorForPosting(o: {
   // stored (no link: it rides the reply). Never set on a path that applies or sends.
   reviewDraft?: boolean;
   edits?: ResumeEdit[];
+  // Gap #8: "relevance" puts the entries that show the posting's skills first in their section (relevanceOrder); the default
+  // keeps every section newest first (D-071, RESUME-TEMPLATES E5). tailor_resume (the brain's tool) asks for relevance.
+  order?: "relevance";
 }): Promise<TailorOut> {
   const t0 = performance.now();
   const ms = () => Math.round(performance.now() - t0);
@@ -848,7 +890,8 @@ export async function tailorForPosting(o: {
   const lead = persona ? persona.lead.filter((id) => CareerProfile.getFact(picked, id)) : [];
   // `picked`, not `clean`: a skill a persona hides stays hidden.
   // D-078: skills read from experience text and never confirmed are taken off the Skills line before anything prints.
-  const gate0 = withoutInferredSkills(withListedSkills(applyPersonaOrder(t.resume, lead), picked), picked);
+  const byOrder = (r: any) => o.order === "relevance" && !lead.length ? relevanceOrder(applyPersonaOrder(r, lead), jd, picked) : applyPersonaOrder(r, lead);
+  const gate0 = withoutInferredSkills(withListedSkills(byOrder(t.resume), picked), picked);
   // 123's builder already withheld the inferred skills it found (every resume path); this line catches any added after it.
   const gate = { ...gate0, withheld: [...((t.resume.withheldSkills ?? []) as WithheldSkill[]), ...gate0.withheld].filter((w, i, all) => all.findIndex((x) => x.name.toLowerCase() === w.name.toLowerCase()) === i) };
   let ordered = gate.resume;
@@ -858,7 +901,7 @@ export async function tailorForPosting(o: {
     // delivered, so it starts from the first version exactly as it printed (every entry kept, the ones this posting does not ask for
     // on one line each, newest first), and says what changed against that version.
     const v1 = keepEveryEntry(ordered, picked, { oneLine: true });
-    const delivered = v1.added.length ? applyPersonaOrder(v1.resume, lead) : v1.resume;
+    const delivered = v1.added.length ? byOrder(v1.resume) : v1.resume;
     const e = applyEdits(delivered, picked, o.edits);
     if (!e.ok) return { ok: false, refused: "edit", reason: e.reason, ms: ms() };
     ordered = e.resume; edits = e.done;
@@ -868,7 +911,7 @@ export async function tailorForPosting(o: {
   { const every = keepEveryEntry(ordered, picked, { oneLine: !edits }); ordered = every.resume; keptBack = [...keptBack, ...every.added]; if (!edits) shortened = every.shortened; }
   // D-070: an entry kept back on a first version takes its place by date (RESUME-TEMPLATES E5, newest first); a lead the person
   // chose still goes first. An edited version keeps the order its edits set.
-  if (!edits && keptBack.length) ordered = applyPersonaOrder(ordered, lead);
+  if (!edits && keptBack.length) ordered = byOrder(ordered);
   if (placeholder) {
     // The placeholder prints where the email would: after a contact line the person confirmed (which has no email), or alone.
     const h = ordered.header = { ...(ordered.header || {}), email: EMAIL_PLACEHOLDER };

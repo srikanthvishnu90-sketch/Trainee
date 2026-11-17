@@ -1086,7 +1086,8 @@ export function careerTools(deps: {
         // visible placeholder and is not stored for an application. Without a deliverer the stored file is the only way to hand it
         // over, so the email is asked for first, as before.
         const edits = Array.isArray(i.edits) ? (i.edits as any[]).map((e) => ({ role: String(e?.role ?? ""), lines: Number(e?.lines) })) : [];
-        const base = { userId: c.userId, profile: profileOf(c), posting: { text, job_id, company }, persona, deps: { render: t.render, resumes: t.resumes }, now: c.now, reviewDraft: !!t.deliver, ...(edits.length ? { edits } : {}) };
+        // Gap #8: the entries that show this posting's skills lead (career_tailor.ts relevanceOrder).
+        const base = { userId: c.userId, profile: profileOf(c), posting: { text, job_id, company }, persona, deps: { render: t.render, resumes: t.resumes }, now: c.now, reviewDraft: !!t.deliver, order: "relevance" as const, ...(edits.length ? { edits } : {}) };
         const legacy = asked === "trainee" || (asked === "own" && !plan) ? { layout: asked, ownDocx } : null;
         let r = await tailorForPosting(legacy ? { ...base, ...legacy } : { ...base, layout: plan?.layout ?? null, template: plan?.template ?? null, ownDocx: plan?.ownDocx ?? null, ownPdfSpec: plan?.ownPdfSpec ?? null });
         let keptNote = "";

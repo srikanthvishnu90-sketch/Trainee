@@ -21,7 +21,11 @@ const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[*✱]/g, 
 // ---- page side: read every question, tag its controls with data-upmore-q / data-upmore-o --------------------------------
 function EXTRACT() {
   const squash = (s) => String(s || "").replace(/\s+/g, " ").trim();
-  const clean = (s) => squash(s).replace(/\(required\)/i, "").replace(/\s*[*✱]+\s*$/, "").replace(/\s*[*✱]+\s*$/, "").trim();
+  // A form's own word for "required" after the label, usually beside its asterisk ("E-Mail* (erforderlich)": Personio's labels as
+  // of 2026-11-16, the word in a span for screen readers): not part of the question's name, and a mark that it is required.
+  const REQ_WORD = "required|erforderlich|pflichtfeld|obligatoire|requis|obligatorio|requerido|obrigat[oó]rio|obbligatorio|verplicht|vereist|obligatorisk|p[aå]kr[aæ]vet|kr[äa]vs|pakollinen|wymagane|povinn[éeý]|privalomas|oblig[aā]ts";
+  const REQ_TAIL = new RegExp(`\\s*[*✱]*\\s*\\((?:${REQ_WORD})\\)\\s*$`, "i");
+  const clean = (s) => squash(s).replace(/\(required\)/i, "").replace(REQ_TAIL, "").replace(/\s*[*✱]+\s*$/, "").replace(/\s*[*✱]+\s*$/, "").trim();
   // An employee sign-in form (MARK_SIGNIN: Teamtailor's "Already working at X?") is never the application's scope or questions.
   // Review of #797: the form the runner marked as the application (parallel-apply MARK), so the form filled is the one whose Submit is pressed.
   const scope = document.querySelector("form[data-upmore-app]") || document.querySelector("form:not([data-upmore-signin])") || document.body;
@@ -98,7 +102,7 @@ function EXTRACT() {
     // Workable's dropdown: the visible combobox carries no flag; the hidden input that holds its value in the same widget is required.
     if (els.some((e) => e.getAttribute("role") === "combobox" && e.closest("[data-ui]") && e.closest("[data-ui]").querySelector("input[required][aria-hidden='true']"))) return true;
     if (!node) return false;
-    if (/[*✱]\s*$/.test(squash(node.textContent))) return true;
+    if (/[*✱]\s*$/.test(squash(node.textContent)) || REQ_TAIL.test(squash(node.textContent))) return true;
     return /required/i.test(node.className || "") || !!node.querySelector(".required, [class*='required' i]");
   };
   const eeoOf = (el, label) =>
@@ -304,6 +308,8 @@ const FACT_RULES = [
   [/linkedin/, "linkedin_url"], [/github/, "github_url"],
   [/^(portfolio|website|personal (site|website)|your website)\b/, "website_url"],
   [/^(current |your )?(location|city)( of residence)?$|^where are you (currently )?(located|based)$/, "location"],
+  // The same question in German (Personio: "Ort", "Wohnort").
+  [/^(wohnort|ort|stadt|aktueller wohnort)$/, "location"],
   // Greenhouse job-boards' own place lookup ("Location (City)"): the confirmed place, picked from its list (matchPlace).
   [/^location city$/, "location"],
   // One "Address" box (Breezy asks it on many forms) takes the person's confirmed full address; a street line takes the street.

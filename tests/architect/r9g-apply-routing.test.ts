@@ -8,7 +8,7 @@
 // Each batch goes through the same screens, resume check and pace as every batch ask: queued, nothing approved or sent
 // (each application is prepared and goes only on the person's yes to its exact payload, D-MS-1). No network, no database.
 import assertNode from "node:assert/strict";
-import { applyManyAsk, applyTurn, findThenApplyAsk, MANY_MAX, matchesFilter, namedAsks } from "../../supabase/functions/_shared/career_apply_chat.ts";
+import { applyManyAsk, applyTurn, findThenApplyAsk, matchesFilter, namedAsks } from "../../supabase/functions/_shared/career_apply_chat.ts";
 import { linksAsk } from "../../supabase/functions/_shared/career_apply_link.ts";
 import { memoryWantStore } from "../../supabase/functions/_shared/career_apply_want.ts";
 import { memoryPostingsDb } from "../../supabase/functions/_shared/career_ingest.ts";
@@ -73,7 +73,8 @@ Deno.test("E06 'find <role> in <place> and apply to all of them': the search and
   const r = await w.turn("find frontend internships in Chicago and apply to all of them");
   eq([r?.status, r?.intent], ["queued", "career_apply_queue"], r?.reply);
   eq(await w.keys(), ["greenhouse:acme:101", "greenhouse:brite:102", "greenhouse:ember:105"]);
-  ok(MANY_MAX <= 200, "one message stays under the 200-a-day pace (D-R9-1)");
+  // architect amendment (D-092, owner 2026-11-16): the MANY_MAX <= 200 guard is removed under D-NO-LIMITS (Trainee sets no
+  // volume limit of its own); MANY_MAX itself is gone. Only that one check changed.
 });
 
 Deno.test("E08 two named roles in one apply ask: each found on file, ONE batch (before: the router's 'not in the list I can work from')", async () => {

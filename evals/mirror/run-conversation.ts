@@ -29,11 +29,17 @@ import * as zlib from "node:zlib";
 import * as nodeCrypto from "node:crypto";
 import { Buffer } from "node:buffer";
 
+import { inCi } from "../subscription/claude_cli.ts";
+import { brainEnvOverrides, SUBSCRIPTION_PLACEHOLDER_KEY } from "../career/run.ts";
+
 const realFetch = globalThis.fetch;
 const a = Deno.args, opt = (n: string) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
 const sub = a.includes("--subscription");
 const dry = a.includes("--dry-run"), live = a.includes("--live") || sub;
-if (sub && (a.includes("--live") || Deno.env.get("CI"))) { console.log("refused: --subscription runs alone and never in CI (D-089)"); Deno.exit(3); }
+if (sub && (a.includes("--live") || inCi())) { console.log("refused: --subscription runs alone and never in CI (D-089)"); Deno.exit(3); }
+// D-089: the same environment rule as run.ts --subscription: nothing may change the brain, its model, the gateway or a switch.
+const overrides = sub ? brainEnvOverrides(Deno.env.toObject()) : [];
+if (overrides.length) { console.log(`refused: --subscription measures the committed code, but the environment sets ${overrides.join(", ")}; unset them (D-089)`); Deno.exit(3); }
 const convPath = opt("--conv");
 if (dry === live || !convPath) { console.log("usage: run-conversation.ts --dry-run | --live --budget-usd <cap>  --conv <file> [--persona <file>] [--out file]"); Deno.exit(2); }
 const budget = Number(opt("--budget-usd") ?? 0);
@@ -89,7 +95,7 @@ const model = async (req: Request): Promise<Response> => {
 // Read before openWorld: it clears ANTHROPIC_API_KEY (response_world ENV_KEYS) so a test world never holds a real key; the first
 // live run (2026-11-11) sent the string "undefined" and every model call came back 401.
 // (subscription mode: the product needs some key to consider itself configured; the request never leaves this process)
-const LIVE_KEY = sub ? "sk-subscription-mode-not-a-key" : Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+const LIVE_KEY = sub ? SUBSCRIPTION_PLACEHOLDER_KEY : Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const ACTION_TABLES: [string, string][] = [["career_apply_receipts", "submit"], ["career_contact_sends", "send"], ["career_outbox", "send"], ["career_outlook_sends", "send"], ["career_apply_jobs", "queue"], ["career_apply_prepared", "prepare"]];
 const w = await openWorld(2, { model });
 // D-065 (item 7): the test world Instinct had (instinct-wa-batch1/world.ts): the benchmark's recorded postings served from their

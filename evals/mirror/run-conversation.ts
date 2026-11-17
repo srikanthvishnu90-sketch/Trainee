@@ -4,6 +4,8 @@
 // conversation through the same real handler and world, in order, on one person and one thread.
 //
 //   deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/mirror/run-conversation.ts --dry-run --conv <file> [--persona <file>] [--out file]
+//   deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/mirror/run-conversation.ts --subscription --conv <file> --persona <file> --out <file>
+//     (D-089: the same real-model run, answered by the `claude` CLI on the owner's subscription; no API key, no API spend; local only)
 //   MIRROR_SPEND_APPROVED=D-057 deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/mirror/run-conversation.ts --live --budget-usd <cap> --conv <file> --persona <file> --out <file>
 //
 // --conv: JSON, an array of {id, prompt} (extra fields ignored), sent in order. --persona: JSON {setup: string[]}: turns sent
@@ -27,13 +29,22 @@ import * as zlib from "node:zlib";
 import * as nodeCrypto from "node:crypto";
 import { Buffer } from "node:buffer";
 
+import { inCi } from "../subscription/claude_cli.ts";
+import { brainEnvOverrides, SUBSCRIPTION_PLACEHOLDER_KEY } from "../career/run.ts";
+
 const realFetch = globalThis.fetch;
 const a = Deno.args, opt = (n: string) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
-const dry = a.includes("--dry-run"), live = a.includes("--live");
+const sub = a.includes("--subscription");
+const dry = a.includes("--dry-run"), live = a.includes("--live") || sub;
+if (sub && (a.includes("--live") || inCi())) { console.log("refused: --subscription runs alone and never in CI (D-089)"); Deno.exit(3); }
+// D-089: the same environment rule as run.ts --subscription: nothing may change the brain, its model, the gateway or a switch.
+const overrides = sub ? brainEnvOverrides(Deno.env.toObject()) : [];
+if (overrides.length) { console.log(`refused: --subscription measures the committed code, but the environment sets ${overrides.join(", ")}; unset them (D-089)`); Deno.exit(3); }
 const convPath = opt("--conv");
 if (dry === live || !convPath) { console.log("usage: run-conversation.ts --dry-run | --live --budget-usd <cap>  --conv <file> [--persona <file>] [--out file]"); Deno.exit(2); }
 const budget = Number(opt("--budget-usd") ?? 0);
-if (live) {
+if (sub) await (await import("../subscription/claude_cli.ts")).preflight();
+if (live && !sub) {
   if (!/^D-\d{3}[a-z]?$/.test(Deno.env.get("MIRROR_SPEND_APPROVED") ?? "")) { console.log("refused: --live needs MIRROR_SPEND_APPROVED=<the DECISIONS.md line of the owner's written spend approval>"); Deno.exit(3); }
   if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("refused: --live needs ANTHROPIC_API_KEY"); Deno.exit(3); }
   if (!(budget > 0)) { console.log("refused: --live needs --budget-usd <cap>"); Deno.exit(3); }
@@ -53,9 +64,55 @@ let calls: { tools: string[]; web: boolean; json: boolean }[] = [];
 const modelErrors = new Map<number, string>();
 const prompts: string[] = [];
 const PRICE = { input: 2 / 1e6, output: 10 / 1e6, cacheRead: 0.1 / 1e6, cacheWrite: 2.5 / 1e6 };
+// Replay (live-10 diagnosis, $0): --replay <file> gives, per turn id, the tool calls a live run made ({name, args}) and the reply text
+// to give after them (the model's draft). A dry run then plays them through the real handler, and answers the support judge's calls
+// per --judge: "stub" (the mirror suite's word stub, tests/architect/helpers/mirror_stub_judge.ts) or "yes" (yes to every claim, so
+// what is still removed is removed by code, not the judge).
+const replay: Record<string, { calls: { name: string; args: Record<string, unknown> }[]; reply: string }> | null = opt("--replay") ? JSON.parse(await Deno.readTextFile(opt("--replay")!)) : null;
+const judgeMode = opt("--judge") ?? "stub";
+// --tag-synthetic (SYNTHETIC, labelled so in every output): the recorded draft is tagged by a script, not a model: each sentence gets
+// the evidence unit (from the prompt's ledger and the tool results' `evidence`) that layer A finds for it, or none.
+const tagSynthetic = a.includes("--tag-synthetic");
+const { findSupport, indexPages, splitSentences } = await import("../../supabase/functions/_shared/agent/research/support.ts");
+const tagged = (draft: string, chat: any) => {
+  const all = (chat.messages ?? []).map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "")).join("\n").replace(/\\"/g, '"');
+  const units = [...new Map([...all.matchAll(/\[(E\d+)\] \(([^)]*)\) ([^"\n]+)/g)].map((m) => [m[1], m[3].trim()])).entries()];
+  if (!units.length) return draft;
+  const idx = indexPages(units.map(([, t]) => ({ text: t, one: false })));
+  return draft.split("\n").map((l) => /^\s*https?:\/\//.test(l) ? l : splitSentences(l).map((x) => { const f = findSupport(x, idx); return f ? (/[.!?]["')]*\s*$/.test(x) ? x.replace(/\s*([.!?]["')]*)\s*$/, ` [${units[f.page][0]}]$1`) : `${x} [${units[f.page][0]}]`) : x; }).join(" ")).join("\n");
+};
+const { mirrorJudgeAnswer } = await import("../../tests/architect/helpers/mirror_stub_judge.ts");
+// "recorded" (live-11 replay): the verdicts a live run's judge gave ({claim: "yes" | "no"}, --verdicts <file>); a claim it never
+// judged gets the truth rule of the support tests (tests/architect/support-test-judge.ts supportsClaim).
+const { supportsClaim } = await import("../../tests/architect/support-test-judge.ts");
+const verdicts: Record<string, string> = opt("--verdicts") ? JSON.parse(await Deno.readTextFile(opt("--verdicts")!)) : {};
+let step = 0, stepLabel = "";
+const replayed = (chat: any): string | { calls: { name: string; args: Record<string, unknown> }[] } | null => {
+  const r = replay?.[label];
+  if (!r) return null;
+  const sys = String(chat.messages?.[0]?.role === "system" ? chat.messages[0].content : "");
+  if (/^You check claims against passages/.test(sys)) {
+    const items = JSON.parse(String(chat.messages.find((m: any) => m.role === "user")?.content ?? "[]"));
+    if (judgeMode === "recorded" || judgeMode === "recorded-no") return JSON.stringify(items.map((x: any) => { const c = String(x.claim ?? "").trim(); return verdicts[c] ?? (judgeMode === "recorded-no" ? "no" : supportsClaim(c, String(x.source ?? "")) ? "yes" : "no"); }));
+    return judgeMode === "yes" ? JSON.stringify(items.map(() => "yes")) : mirrorJudgeAnswer(JSON.stringify(items));
+  }
+  if (chat.response_format) return "{}";
+  // SYNTHETIC (--tag-synthetic): the repair pass is stubbed as "no change" (nothing comes back, so what failed is dropped).
+  if (tagSynthetic && /^You fix a text message from a career assistant/.test(sys)) return "";
+  if (!chat.tools?.length) return r.reply; // a rewrite pass gets the same draft back (so it never shortens it into something else)
+  if (stepLabel !== label) { stepLabel = label; step = 0; }
+  const c = r.calls[step++];
+  return c ? { calls: [c] } : tagSynthetic ? tagged(r.reply, chat) : r.reply;
+};
 const scripted = (chat: any) => {
   modelCalls++;
+  // (CodeRabbit on #849: a replayed request's prompt is logged too)
   if (promptLog) prompts.push(`=== ${label}\n${JSON.stringify(chat.messages?.[0]?.content ?? "").slice(0, 20000)}`);
+  const rp = replayed(chat);
+  if (rp !== null) {
+    if (typeof rp === "string") return Response.json({ id: "mirror-replay", model: chat.model, choices: [{ index: 0, message: { role: "assistant", content: rp }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
+    return Response.json({ id: "mirror-replay", model: chat.model, choices: [{ index: 0, message: { role: "assistant", content: null, tool_calls: rp.calls.map((c, k) => ({ id: `rp-${label}-${step}-${k}`, type: "function", function: { name: c.name, arguments: JSON.stringify(c.args ?? {}) } })) }, finish_reason: "tool_calls" }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
+  }
   const text = chat.response_format ? "{}" : `Dry run, no model (${label}).`;
   return Response.json({ id: "mirror-dry", model: chat.model, choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
 };
@@ -66,6 +123,9 @@ const model = async (req: Request): Promise<Response> => {
   if (dry) return await anthropicWire(req, scripted);
   // D-065 (item 6): at the cap the runner refuses the call the way the provider refuses at an account's spending limit (HTTP 400,
   // its own words), so the product says it stopped at a spending limit, never "an error on its side, not a limit" (limit_stop.ts).
+  // Subscription mode: the product holds only the placeholder key; a request carrying any other key is refused, never answered.
+  if (sub && req.headers.get("x-api-key") !== SUBSCRIPTION_PLACEHOLDER_KEY) return Response.json({ type: "error", error: { type: "authentication_error", message: "subscription mode: the request carries a key other than the placeholder (D-089)" } }, { status: 401 });
+  if (sub) { modelCalls++; return await (await import("../subscription/claude_cli.ts")).cliFetch(req); }
   if (spent >= budget) return Response.json({ type: "error", error: { type: "invalid_request_error", message: `You have reached your specified API usage limits (mirror runner cap $${budget}, $${spent.toFixed(3)} spent).` } }, { status: 400 });
   modelCalls++;
   const res = await realFetch(req);
@@ -82,7 +142,8 @@ const model = async (req: Request): Promise<Response> => {
 
 // Read before openWorld: it clears ANTHROPIC_API_KEY (response_world ENV_KEYS) so a test world never holds a real key; the first
 // live run (2026-11-11) sent the string "undefined" and every model call came back 401.
-const LIVE_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+// (subscription mode: the product needs some key to consider itself configured; the request never leaves this process)
+const LIVE_KEY = sub ? SUBSCRIPTION_PLACEHOLDER_KEY : Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const ACTION_TABLES: [string, string][] = [["career_apply_receipts", "submit"], ["career_contact_sends", "send"], ["career_outbox", "send"], ["career_outlook_sends", "send"], ["career_apply_jobs", "queue"], ["career_apply_prepared", "prepare"]];
 const w = await openWorld(2, { model });
 // D-065 (item 7): the test world Instinct had (instinct-wa-batch1/world.ts): the benchmark's recorded postings served from their
@@ -159,7 +220,13 @@ try {
     const r = await person.say(s);
     lines.push(JSON.stringify({ id: label, setup: true, reply: String(r.reply ?? ""), intent: r.intent }));
   }
+  // A turn is started only while the cap holds a turn's worth (live-9 and live-10: at most $0.45 a turn, $3.2 to $3.4 for 26 turns),
+  // so a live run stops between turns, never inside one, and a $4.50 cap completes all 26.
+  // (D-089: a --subscription run spends nothing through the API: its calls go to the claude CLI, and a request carrying any key
+  // but the placeholder is refused with a 401 above. The reserve guards real API spend only, so it gates an API --live run.)
+  const TURN_RESERVE_USD = 0.5;
   for (const t of turns) {
+    if (live && !sub && budget - spent < TURN_RESERVE_USD) { stopped = `budget: $${spent.toFixed(3)} of $${budget} spent; less than a turn's reserve ($${TURN_RESERVE_USD}) left before ${t.id}`; break; }
     label = t.id;
     const before = await counts(person.id), outBefore = w.outbound.length, callsBefore = modelCalls, spentBefore = spent, webBefore = webSearches, t1 = performance.now();
     calls = [];
@@ -186,13 +253,16 @@ try {
       shorten: meta.shorten ?? null,
       // D-071: what research did with its pages and draft (drafted, kept, dropped by reason), and what each search asked.
       research: meta.research ?? null,
+      // Live-10: the model's draft before the support check, and each sentence it removed with the reason (layer A or the judge).
+      support: meta.support ?? null,
+      pipeline: meta.pipeline ?? null, piped: meta.piped ?? null,
       args: ((meta.tool_calls ?? []) as any[]).filter((x) => x && x.args).map((x) => ({ name: String(x.name), args: x.args })),
       router_intent: meta.router_intent ?? null, brain: meta.brain ?? null, artifact, files, documents,
     };
     lines.push(JSON.stringify({ id: t.id, reply, actions, route: modelCalls > callsBefore ? (dry ? "model-scripted" : "model") : "router", intent, status, ms: Math.round(performance.now() - t1), usd: Number((spent - spentBefore).toFixed(4)), trace }));
     // The product falls back to the router when the model call is refused at the cap, so later turns would be the fallback's
     // words, not the model's: stop here (as heldout/harness.ts does). Live run 5 (2026-11-12) ran C18 to C23 on the fallback.
-    if (live && spent >= budget) { stopped = `budget reached: $${spent.toFixed(3)} of $${budget}`; break; }
+    if (live && !sub && spent >= budget) { stopped = `budget reached: $${spent.toFixed(3)} of $${budget}`; break; }
   }
 } finally {
   Deno.env.delete("ANTHROPIC_API_KEY");
@@ -203,4 +273,4 @@ try {
 }
 await Deno.writeTextFile(out, lines.join("\n") + (lines.length ? "\n" : ""));
 if (promptLog) await Deno.writeTextFile(promptLog, prompts.join("\n\n"));
-console.log(`MIRROR-CONVERSATION ${dry ? "dry-run" : "live"} gmail_sent=${gmail.sent.length} turns=${lines.filter((l) => !l.includes('"setup":true')).length}/${turns.length} model_calls=${modelCalls} external_requests=${w.outbound.length} web_searches=${webSearches} spent_usd=${spent.toFixed(4)} in ${((performance.now() - t0) / 1000).toFixed(0)} s -> ${out}${stopped ? ` (stopped: ${stopped})` : ""}`);
+console.log(`MIRROR-CONVERSATION ${dry ? "dry-run" : sub ? "subscription" : "live"} gmail_sent=${gmail.sent.length} turns=${lines.filter((l) => !l.includes('"setup":true')).length}/${turns.length} model_calls=${modelCalls} external_requests=${w.outbound.length} web_searches=${webSearches} spent_usd=${spent.toFixed(4)} in ${((performance.now() - t0) / 1000).toFixed(0)} s -> ${out}${stopped ? ` (stopped: ${stopped})` : ""}`);

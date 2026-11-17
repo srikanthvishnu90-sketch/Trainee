@@ -55,6 +55,44 @@ const correctionsOf = (f: any): { from: string; to: string }[] => (Array.isArray
   .filter((c: any) => c && typeof c.from === "string" && typeof c.to === "string" && words(c.from) && words(c.to)).map((c: any) => ({ from: words(c.from), to: words(c.to) }));
 const undo = (p: string, fixes: { from: string; to: string }[]) => fixes.slice().reverse().reduce((x, c) => x.split(c.to).join(c.from), p);
 
+// MASS APPLY CONVERSATIONS (2026-11-16, architect design for eval MA05): the resume's contact line, confirmed at the same yes.
+// The router writes profile.resume_header when the person confirms their resume (142 confirmResumeHeader), with no
+// provenance and no event, so no application could use the name or email on it and every batch asked for them. At the
+// moment of that yes, and only when the header's words were shown to them and are in their own upload, each header value
+// becomes a confirmed fact with its own persisted fact_confirmed event and the same owner provenance as the resume's entries
+// (typed_profile_fields.ts projects kind "profile" Full name / First name / Last name / Email / Phone). Nothing is split
+// on a guess: a first and a last name only from a name of exactly two words. An unconfirmed header is never used.
+export const HEADER_FACT_PREFIX = "resume-header:";
+// deno-lint-ignore no-explicit-any
+export async function evidenceResumeHeader(o: { userId: string; now: number; message: string; before: any; after: any; shown: Shown | null | undefined; upload: Upload | null | undefined; events: EventStore | null | undefined }): Promise<number> {
+  const h = o.after?.resume_header, was = o.before?.resume_header;
+  if (!h || typeof h !== "object" || !h.confirmed_at || (was && was.confirmed_at === h.confirmed_at)) return 0;
+  if (!Array.isArray(o.after.facts)) return 0;
+  const shown = words(o.shown?.text), given = words(o.upload?.text);
+  const name = typeof h.name === "string" ? h.name.trim() : "", email = typeof h.email === "string" ? h.email.trim() : "";
+  const phone = /\+?\d[\d ()-]{6,}\d/.exec(String(h.contactLine ?? ""))?.[0]?.trim() ?? "";
+  const two = name.split(/\s+/);
+  const values: [string, string][] = [["Full name", name], ...(two.length === 2 ? [["First name", two[0]], ["Last name", two[1]]] as [string, string][] : []), ["Email", email], ["Phone", phone]];
+  const at = new Date(o.now).toISOString(), message_sha256 = await sha256Hex(String(o.message ?? ""));
+  let n = 0;
+  for (const [label, value] of values) {
+    const w = words(value);
+    // Shown to them at the yes, and in what they gave: otherwise not evidenced (nothing is added).
+    if (!w || !shown.includes(w) || !given.includes(w) || !o.upload) continue;
+    const id = `${HEADER_FACT_PREFIX}${label.toLowerCase().replace(/ /g, "_")}`;
+    // deno-lint-ignore no-explicit-any
+    o.after.facts = o.after.facts.filter((f: any) => f?.id !== id);
+    const event = crypto.randomUUID();
+    const kept = await recordEvent(o.events, { user_id: o.userId, at: o.now, kind: "fact_confirmed", subject: `${label}: ${value}`, source: "chat",
+      detail: { id, kind: "profile", confirmation_event_id: event, message_sha256, upload: { kind: o.upload.kind, ref: o.upload.ref, sha256: o.upload.sha256 }, via: "router: their yes to the resume header shown to them" } });
+    if (!kept) continue;
+    o.after.facts.push({ id, kind: "profile", name: label, value, text: `${label}: ${value}`, status: "confirmed", needs_confirmation: false, source: "resume-header",
+      provenance: `${RESUME_CONFIRM_PROVENANCE} (${at})`, confirmation_event_id: event, confirmed_at: at, source_ref: { upload: o.upload.ref, upload_sha256: o.upload.sha256 } });
+    n++;
+  }
+  return n;
+}
+
 // deno-lint-ignore no-explicit-any
 export async function evidenceResumeConfirmation(o: {
   userId: string; now: number; message: string; before: any; after: any;
@@ -65,6 +103,7 @@ export async function evidenceResumeConfirmation(o: {
 }): Promise<EvidenceResult> {
   const r: EvidenceResult = { stamped: 0, unshown: 0, untraced: 0, refused: 0, held: [] };
   if (!o.out || !CONFIRMING.has(String(o.out.intent)) || o.out.resultStatus !== "completed") return r;
+  r.stamped += await evidenceResumeHeader(o);
   const facts = Array.isArray(o.after?.facts) ? o.after.facts : [];
   // deno-lint-ignore no-explicit-any
   const drafts = new Set((Array.isArray(o.before?.facts) ? o.before.facts : []).filter((f: any) => f && f.needs_confirmation === true).map((f: any) => f.id));

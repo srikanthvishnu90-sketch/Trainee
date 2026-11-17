@@ -20,8 +20,11 @@ The fix is for the drafting model to say which unit each sentence rests on, and 
    - The person's confirmed record, one fact per unit, and what it lacks (`Not on file: city, phone.`). These go in the system
      prompt.
    - Each tool result's units, attached to that tool result in `loop.ts` (`Ledger.fromToolResult`, chosen by the result's shape):
-     - a posting's pay, one unit per place (a posting with no company field, as a Workday apply flow returns, is the employer its
-       URL's ATS board or host names, else "... at <Employer>" in its title; a year in the title names the role and dates no figure);
+     - a posting's pay, one unit per place. A posting with no company field (a Workday apply flow) belongs to the employer its URL
+       names as a known ATS board (Workday, Greenhouse, Lever, Ashby, SmartRecruiters, Workable and so on), or as a host the posting's
+       own text names, else "... at <Employer>" in its title, else to no one. A job board or aggregator (simplify.jobs, joinhandshake,
+       wellfound, builtin, ziprecruiter, levels.fyi) never owns a posting. A year in the title names the role and dates no figure only
+       when it is the turn's year or later (`new Ledger(now)`); "Summer 2023" still dates it (round 10 of #849);
      - its deadline and state;
      - a search's count;
      - requirements;
@@ -35,11 +38,13 @@ The fix is for the drafting model to say which unit each sentence rests on, and 
    - a caveat on a source;
    - "nothing was sent".
 
-   Round 9 of #849 adds two shapes in `verifyTagged`, both by structure: plain advice in the imperative with no figure, name or date
-   (`support.ts plainTalk`: "Keep it short", "Lead with the project closest to the role"; a third-person statement such as "Its
-   analysts sit on the credit desk" is still checked), and Trainee's own offer or list of what it needs (`support.ts ownAction`: "Want
-   me to prepare the PayPal application?", "I need your email and Harbor Global's dates") with no figure, date, period or status word,
-   no clause that asserts something, and only names the turn's tool results, the record or the ask already hold.
+   Two shapes relax only what evidence a sentence needs, never whether it is checked (round 10 of #849, D-088). The first is plain
+   advice in the imperative with no figure, name or date (`support.ts plainTalk`: "Keep it short", "Lead with the project closest to
+   the role"). The second is Trainee's own offer or list of what it needs (`support.ts ownAction`: "Want me to prepare the PayPal
+   application?", "I need your email and Harbor Global's dates"). Neither needs a unit that states it. Each is still put to the judge,
+   inside the cap, as `adviceClaim`: "This quoted sentence is advice or an offer to the person and states no fact beyond the passage",
+   against the turn's evidence for its subject. The judge refuses any fact the sentence carries that the evidence does not state
+   ("Remember they don't sponsor visas", "I can confirm PayPal sponsors visas"). A judge "no", or no judge, drops it.
 3. **Verify** (`verifyTagged`). Each clause is checked against the units the sentence cites and nothing else:
    - Clauses are split at "; ", ", and ", ", so " and ", but ".
    - Layer A runs on an index of the cited units; record units are read as one record.
@@ -63,7 +68,10 @@ The fix is for the drafting model to say which unit each sentence rests on, and 
      "... and so does PayPal", "PayPal matches Citadel at $80"), the figures are shared: every employer named must hold all of them in
      its own unit, whatever the order or wording (round 9 of #849). The judge then reads the whole clause against those units.
    - An employer opening a sentence beside a full date is a name, checked like any other; only a word for the posting's own parts
-     ("Applications are open through December 6, 2026") is read as the sentence's subject word (round 9 of #849).
+     ("Applications are open through December 6, 2026") is read as the sentence's subject word (round 9 of #849). That word only relaxes
+     layer A; the clause still goes to the judge.
+   - An employer that no unit names ("Stripe's internship is in Seattle", when no tool result names Stripe) is a subject too, and is
+     carried like any other: "It pays $60 an hour" after it never stands on another employer's unit (round 10 of #849).
    - What is sent is what was verified: a dropped sentence changes what the next one refers back to, so the check runs again on what
      stood until nothing more fails.
    - On the untagged path (`keepSupported`), a clause split off a refused sentence keeps the sentence's subject: a clause that names

@@ -223,7 +223,7 @@ export async function agentTurn(o: {
   const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores, restoreAsk: o.restoreAsk ?? null, cardPending: !!o.cardPending };
   // REPLY PIPELINE (PIPELINE.on; docs/architect/specs/REPLY-PIPELINE.md): the evidence ledger starts with the person's confirmed record
   // and what it lacks; each tool result adds its units (loop.ts). The draft cites them; the task contract is stated up front.
-  const ledger = PIPELINE.on && !hypo ? new Ledger() : null;
+  const ledger = PIPELINE.on && !hypo ? new Ledger(o.now) : null;
   const contracts = PIPELINE.on ? contractsFor(null, o.message) : [];
   if (ledger) {
     const pf = (o.stores as any)?.profile ?? {}, contact = { ...(pf.basics ?? {}), ...(pf.resume_header?.confirmed_at ? pf.resume_header : {}) };

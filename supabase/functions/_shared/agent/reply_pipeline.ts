@@ -13,7 +13,7 @@
 //             code's words; the answer is verified again; what still fails is dropped. It replaces the shortener and the quote fallback.
 //   fallback  after the drop, when nothing left answers, code says what it could not verify and what the ledger holds (a posting's
 //             pay with its link).
-import { clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, noClaim, ownAction, personQuestion, plainTalk, recordOnly, splitSentences, type SupportJudge, urlEmployer } from "./research/support.ts";
+import { ADVICE_CLAIM, clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, noClaim, ownAction, personQuestion, plainTalk, recordOnly, splitSentences, type SupportJudge, urlEmployer } from "./research/support.ts";
 
 // ON (ruling 2026-11-14): the drafting prompt asks for tags and every tool result carries its units. The path is chosen by the draft:
 // a TAGGED draft goes through this pipeline (no page quote is ever put in place of a sentence); an UNTAGGED one (a model that ignored
@@ -28,6 +28,8 @@ export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; ho
 export const evidenceTurn = (l: Ledger | null) => !!l && l.units.some((u) => (u.kind === "page" || u.kind === "chat") && u.source !== "an earlier reply in this chat");
 export class Ledger {
   units: EvidenceUnit[] = [];
+  // The turn's clock (PROCESS rule 6): a year in a posting's title names the role only when it is this year or later.
+  constructor(readonly now: number = Date.now()) {}
   add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[] } = {}): string {
     const t = String(text ?? "").replace(/\s+/g, " ").trim();
     if (!t) return "";
@@ -57,8 +59,10 @@ export class Ledger {
       // URL's ATS board or host, else "… at <Employer>" in its title; spelled as the turn or the posting already spells it.
       const company = typeof p?.company === "string" && p.company.trim() ? p.company.trim() : this.employerOf(p, url);
       const who = [company, p?.title].filter((x) => typeof x === "string" && x.trim()).join(", ");
-      // (the posting's title names the role: a year in it, "Summer 2027", dates no figure of the unit)
-      const named = typeof p?.title === "string" && p.title.trim() ? [p.title.trim()] : [];
+      // (the posting's title names the role: a year in it, "Summer 2027", dates no figure of the unit; round 10: only this year or a
+      // later one, by the turn's clock: "Summer 2023" still dates the figure, so a claim in the present tense must carry it)
+      const thisYear = new Date(this.now).getUTCFullYear();
+      const named = typeof p?.title === "string" && p.title.trim() && (p.title.match(/(?<!\d)(?:19|20)\d\d(?!\d)/g) ?? []).every((y: string) => Number(y) >= thisYear) ? [p.title.trim()] : [];
       // (the posting's own places, so layer A reads "Chicago, IL" there as a place, never as an owner)
       const places = [p?.location, ...String(p?.pay ?? "").split(/;\s*/).map((x: string) => /^([^:]+):/.exec(x)?.[1])].filter((x): x is string => typeof x === "string" && /,/.test(x)).map((x) => x.trim());
       if (typeof p?.pay === "string" && p.pay.trim()) for (const part of p.pay.split(/;\s*/)) ids.push(this.add("chat", `${who}${p?.location ? ` (${p.location})` : ""}: pay ${part.trim()}`, { url, source: name, places, owner: company, named }));
@@ -90,15 +94,17 @@ export class Ledger {
   }
   // The employer a posting with no company field is, from its other fields (round 9 of #849, B4), or null.
   employerOf(p: any, url: string | null): string | null {
+    // (round 10 of #849: a known ATS board, or a host the posting's own text names; else "… at <Employer>" in its title; else none)
+    const texts = Object.entries(p ?? {}).filter(([k, v]) => typeof v === "string" && !/url|link|href/i.test(k)).map(([, v]) => v as string).join(" \n ");
     const title = typeof p?.title === "string" ? p.title : "";
-    const slug = urlEmployer(url) ?? (/\bat\s+(\p{Lu}[\p{L}&.'-]*(?:\s+\p{Lu}[\p{L}&.'-]*){0,3})\s*$/u.exec(title)?.[1] ?? null);
+    const atTitle = /\bat\s+(\p{Lu}[\p{L}&.'-]*(?:\s+\p{Lu}[\p{L}&.'-]*){0,3})\s*$/u.exec(title)?.[1] ?? null;
+    const slug = urlEmployer(url, texts) ?? atTitle;
     if (!slug) return null;
     const key = slug.toLowerCase().replace(/[^a-z0-9]/g, "");
     // (spelled as an employer already in the ledger, or as the posting's own text writes it, else in a capital)
     const had = this.units.map((u) => u.owner).find((w) => !!w && w.toLowerCase().replace(/[^a-z0-9]/g, "") === key);
     if (had) return had;
-    const texts = Object.values(p ?? {}).filter((v): v is string => typeof v === "string").join(" \n ");
-    const seen = [...texts.matchAll(/\p{Lu}[\p{L}&.'-]*(?:\s+\p{Lu}[\p{L}&.'-]*){0,3}/gu)].map((m) => m[0]).find((w) => w.toLowerCase().replace(/[^a-z0-9]/g, "") === key);
+    const seen = [...texts.matchAll(/\p{Lu}[\p{L}&.'-]*(?:\s+\p{Lu}[\p{L}&.'-]*){0,3}/gu)].flatMap((m) => [m[0], ...m[0].split(/\s+/)]).find((w) => w.toLowerCase().replace(/[^a-z0-9]/g, "") === key);
     return seen ?? slug.split(/[-\s]+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
   }
   // The person's confirmed record, a fact per unit, and what it lacks.
@@ -176,6 +182,9 @@ export function unitNames(u: EvidenceUnit, weak = false): string[] {
 // Round 4 of #849: with `strict`, a name that opens the sentence is checked too ("Google requires…" was never checked), unless it is a
 // common sentence opener; the judge path uses strict, so a one-word employer at the start is never left to the judge.
 const OPENER = /^(?:want|would|shall|should|can|could|do|did|does|is|are|was|were|will|worth|heads|before|after|if|when|while|since|because|let|happy|glad|sure|ok|okay|thanks|please|may|might|must|need|how|what|which|who|why|where|sadly|unfortunately|note|start|also|however|good|great|here|yes|no|both|all|each|most|some|apply|send|ask|check|look|focus|use|keep|try|first|next|then|finally|overall|today|currently|right|so|still|plus|again|instead|meanwhile|otherwise|honestly|luckily|happily|thankfully|importantly|remember)$/i;
+// Round 10 of #849 (D-088): what the judge is asked about advice or Trainee's own offer: that it states no fact the passage does not.
+// SUPPORT_JUDGE_SYSTEM reads this shape (support.ts ADVICE_CLAIM).
+export const adviceClaim = (sentence: string, subject: string | null) => `${ADVICE_CLAIM}${subject ? ` (it is about ${subject})` : ""}: "${sentence}"`;
 // (round 9: an imperative opener, never a quantifier, an auxiliary or a discourse word: "Apply early" is advice; "Most interns…",
 // "Also, interns…" are not)
 const DIRECTIVE = /^(?:apply|send|ask|check|look|focus|use|keep|try|start|let|let's|remember|please|aim|pick|choose|avoid|skip|write|mention|lead|tailor|follow|reach|prepare|practice|practise|review|read|bring|save|plan|consider|add|make|say|tell|put|show|list|drop|cut|open|be|do|don't|never|always)$/i;
@@ -197,7 +206,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const raw = lines.map((l) => [...l]);
   const failures: Failure[] = [], kept: string[] = [];
   // (`parts`: a clause naming two or more employers, one part per employer, each with that employer's units; round 8 of #849)
-  const checks: { a: number; b: number; clause: string; units: EvidenceUnit[]; claim: string; subject?: string | null; soft?: boolean; untagged?: boolean; parts?: { text: string; subject: string; units: EvidenceUnit[] }[] }[] = [];
+  const checks: { a: number; b: number; clause: string; units: EvidenceUnit[]; claim: string; subject?: string | null; soft?: boolean; untagged?: boolean; parts?: { text: string; subject: string; units: EvidenceUnit[] }[]; advice?: boolean }[] = [];
   const bad = new Set<string>(), citeAt = new Map<string, string[]>();
   const fail = (a: number, b: number, sentence: string, reason: string, subject: string | null = null) => { failures.push({ sentence, reason, subject }); bad.add(`${a}:${b}`); };
   // Round 5 of #849: a page unit belongs to every organisation it names (a page sentence about Citadel is Citadel's), so the
@@ -230,15 +239,22 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const at = (w: string, t: string) => { const i = t.toLowerCase().indexOf(w.toLowerCase()); return i < 0 ? t.length : i; };
   const mentioned = (t: string) => owners.filter((w) => nameFoundIn(w, t)).sort((x, y) => at(x, t) - at(y, t));
   let carried: string | null = o.carry ?? null;
+  // Round 10 of #849: an employer the turn does not know ("Stripe's internship is in Seattle" when no tool result names Stripe) is a
+  // subject too: read as a page reads one (unitNames: "X's", "X pays", "at X"), and found in no unit at all. It is carried like any
+  // other, so "It pays $60 an hour" after it never stands on another employer's unit.
+  const allText = ledger.units.map((u) => u.text).join("\n");
+  const unknownIn = (t: string): string | null => unitNames({ id: "", kind: "page", text: t, host: null }, true).find((w) => !owners.some((x) => nameFoundIn(x, w) || nameFoundIn(w, x)) && !nameFoundIn(w, allText) && !SOURCE.test(w)) ?? null;
   // (a sentence code does not check, a question or a caveat, still names what the next one refers back to)
-  const carryPast = (t: string) => { const m = mentioned(t); if (m.length) carried = m.length === 1 ? m[0] : null; };
+  const carryPast = (t: string) => { const m = mentioned(t); if (m.length) carried = m.length === 1 ? m[0] : null; else { const u = unknownIn(t); if (u) carried = u; } };
   // Round 9 of #849 (B2): code's record check speaks only for the "isn't on file" template alone, never for a clause joined to it,
   // and never for one that names an employer of this turn; every other clause is checked as usual.
   const recordOk = recordOnly(o.onRecord);
   const rec = (t: string) => { const v = recordOk(t); return v === true && mentioned(t).length ? null : v; };
-  // Round 9 (B4): what states nothing about the world goes unchecked, by its shape (support.ts): plain talk with no figure, name or
-  // date (an imperative opener read as the plain word it is: "Apply early", "Lead with…"), and Trainee's own offer or list of what it
-  // needs, with no figure or date and only names the turn already knows.
+  // Round 9 (B4), round 10 (D-088): advice and Trainee's own offers relax only what evidence a sentence needs, never whether it is
+  // checked. Plain talk in the imperative with no figure, name or date ("Apply early", "Lead with…"), and Trainee's own offer or list
+  // of what it needs with no figure or date and only names the turn already knows, need no unit that states them; the judge still
+  // reads each one against the turn's evidence for its subject, and refuses any fact inside it the evidence does not state ("Remember
+  // they don't sponsor visas", "I can confirm PayPal sponsors visas"). A judge "no", or no judge, drops it.
   const known = [allowed, ...postingOwners, ...ledger.units.filter((u) => u.kind === "absent").map((u) => u.text)].join("\n");
   // (advice only: an imperative, "Keep it short", "Mention the team"; a statement in the third person with no figure or name, "Its
   // analysts sit on the credit desk", is a claim about the world and is checked)
@@ -255,7 +271,14 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (rec(text) === true) return carryPast(text);
     // The record's verdict comes before the plain-sentence rule: a sentence about the record that the record contradicts fails.
     if (rec(text) === false) { failures.push({ sentence: text, reason: "it is not what the person's record holds" }); bad.add(`${a}:${b}`); return; }
-    if (free(text)) return carryPast(text);
+    if (free(text)) {
+      const subj = mentioned(text)[0] ?? carried;
+      const pool0 = ids.length ? ids.map((id) => ledger.get(id)).filter((u): u is EvidenceUnit => !!u) : ledger.units;
+      const pool = pool0.filter((u) => u.source !== "an earlier reply in this chat" && (subj ? mine(u, subj) || (!u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
+      if (ids.length) citeAt.set(`${a}:${b}`, ids);
+      checks.push({ a, b, clause: text, units: pool, claim: text, subject: subj, advice: true, untagged: !ids.length });
+      return carryPast(text);
+    }
     // Review of #849: a sentence with no figure, no date and no name needs no tag (LEDGER_RULE says so); only one that names or
     // counts something must cite a unit.
     // Review of #849 (round 2): an untagged sentence on an evidence turn is checked against EVERY unit (layer A, then the judge), as the
@@ -282,8 +305,8 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
         carried = null;
         continue;
       }
-      const ownSubj = names[0] ?? null;
-      const subject = owners.length ? (ownSubj ?? carried) : null;
+      const ownSubj = names[0] ?? unknownIn(c) ?? null;
+      const subject = ownSubj ?? (owners.length || carried ? carried : null);
       carried = subject;
       // (a carried subject may not rest on a line from an earlier reply whose owner is unknown: it may be another employer's; a soft
       // subject may rest on a unit that names no employer, and the judge is shown the subject)
@@ -300,6 +323,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const withSubject = (c: { clause: string; subject?: string | null }) => `${c.subject && !nameFoundIn(c.subject, c.clause) ? `${c.subject}: ` : ""}${c.clause}`;
   checks.forEach((c, k) => {
     if (bad.has(`${c.a}:${c.b}`)) return;
+    if (c.advice) { asks.push({ k, claim: adviceClaim(c.clause, c.subject ?? null), source: (c.units.length ? c.units.map((u) => `- ${u.text}`).join("\n") : "(no evidence was read this turn)").slice(0, 2400) }); return; }
     if (c.parts) {
       // A comparison: each part's figures, names and dates in one unit of that part's own employer (layer A), the part's employer
       // name aside; a part that states nothing but the name is the comparison's frame. Then the judge reads the whole clause

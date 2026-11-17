@@ -98,9 +98,11 @@ Deno.test("#849 round 9 B3: an employer opening a sentence beside a date some un
 });
 
 Deno.test("#849 round 9 B4: plain advice, Trainee's own offers and needs lists stand; a posting with no company is its URL's employer's", async () => {
-  // (a) plain talk: no figure, no name, no date: needs no tag and is not refused (yes stub and word judge alike).
+  // (a) plain talk: no figure, no name, no date: needs no tag and no unit that states it.
+  // (Amended under the round-10 ruling, D-088: no shape skips the check. Advice stands on the judge's yes and drops on its no; the
+  // word judge, which only matches words, is measured in the report, not asserted here.)
   for (const a of ["Apply early in the cycle.", "Lead your message with the project closest to the role.", "Keep it short and specific.", "Mention the team you want to join.", "Ask for a referral only after a short chat."]) {
-    for (const j of [yes, words]) {
+    for (const j of [yes]) {
       const l = new Ledger(); paypal(l);
       const out = await runReplyPipeline(`PayPal's SWE Intern pays $28-$49 an hour [${P(l)}]. ${a}`, l, { judge: j, ask: "what does it pay and any tips", repair: null });
       eq(out.text.includes(a), true, `${a}: ${out.text}`);
@@ -122,8 +124,10 @@ Deno.test("#849 round 9 B4: plain advice, Trainee's own offers and needs lists s
     ["I need your email because PayPal pays $90 an hour.", false],
     ["Want me to apply to Goldman Sachs for you?", false],
   ] as const) {
+    // (amended under the round-10 ruling: a yes judge keeps the offers and lists; the ones with a date, a figure or an unknown
+    // employer are refused by code even then)
     const l = new Ledger(); paypal(l); rec(l);
-    const out = await runReplyPipeline(`PayPal's SWE Intern pays $28-$49 an hour [${P(l)}]. ${d}`, l, { judge: words, ask: "apply to paypal", repair: null });
+    const out = await runReplyPipeline(`PayPal's SWE Intern pays $28-$49 an hour [${P(l)}]. ${d}`, l, { judge: yes, ask: "apply to paypal", repair: null });
     eq(out.text.includes(d), keep, `${d}: ${out.text}`);
   }
   // (c) An apply-flow result whose posting has no company field (Workday): its units are the URL's employer's.

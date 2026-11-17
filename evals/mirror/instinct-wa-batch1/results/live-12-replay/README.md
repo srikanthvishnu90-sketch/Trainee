@@ -34,3 +34,12 @@ The recorded verdicts never judged it, so it counts as "no" (the judge's drop, n
 anything, 2 sentences legacy kept are still dropped (C1, before round 9: 3):
 - "Changes: Pixelforge and Rallyup lead the resume, ...". The File is a plan that recommends this; no unit says it was done.
 - "... the 3.9 stays off everything this chat". Layer A reads "3.9 stays" as a count of stays.
+
+## Round 10 of #849 (regenerated)
+
+Advice and Trainee's own offers and needs lists are now put to the judge too (D-088: no shape skips the check). With the recorded
+verdicts (`recorded-no`), C1's offer ("Want me to prepare the PayPal application for your approval?") and C11's needs list ("I need
+your email, Harbor Global's dates, and Crestline's exact name.") were never judged live, so they count as "no" and drop. C11 then
+falls back, so the tagged path falls back on 2 turns (C1, C11). Against the legacy replay, draft sentences legacy kept that are dropped
+stay at 1 (C1's NVIDIA sentence, the judge's drop); legacy drops the needs list too. With a yes judge, both offers stand, there is no
+fallback, and the 2 drops listed for round 9 are unchanged.

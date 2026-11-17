@@ -721,13 +721,16 @@ function CONTROLS(arg) {
     }
     return false;
   };
-  const widgetOf = (e) => {
+  const widgetOf = (e, v = "") => {
     const near = [e.previousElementSibling, e.previousElementSibling && e.previousElementSibling.previousElementSibling, e.nextElementSibling, e.parentElement !== root && e.parentElement.tagName !== "FORM" ? e.parentElement : null];
     // A container beside the hidden value is its widget's only when it holds at most one question: Teamtailor keeps the posting's
     // job_id in the container of the whole form, which also holds the phone's country search box (role=combobox, "Search"); that
     // box is not what the job_id is the value of (answered run of 2026-11-16: "Search: set by the page" on 9 postings).
     const oneQuestion = (n) => new Set([...n.querySelectorAll("[data-upmore-q]")].map((x) => x.getAttribute("data-upmore-q"))).size <= 1;
-    for (const n of near) { if (!n) continue; if (n.matches(WIDGET)) return n; const w = n.querySelector(WIDGET); if (w && oneQuestion(n)) return n.matches("[role=group], [role=radiogroup]") || n.hasAttribute("aria-label") ? n : w; }
+    // Review of the rs-07 split (probe p07-widget-hidden, 2026-11-17): dropping the neighbour's widget let a page-set work_location
+    // "Remote" beside a drawn listbox and two other questions go unconfirmed. A crowded container's widget is dropped only when the
+    // hidden value is itself page structure (structural: an id, a source, a position); any other value keeps the widget, and is asked.
+    for (const n of near) { if (!n) continue; if (n.matches(WIDGET)) return n; const w = n.querySelector(WIDGET); if (w && (oneQuestion(n) || !structural(e.name || "", v))) return n.matches("[role=group], [role=radiogroup]") || n.hasAttribute("aria-label") ? n : w; }
     return null;
   };
   const named = (w, value) => {
@@ -746,8 +749,8 @@ function CONTROLS(arg) {
       const touched = (q !== null && filledQs.includes(q)) || (q === null && inQuestion(e));
       let label = squash((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder).slice(0, 200), hidden = e.type === "hidden", answer = false;
       if (hidden) {
-        const w = widgetOf(e);
         const v = String(e.value || "").trim();
+        const w = widgetOf(e, v);
         // The "off" value a form keeps beside its own tick box of the same name (Lever: consent[marketing]=0 beside the box, sent
         // when it is not ticked) is that box's unticked state, not an answer of its own: the box is the question.
         const offOfBox = /^(?:0|no|false|off|)$/i.test(v) && !!e.name && [...(e.form ? e.form.elements : document.querySelectorAll("input"))].some((x) => x !== e && x.name === e.name && (x.type === "checkbox" || x.type === "radio"));
@@ -1137,6 +1140,10 @@ async function attempt(browser, p, opts, timing) {
     await declineCookies(page);
     // Round 5: the page as it was before anything was filled: its own constants (a job id, a shortcode, a source) are known here.
     hiddenAtLoad = await page.evaluate(() => [...document.querySelectorAll("input[type=hidden]")].filter((e) => e.name).map((e) => [e.name, String(e.value)])).catch(() => []);
+    // Review of the rs-05 split: the boxes named for the resume that are there and empty before anything is filled; only such a box,
+    // filled by the board once this run set the resume file, may carry the stored resume's address (handoff.cjs carriesResume).
+    const resumeBoxesEmptyAtLoad = new Set(await page.evaluate(() => [...document.querySelectorAll("input:not([type=file]):not([type=checkbox]):not([type=radio]), textarea")]
+      .filter((e) => e.name && /resume|\bcv\b|curriculum|lebenslauf/i.test(e.name) && !String(e.value || "").trim()).map((e) => e.name)).catch(() => []));
     const fr = { map: [], filled: [], needsUser: [], failed: [], invalid: [] };
     for (let step = 0; ; step++) {
       const r = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
@@ -1263,7 +1270,7 @@ async function attempt(browser, p, opts, timing) {
     if (formSnap) { const fs = JSON.parse(formSnap), why = sentDiffers(fs.dom, fs.rows); if (why) { const e = new NeedsUser("page_changed_at_submit", why); throw e; } }
     // The person's own confirmed answer to a question, as ats-fill reads it (an approved answer, else a confirmed fact).
     const known = factsFrom(p.facts || {}, p.answers || {});
-    const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country, resumeName: require("node:path").basename(p.resume.path) });
+    const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country, resumeName: fr.filled.some((f) => f.source === "resume") ? require("node:path").basename(p.resume.path) : undefined, resumeBoxesEmptyAtLoad });
     if (unconfirmed.length) { const e = new NeedsUser("missing_required_answer", unconfirmed[0].label); e.needs = unconfirmed; throw e; }
     if (!hasApproval(p)) throw new NeedsUser("not_approved", "payload changed after approval");
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });

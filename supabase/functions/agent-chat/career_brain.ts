@@ -13,6 +13,8 @@ import { FAMILY_TITLE, familyAskOf, type FamilyMakeDeps } from "../_shared/file_
 import type { FileService } from "../_shared/file_service.ts";
 import { careerSystemPrompt, MIRROR_RULES, shapeRulesFor } from "../_shared/agent/prompt.ts";
 import { approvalRulesText } from "../_shared/agent/approval_rules.ts";
+import { withContracts } from "../_shared/agent/task_contracts.ts";
+import { personDay } from "../_shared/agent/person_day.ts";
 import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing } from "../_shared/agent/memory.ts";
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
 import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
@@ -81,10 +83,8 @@ export function summaryFor(cut: boolean, events: CareerEvent[] | null, now: numb
   return events ? threadSummary(events, now, tz) : SUMMARY_UNREADABLE;
 }
 
-export function localDay(now: number, tz = "America/New_York"): string {
-  try { return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now)); }
-  catch { return new Date(now).toISOString().slice(0, 10); }
-}
+// The person's day (person_day.ts): the same definition the tools count days from.
+export function localDay(now: number, tz?: string | null): string { return personDay(now, tz); }
 
 export async function agentTurn(o: {
   message: string;
@@ -236,7 +236,8 @@ export async function agentTurn(o: {
     for (const l of shownPayOf("what is the pay", o.history)) ledger.add("chat", l.text.replace(/^(?:[^.:]*\bdo hold:\s*)+/i, ""), { url: l.url, source: "an earlier reply in this chat" });
     ctx.ledger = ledger;
   }
-  const tools = [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? []), ...(o.paths ? [pathComparisonTool(o.paths)] : [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : []), ...(o.familyFiles ? [familyFileTool(o.familyFiles, o.files?.ttlHours() ?? 168)] : [])];
+  // Gap #2 (coach depth): each job-search, apply and status tool carries its task contract in its run note (task_contracts.ts).
+  const tools = withContracts([...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? []), ...(o.paths ? [pathComparisonTool(o.paths)] : [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : []), ...(o.familyFiles ? [familyFileTool(o.familyFiles, o.files?.ttlHours() ?? 168)] : [])]);
   const offered = new Set(tools.map((t) => t.name));
   let result = await runAgentTurn({
     process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts,

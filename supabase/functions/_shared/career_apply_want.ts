@@ -2,6 +2,7 @@
 // own apply queue (career_apply_wanted); the Trainee extension takes them, prepares each in the person's browser and
 // shows a card; nothing reaches an employer before they approve that card. A posting is keyed exactly as the extension
 // keys it (posting_key.ts), so the same posting is queued once and the extension's own queue never holds it twice.
+import { personZone } from "./agent/person_day.ts";
 import { applyUrl, detectPortal, formUrlFor, postingKey } from "./posting_key.ts";
 import { COMPANY_COOLDOWN_DAYS, dailyLimit, type Limits, normCompany } from "./career_apply.ts";
 import { sameCompany, type TrackedApp } from "./career_mail.ts";
@@ -59,10 +60,11 @@ export function wantsFrom(picks: Pick[], now: number): { ok: Want[]; refused: Re
   return { ok, refused };
 }
 
-// The start of the person's day (UTC when the zone is unknown), for the daily limit.
-export function dayStart(now: number, tz = "UTC"): string {
+// The start of the person's day, for the daily limit: the same day the prompt names (agent/person_day.ts; review rv3: it was UTC
+// when the zone was unknown, so the limit reset at 7 or 8 pm in New York).
+export function dayStart(now: number, tz?: string | null): string {
   try {
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(new Date(now));
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: personZone(tz), year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(new Date(now));
     const n = (t: string) => Number(parts.find((x) => x.type === t)?.value);
     const sinceMidnight = ((n("hour") % 24) * 3600 + n("minute") * 60 + n("second")) * 1000;
     return new Date(now - sinceMidnight - (now % 1000)).toISOString();

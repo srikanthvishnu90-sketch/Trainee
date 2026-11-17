@@ -13,6 +13,7 @@ import type { PathStore } from "../_shared/career_path_comparisons.ts";
 import { FAMILY_TITLE, familyAskOf, type FamilyMakeDeps } from "../_shared/file_family_make.ts";
 import type { FileService } from "../_shared/file_service.ts";
 import { careerSystemPrompt, MIRROR_RULES, shapeRulesFor } from "../_shared/agent/prompt.ts";
+import { approvalRulesText } from "../_shared/agent/approval_rules.ts";
 import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing } from "../_shared/agent/memory.ts";
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
 import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
@@ -242,7 +243,7 @@ export async function agentTurn(o: {
     process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts,
       planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !appHypo && offered.has("read_application_mail"), noneClaim: !appHypo, record: () => (ctx.turn as any)?.record, posting: meant.length > 0 && offered.has("get_posting"), shownPay,
       marketRate: !hypo && marketRateAskOf(o.message) && offered.has("research_market"), review: practiceAnswer || !!roast ? o.message : null, familyFile: !hypo && offered.has(FAMILY_FILE_TOOL) ? familyAskOf(o.message) : null }),
-    system: careerSystemPrompt(localDay(o.now, o.tz)) + (ledger ? `\n\n${LEDGER_RULE}\n${ledger.block()}\n${contractBlock(contracts)}` : "") + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
+    system: careerSystemPrompt(localDay(o.now, o.tz)) + (ledger ? `\n\n${LEDGER_RULE}\n${ledger.block()}\n${contractBlock(contracts)}` : "") + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + approvalRulesText() + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
     // ADVERSARIAL ROUND 2: an attached file's name and text are not the person's words: no tool reads them as said.

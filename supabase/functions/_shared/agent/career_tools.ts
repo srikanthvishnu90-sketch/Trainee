@@ -787,7 +787,7 @@ export function careerTools(deps: {
     },
     {
       name: "queue_applications", effect: "write_own",
-      description: "Start applying: put the postings the person chose (from search_jobs, with job_id) in their own apply queue, up to their daily limit. Code checks each against the posting on file, the employer they named or were shown, the 30-day rule and their current employer. Nothing is sent: each goes only after they approve its card in the Trainee extension. Say what was queued, what was refused and why.",
+      description: "Start applying: put the postings the person chose (from search_jobs, with job_id) in their own apply queue, up to their daily limit; code checks each against the posting on file and their record. Nothing is sent: each is prepared in a browser and shown on one card, and goes only on their yes to that card (HOW APPROVAL WORKS). Say what was queued, what was refused and why.",
       input_schema: obj({ postings: { type: "array", description: "The postings to apply to, from search_jobs", items: obj({ url: str("The posting's link as search_jobs returned it"), job_id: str("The posting's job_id as search_jobs returned it (always pass it: an employer's own careers-page link is opened at its board's form)"), company: str("Employer"), title: str("Job title") }, ["url"]) } }, ["postings"]),
       run: async (i, c) => {
         if (!deps.wants) throw new Error("applying from chat is not connected here; say so, and that the person can paste posting links into the Trainee extension's queue");
@@ -807,7 +807,7 @@ export function careerTools(deps: {
         const r = await queueWants(deps.wants, c.userId, onRole.ok, c.now, { limits: deps.limits, tz: deps.tz });
         const refused = [...found.refused, ...screened.refused, ...onRole.refused, ...r.refused];
         await record(c, "apply_queued", `${r.queued} postings`, { queued: r.queued, refused: refused.length, companies: [...new Set(r.items.map((w) => w.company).filter(Boolean))].slice(0, 5) });
-        return { ...r, refused, screen: screened.gate, note: "Nothing is sent yet. The Trainee extension prepares each posting in the person's browser and shows a card; it goes only after they approve that card. Tell them each refusal and its reason as given." };
+        return { ...r, refused, screen: screened.gate, note: "Nothing is sent yet. Each posting is prepared in a browser and shown on one card; one yes approves exactly what that card shows (HOW APPROVAL WORKS). Tell them each refusal and its reason as given." };
       },
     },
     {

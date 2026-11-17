@@ -1058,7 +1058,11 @@ async function recheckFilled(page, filled, ctx0, { settleMs = 300 } = {}) {
   ctx.facts = factsFrom(ctx.facts, ctx.answers);
   const settle = async () => { await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {}); await page.waitForTimeout(settleMs); };
   const empty = (h) => h.gone || h.held === null || h.held === undefined || (Array.isArray(h.held) ? h.held.length === 0 : String(h.held).trim() === "");
-  const dropped = async () => { const held = await heldNow(page, filled, { menus: false }); return filled.filter((f, i) => empty(held[i] || { gone: true })); };
+  // A phone box whose widget reset itself to a bare dial code ("+31": Recruitee's phone widget falls back to its own country after the
+  // page re-renders, CI 44021741347: 13 held-out postings value_changed_by_page) holds no number at all: the approved phone was
+  // dropped, and is set once more and read back by its digits, as any dropped value.
+  const bareDial = (f, h) => isPhone(f.d, f.value) && !Array.isArray(h.held) && /^\s*\+?\s*\d{1,4}\s*$/.test(String(h.held ?? "")) && digitsOf(h.held).length < 5 && digitsOf(f.value).length >= 7;
+  const dropped = async () => { const held = await heldNow(page, filled, { menus: false }); return filled.filter((f, i) => empty(held[i] || { gone: true }) || bareDial(f, held[i] || {})); };
   await settle();
   let lost = await dropped();
   if (!lost.length) return [];

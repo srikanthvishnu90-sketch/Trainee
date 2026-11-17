@@ -121,6 +121,20 @@ async function robotsOk(url, cache, ua, pacer) {
   return g !== "deny" && lib.robotsAllows(g, u.pathname + u.search);
 }
 
+// Architect ruling (2026-11-16): measure on open postings only. Each sample row's open status is re-checked at the start of its
+// run: one paced GET of the posting's own address (robots.txt already obeyed), no redirect followed by fetch itself. 404 or 410 is
+// closed at the start ("closed_at_start"), and the row is not driven. The runner's own closed verdicts during the run (a board that
+// says the posting is gone, a link sent back to the job list; d072 closedPosting) are closed too. Both are reported apart and left
+// out of the open denominator; the all-rows headline is printed beside it as before.
+async function openAtStart(url, o) {
+  try {
+    await o.pacer.wait(paceKey(new URL(url).host));
+    const r = await fetch(url, { method: "GET", headers: { "user-agent": o.ua }, redirect: "manual", signal: AbortSignal.timeout(15000) });
+    try { await r.body?.cancel(); } catch { /* none */ }
+    return r.status === 404 || r.status === 410 ? `page_load_${r.status}` : null;
+  } catch { return null; }
+}
+const isClosed = (x) => !!x.closed_at_start || /^posting_closed/.test(((x.d072 || d072.classify(x)) || {}).cause || "") || x.reason === "posting_closed";
 // The bench's stop at the instant before the click. A Submit inside an employee sign-in form is refused (architect ruling on #741:
 // Teamtailor's "Already working at X?" form was counted as a pass), never counted as reaching the application's Submit.
 function strictStop() {
@@ -174,6 +188,7 @@ async function strictPosting(browser, item, o) {
   const t0 = Date.now();
   const rb = await robotsOk(item.url, o.robots, o.ua, o.pacer);
   if (rb !== true) { r.reason = rb === "unreachable" ? "host_unreachable" : "robots_disallowed"; r.ms = Date.now() - t0; r.d072 = d072.classify(r); return r; }
+  if (o.openCheck !== false && !o.answers) { const gone = await openAtStart(item.url, o); if (gone) { r.reason = "posting_closed"; r.error = gone; r.closed_at_start = gone; r.ms = Date.now() - t0; r.d072 = d072.classify(r); return r; } }
   const host = new URL(item.url).hostname.toLowerCase();
   // The posting's own host and its www twin (sofi.com sends every visitor to www.sofi.com: the same site, not a redirect off it).
   const twin = host.startsWith("www.") ? host.slice(4) : `www.${host}`;
@@ -233,6 +248,10 @@ function summarize(rows) {
     ready_except_upload: rows.filter((x) => x.result === "ready_except_upload").length, uploads_simulated: rows.reduce((a, x) => a + (x.upload_simulated || 0), 0),
     sends_blocked: rows.reduce((a, x) => a + x.sent_blocked, 0), graphql_reads: rows.reduce((a, x) => a + x.graphql_reads, 0),
     breaches: rows.filter((x) => /^BREACH/.test(x.reason || "") || /^BREACH/.test((x.answered && x.answered.reason) || "")).length, top_fail: reasons(rows).slice(0, 8), ...answeredCounts(rows) };
+  const open = rows.filter((x) => !isClosed(x));
+  all.open = { sampled: open.length, closed: rows.length - open.length, closed_at_start: rows.filter((x) => x.closed_at_start).length, pass: open.filter((x) => x.result === "pass").length,
+    ready_if_answered: open.filter((x) => x.result === "ready_if_answered").length, ready_except_upload: open.filter((x) => x.result === "ready_except_upload").length, ...answeredCounts(open) };
+  for (const pr of prov) { const os_ = open.filter((x) => x.provider === pr.provider); pr.open = { sampled: os_.length, closed: pr.sampled - os_.length, pass: os_.filter((x) => x.result === "pass").length, ...answeredCounts(os_) }; }
   return { all, prov, d072: d072.tally(rows) };
 }
 
@@ -243,6 +262,11 @@ function markdown(label, s, persona = "default") {
     "| provider | sampled | pass | pass % | ready if answered | ready except upload | fail | VM today | pass the VM drives | top failure reasons |", "|---|---|---|---|---|---|---|---|---|---|"];
   for (const x of s.prov) L.push(`| ${x.provider} | ${x.sampled} | ${x.pass} | ${pct(x.pass, x.sampled)} | ${x.ready_if_answered} | ${x.ready_except_upload} | ${x.fail} | ${x.vm_drives === x.sampled ? "drives" : x.vm_drives ? `drives ${x.vm_drives}/${x.sampled}` : "refuses"} | ${x.vm_pass} | ${x.top_fail.map(([k, n]) => `${k} ${n}`).join("; ")} |`);
   L.push("", "Failure reasons overall: " + s.all.top_fail.map(([k, n]) => `${k} ${n}`).join("; "));
+  if (s.all.open) {
+    const o = s.all.open;
+    L.push("", `**Open postings only (architect ruling 2026-11-16): pass ${o.pass} / ${o.sampled} (${pct(o.pass, o.sampled)}); ready if answered ${o.ready_if_answered}; ready except upload ${o.ready_except_upload}${o.answered_pass !== undefined ? `; answered: reached Submit ${o.answered_pass} (+ ${o.answered_upload} upload simulated)` : ""}.** Closed, reported apart: ${o.closed} (${o.closed_at_start} found closed at the start of the run, the rest by the runner on the page).`, "",
+      "| provider | open | closed | pass (open) | answered: reached Submit (open) |", "|---|---|---|---|---|", ...s.prov.map((x) => `| ${x.provider} | ${x.open.sampled} | ${x.open.closed} | ${x.open.pass} | ${x.open.answered_pass ?? "-"}${x.open.answered_upload ? ` (+${x.open.answered_upload})` : ""} |`));
+  }
   if (s.all.answered_pass !== undefined) {
     L.push("", `**Answered (--answered, not the headline): ${s.all.answered_pass} / ${s.all.sampled} reached the instant before Submit once every question the runner handed back as the person's had a synthetic TEST answer (+ ${s.all.answered_upload} with the upload simulated).** Execution failures left: ${s.all.answered_top_fail.map(([k, n]) => `${k} ${n}`).join("; ")}.`, "",
       "| provider | answered: reached Submit | answered: upload simulated | answered: top failures |", "|---|---|---|---|", ...s.prov.map((x) => `| ${x.provider} | ${x.answered_pass} | ${x.answered_upload} | ${(x.answered_top_fail || []).map(([k, n]) => `${k} ${n}`).join("; ")} |`));
@@ -293,4 +317,4 @@ async function main() {
   if (s.all.breaches) process.exit(3);
 }
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { answeredPosting, answeredCounts, strictGate, STRICT_INIT, strictStop, simulatedUpload, simulatedFileRead, SIMULATED_FILE, SIMULATED_UPLOADS, strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };
+module.exports = { openAtStart, isClosed, answeredPosting, answeredCounts, strictGate, STRICT_INIT, strictStop, simulatedUpload, simulatedFileRead, SIMULATED_FILE, SIMULATED_UPLOADS, strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };

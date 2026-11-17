@@ -124,13 +124,16 @@ function carriesResume(c, resumeName, ev) {
   if (!fileKey(resumeName) || fileKey(last) !== fileKey(resumeName) || String(ext(last) || "").toLowerCase() !== String(ext(resumeName) || "").toLowerCase()) return false;
   const name = String(c.name || ""), host = u.hostname.toLowerCase();
   const sets = (ev && ev.sets) || [], uploads = (ev && ev.uploads) || [];
-  return sets.some((s) => s && s.before && Object.prototype.hasOwnProperty.call(s.before, name) && s.before[name] === ""
+  // Second delta review of rs-05 (2026-11-17, probe dup-name): evidence is per element. Two controls sharing the box's name, now or
+  // just before a resume set, are never told apart: refused.
+  if ((ev && ev.controls ? ev.controls : [c]).filter((x) => x && String(x.name || "") === name).length !== 1) return false;
+  return sets.some((s) => s && Array.isArray(s.before) && s.before.filter(([n]) => n === name).length === 1 && s.before.some(([n, v]) => n === name && v === "")
     && uploads.some((x) => x && x.at >= s.at && String(x.host || "").toLowerCase() === host));
 }
 function unconfirmedDefaults(controls, person = {}) {
   const out = [], seen = new Set();
   for (const c of controls || []) {
-    if (carriesResume(c, person.resumeName, person.resumeEvidence)) continue;
+    if (carriesResume(c, person.resumeName, person.resumeEvidence && { ...person.resumeEvidence, controls })) continue;
     // Round 2 (review of #818): every control the page set and the engine did not, text boxes, hidden answers and contenteditable
     // regions included; a disabled control is never sent, so it is shown on the card and never asked.
     if ((c.hidden && !c.answer) || c.pageData || c.touched || c.disabled || !set(c) || c.type === "file") continue;

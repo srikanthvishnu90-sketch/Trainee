@@ -3,8 +3,9 @@
 // 2026-11-17). Trunk accepted "the approved digits less only their own country code" whatever the widget's own country was, so the
 // employer could join another country (+31, +44) with the digits: a number the person never approved. Default-deny since the delta
 // review: the national digits hold the approved number only with positive evidence of the approved code: the phone's own shell shows
-// "+1", or the form has no country notion at all (a plain box the page only reformats). Every other shell is refused, whichever way
-// it names its country (and also when it names the United States without showing +1). Local pages and a mock employer.
+// "+1" in its selected dial-code display (never hint text), or the form posts no field the runner did not fill (a plain box the page
+// only reformats). Every other shell is refused, whichever way it names its country (and also when it names the United States
+// without showing +1). Local pages and a mock employer.
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -29,8 +30,15 @@ const SHELLS = {
   "US-named-no-dial": ["refuse", `<div class="iti"><div class="iti__flag" title="United States">US</div>${BOX}</div>`],
   "iti-dial-US": ["post", `<div class="iti"><div class="iti__selected-flag" title="United States: +1"><div class="iti__flag iti__us"></div></div>${BOX}</div>`],
   "plain": ["post", BOX],
+  // Second delta review of rs-00 (2026-11-17): a page-set country posted beside a plain box (no word the old list knew), a country
+  // select outside the form that still posts with it, and a "+1" example in the help text beside an NL country field.
+  "hidden-phone_iso": ["refuse", `${BOX}<input type="hidden" name="phone_iso" value="NL">`],
+  "hidden-cc": ["refuse", `<div class="tel-wrap"><span><svg width="8" height="8"></svg> NL</span>${BOX}</div><input type="hidden" name="cc" value="NL">`],
+  "hidden-phone-region": ["refuse", `${BOX}<input type="hidden" name="phone[region]" value="NL">`],
+  "outside-form-select": ["refuse", `${BOX}</form><select form="F" name="phone_country"><option value="US">US</option><option value="NL" selected>Netherlands +31</option></select><form>`],
+  "hint-plus1-with-NL": ["refuse", `<div class="phone-field">${BOX}<small>Example: +1 202 555 0100</small></div><input type="hidden" name="candidate.phone_country" value="NL">`],
 };
-const page = (shell) => `<!doctype html><html><body><h1>Apply</h1><form action="/apply" method="post">
+const page = (shell) => `<!doctype html><html><body><h1>Apply</h1><form id="F" action="/apply" method="post">
 <label for="n">Full name *</label><input id="n" name="candidate.name" required><label for="e">Email address *</label><input id="e" type="email" name="candidate.email" required>
 <label for="p">Phone number *</label>${shell}<label for="cv">CV</label><input id="cv" type="file" name="candidate.cv"><button type="submit">Send</button></form><script>
 const ph = document.getElementById("p"); ph.addEventListener("input", () => setTimeout(() => { const v = ph.value; if (/^\\+1[\\s-]/.test(v)) ph.value = v.replace(/^\\+1[\\s-]*/, ""); }, 50));

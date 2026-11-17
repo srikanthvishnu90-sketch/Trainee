@@ -55,6 +55,15 @@ test("the consent answer goes to the choice, the confirmed phone to the box; sen
   assert.equal(mine.length, 1);
   assert.deepEqual(JSON.parse(mine[0].body), { name: "Casey Example", email: "casey@example.invalid", phone: FACTS.phone, sms: YES });
 });
+test("the VM's way (no facts; the phone approved under 'Phone'): the number goes to the box, the required consent is asked; nothing sent", { skip, timeout: 60000 }, async () => {
+  const n = posts.length;
+  const p = job("consent", { Phone: FACTS.phone }); p.facts = { full_name: FACTS.full_name, email: FACTS.email }; p.approval.hash = payloadHash(p);
+  const r = await applyOne(browser, p, { stepTimeoutMs: 8000, retries: 0 });
+  assert.equal(r.reason, "missing_required_answer", JSON.stringify(r));
+  assert.deepEqual((r.needs || []).map((x) => [x.label, x.reason, x.kind]), [["Phone", "no_confirmed_answer", "buttons"]]);
+  assert.ok((r.filled_labels || []).includes("Phone"), JSON.stringify(r.filled_labels));
+  assert.equal(posts.length, n);
+});
 test("an answer that is no option of the choice, or two boxes under the label: handed back, nothing sent", { skip, timeout: 60000 }, async () => {
   const n = posts.length;
   const a = await applyOne(browser, job("consent", { Phone: "Maybe later" }), { stepTimeoutMs: 8000, retries: 0 });

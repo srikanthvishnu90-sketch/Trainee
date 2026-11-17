@@ -53,13 +53,17 @@ const BOARDS = [
   ["lever", /^jobs\.lever\.co$/],
   ["personio", new RegExp(`^${LABEL}\\.jobs\\.personio\\.de$`)],
   ["breezy", new RegExp(`^${LABEL}\\.breezy\\.hr$`)],
+  // Architect ruling (2026-11-16, round 2 of ag/runner-strict): Ashby, which reaches the instant before Submit on 10 of 20 sampled
+  // postings once the person's answers are in (the strict bench's answered column). SmartRecruiters (DataDome) and Workday (sign-in)
+  // stay on the hand-off path. Same pattern as career_apply_vm_family (20261116120000).
+  ["ashby", /^jobs\.ashbyhq\.com$/],
 ];
 function atsOf(url) {
   let u;
   try { u = new URL(url); } catch { return { refuse: "invalid_url" }; }
   const host = u.hostname.toLowerCase().replace(/^www\./, "");
   if (REFUSED.test(host)) return { refuse: "site_not_supported" };
-  if (LOOPBACK.has(host)) { const m = /^\/(greenhouse|lever)\//.exec(u.pathname); return m ? { ats: m[1], host: u.host, local: true } : { refuse: "site_not_supported" }; }
+  if (LOOPBACK.has(host)) { const m = /^\/(greenhouse|lever|ashby)\//.exec(u.pathname); return m ? { ats: m[1], host: u.host, local: true } : { refuse: "site_not_supported" }; }
   if (u.port) return { refuse: "site_not_supported" };
   for (const [ats, re] of BOARDS) if (re.test(host)) return { ats, host: u.host };
   return { refuse: "site_not_supported" };

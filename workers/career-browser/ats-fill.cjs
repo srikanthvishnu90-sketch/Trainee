@@ -804,6 +804,13 @@ function decide(d, ctx) {
   if (twins && twins.length === 2 && !boardOwn) {
     const ans = answerFor(d.label, answers);
     const choice = twins.filter((x) => ["radio", "buttons", "select"].includes(x.kind) && Array.isArray(x.options)), box = twins.filter((x) => ["text", "textarea"].includes(x.kind));
+    // The other way round (the apply VM carries contact facts as approved answers under their labels): an approved "Phone" that is
+    // a phone number and no option of the choice is the box's; the choice has no approved answer (asked when required, else blank).
+    const fitsBox = (v) => { const k = factKey(d.label); return k === "phone" ? String(v).replace(/\D/g, "").length >= 7 && !/[a-z]{3}/i.test(String(v)) : k === "email" ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v).trim()) : false; };
+    if (!blank(ans) && choice.length === 1 && box.length === 1 && matchOption(choice[0].options.map((o) => o.label), ans).error && fitsBox(ans)) {
+      if (d.q === box[0].q) return { status: "fill", value: String(ans), source: "answer" };
+      if (d.q === choice[0].q) return d.required ? { status: "ask", reason: "no_confirmed_answer" } : { status: "skip", reason: "optional_left_blank" };
+    }
     if (!blank(ans) && choice.length === 1 && box.length === 1 && !matchOption(choice[0].options.map((o) => o.label), ans).error) {
       if (d.q === choice[0].q) return { status: "fill", value: String(ans), source: "answer" };
       // The choice's answer is never the box's fact (factsFrom would read an approved "Phone" answer as the phone).

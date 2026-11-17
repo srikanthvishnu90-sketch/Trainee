@@ -1,36 +1,32 @@
-// Gap #5 of the 10/10 rubric (2026-11-16; evals/mirror/instinct-wa-batch1/, live-12 C1 and C19): a tool call missing a required
-// input is refused before it runs, the brain gets ONE more try with the refusal naming each missing input from the tool's own
-// schema, and if the call never runs the reply says so: it never reports a result from it (D-024). Live-12 C19: find_people was
-// refused with "missing required input: school, employers" and the delivered reply said "The search found no public page ...".
-// $0, a scripted model through the real agent loop (runAgentTurn).
-//   NR-1  the first refusal names each missing input with its schema description and allows one more call; the retry with the
-//         inputs filled runs the tool
-//   NR-2  a second refusal ends that tool for the turn: a third call is refused and the tool never runs
-//   NR-3  C19: "found nobody" after a refused people search is impossible: the review asks once, then code removes the sentence
-//         and the reply says the search did not run
-//   NR-4  a refused save (C1's remember_instruction) is said not to have run, even when the reply talks about something else
-//   NR-5  a reply that already says the call did not run is left as the model wrote it
-//   deno test -A --no-check tests/architect/pending/tool-not-run-20261116.test.ts
+// Gap #5 of the 10/10 rubric (2026-11-16; evals/mirror/instinct-wa-batch1/, live-12 C1 and C19), structural (architect direction
+// after two rejected rounds of word lists): a tool call missing a required input is refused before it runs and the brain gets ONE
+// more try; the refusal is a structured "not run" fact; when the call never ran, code ALWAYS adds its not-run line (a D-024 fact,
+// like STANDING_REFUSED), whatever the reply says, and removes no sentence (a claim needing the refused call's result is the reply
+// verifier's, PR #849: a refused call contributes no evidence). A retry that ran and threw is said to have failed. Labels come from
+// a closed map, never a tool name. $0, a scripted model through the real agent loop (runAgentTurn).
+//   NR-1  the refusal is structured (not_run, each missing input with its schema description, retry allowed); the retry runs
+//   NR-2  a second refusal ends that tool for the turn; a third call is refused and never runs
+//   NR-3  C19: the not-run line is always added; no sentence of the reply is removed; no extra model call
+//   NR-4  no wording suppresses the line (review probes U1b, U2, U3, U5, U7, S1, S2, and a reply that already admits it)
+//   NR-5  no sentence is ever removed (review probes O1, O2, O3)
+//   NR-6  a retry that ran and threw is said to have failed; the meta names the label
+//   NR-7  every tool the brain can be offered has a human label; an unknown tool is the "requested step", never its name (L1)
+//   deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/pending/tool-not-run-20261116.test.ts
 import assertNode from "node:assert/strict";
 import { runAgentTurn, type ToolSpec } from "../../../supabase/functions/_shared/agent/loop.ts";
+import { LABELS, labelOf } from "../../../supabase/functions/_shared/agent/not_run.ts";
+import { careerTools } from "../../../supabase/functions/_shared/agent/career_tools.ts";
+import { capabilityTools } from "../../../supabase/functions/_shared/agent/capability_tools.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 
 const runs: string[] = [];
-const people: ToolSpec = {
-  name: "find_people", effect: "read",
-  description: "Public people search by a shared school at employers.",
-  input_schema: { type: "object", properties: { school: { type: "string", description: "The school, as the person named it" }, employers: { type: "array", items: { type: "string" }, description: "Employers to look at, as the person named them" }, count: { type: "integer", description: "How many" } }, required: ["school", "employers"] },
-  run: async (i) => { runs.push(`find_people:${JSON.stringify(i)}`); return { status: "ok", leads: [{ name: "Lead One", employer: "Google", verified: false }] }; },
-};
-const remember: ToolSpec = {
-  name: "remember_instruction", effect: "write_own",
-  description: "Keep something that must always hold.",
-  input_schema: { type: "object", properties: { instruction: { type: "string", description: "The instruction, short and plain" }, quote: { type: "string", description: "Their exact words from this message" } }, required: ["instruction", "quote"] },
-  run: async () => { runs.push("remember_instruction"); return { status: "kept" }; },
-};
-// A scripted model: each answer in turn; the last one repeats. Records every payload it was given.
+const tool = (name: string, req: string[], run?: ToolSpec["run"]): ToolSpec => ({
+  name, effect: "read", description: name,
+  input_schema: { type: "object", properties: Object.fromEntries([...req, "employers"].map((k) => [k, { type: "string", description: `The ${k}, as the person named it` }])), required: req },
+  run: run ?? (async (i) => { runs.push(`${name}:${JSON.stringify(i)}`); return { status: "ok", found: 3 }; }),
+});
 function scripted(steps: any[][]) {
   const payloads: any[] = [];
   let i = 0;
@@ -39,103 +35,105 @@ function scripted(steps: any[][]) {
 }
 const text = (t: string) => [{ type: "text", text: t }];
 const use = (name: string, input: unknown, id: string) => [{ type: "tool_use", id, name, input }];
-const C19 = "find me 3 lakeshore alumni working at google or trading firms i could reach out to, just research don't message anyone";
-const run = (tools: ToolSpec[], m: any, message = C19) => runAgentTurn({ system: "s", history: [], message, tools, model: m, ctx: { userId: "u", threadId: "t", now: 0, state: {} } });
+const twice = (name: string) => [use(name, {}, "a"), use(name, {}, "b")];
+const ASK = "find me 3 lakeshore alumni at google, just research";
+const run = (tools: ToolSpec[], m: any, message = ASK) => runAgentTurn({ system: "s", history: [], message, tools, model: m, ctx: { userId: "u", threadId: "t", now: 0, state: {} } });
 const resultsOf = (p: any) => p.messages[p.messages.length - 1].content.filter((b: any) => b.type === "tool_result");
+const LINE = "The people search did not run this time, so there is no result from it.";
+// What the loop's other guards make of the same final text with no refused call: the not-run layer only adds its line to that.
+const baseline = async (tools: ToolSpec[], said: string, message = ASK) => (await run(tools, scripted([text(said)]), message)).reply;
 
-Deno.test("NR-1 the first refusal names each missing input from the schema and allows one more call; the retry runs", async () => {
+Deno.test("NR-1 the refusal is a structured not-run fact naming each missing input; the retry with it filled runs", async () => {
   runs.length = 0;
-  const m = scripted([use("find_people", { count: 3 }, "a"), use("find_people", { school: "Lakeshore University", employers: ["Google"], count: 3 }, "b"), text("One public lead, not verified: Lead One at Google. Nobody was contacted.")]);
-  const r = await run([people], m);
+  const m = scripted([use("find_people", { count: 3 }, "a"), use("find_people", { school: "Lakeshore University" }, "b"), text("One public lead, not verified. Nobody was contacted.")]);
+  const r = await run([tool("find_people", ["school"])], m);
   const first = resultsOf(m.payloads[1])[0];
   ok(first.is_error, "refused");
-  const said = String(first.content);
-  ok(/school \(The school, as the person named it\)/.test(said) && /employers \(Employers to look at/.test(said), `each missing input with its description: ${said}`);
-  ok(/once more/.test(said) && /did not run/.test(said), `one more try, and it did not run: ${said}`);
-  eq(runs, ['find_people:{"school":"Lakeshore University","employers":["Google"],"count":3}'], "the retry with the inputs ran");
-  eq(r.tool_calls.map((c) => [c.name, c.ok]), [["find_people", false], ["find_people", true]]);
-  ok(/missing required input: school, employers/.test(r.tool_calls[0].error ?? ""), r.tool_calls[0].error);
-  ok(!/did not run/.test(r.reply), `a call that ran needs no not-run line: ${r.reply}`);
+  const fact = JSON.parse(String(first.content));
+  eq([fact.status, fact.not_run, fact.retry_allowed], ["not_run", "people search", true]);
+  eq(fact.missing_required_input, [{ input: "school", means: "The school, as the person named it" }]);
+  ok(!/find_people/.test(String(first.content)), "no tool name in the fact");
+  eq(runs, ['find_people:{"school":"Lakeshore University"}'], "the retry ran");
+  ok(/missing required input: school/.test(r.tool_calls[0].error ?? ""), r.tool_calls[0].error);
+  ok(!r.reply.includes(LINE) && !r.not_run, `a call that ran needs no line: ${r.reply}`);
 });
 
-Deno.test("NR-2 a second refusal ends that tool for the turn: a third call is refused and never runs", async () => {
+Deno.test("NR-2 a second refusal ends that tool for the turn: a third call, even complete, is refused and never runs", async () => {
   runs.length = 0;
-  const m = scripted([use("find_people", { count: 3 }, "a"), use("find_people", { count: 3 }, "b"), use("find_people", { school: "Lakeshore University", employers: ["Google"] }, "c"),
-    text("The people search did not run because it needed the school and the employers. Which employers should I look at?")]);
-  const r = await run([people], m);
+  const m = scripted([...twice("find_people"), use("find_people", { school: "Lakeshore" }, "c"), text("Which school should I search for?")]);
+  const r = await run([tool("find_people", ["school"])], m);
   eq(runs, [], "the tool never ran");
-  ok(/second try/.test(String(resultsOf(m.payloads[2])[0].content)), "the second refusal says it was the last");
-  ok(/will not run again/.test(String(resultsOf(m.payloads[3])[0].content)), `the third call is refused: ${resultsOf(m.payloads[3])[0].content}`);
+  eq(JSON.parse(String(resultsOf(m.payloads[2])[0].content)).retry_allowed, false);
+  ok(/will not run this turn/.test(JSON.parse(String(resultsOf(m.payloads[3])[0].content)).note));
   eq(r.tool_calls.map((c) => c.ok), [false, false, false]);
-  ok(/did not run/.test(r.reply), r.reply);
+  ok(r.reply.startsWith(LINE), r.reply);
 });
 
-Deno.test("NR-3 C19: after a refused people search, 'found nobody' is impossible; the reply says the search did not run", async () => {
-  runs.length = 0;
-  const lie = "The search found no public page listing Lakeshore University alumni at Google, Citadel or Jane Street. Try your school's alumni directory and its career office. Nobody was contacted.";
-  const m = scripted([use("find_people", { count: 3 }, "a"), use("find_people", { count: 3 }, "b"), text(lie)]);
-  const r = await run([people], m);
-  eq(runs, [], "the search never ran");
-  ok(m.payloads.some((p) => /did not run this turn/.test(String(p.system))), "the brain was asked once to fix it");
-  ok(!/found no public page/.test(r.reply), `a result from a search that never ran: ${r.reply}`);
-  ok(/people search did not run/.test(r.reply), `the reply says it did not run: ${r.reply}`);
-  ok(/alumni directory/.test(r.reply) && /Nobody was contacted/.test(r.reply), `the rest of the reply stands: ${r.reply}`);
+Deno.test("NR-3 C19: the not-run line is always added, no sentence is removed, and it costs no model call", async () => {
+  const lie = "The search found no public page listing Lakeshore University alumni at Google. Try your school's alumni directory. Nobody was contacted.";
+  const m = scripted([...twice("find_people"), text(lie)]);
+  const r = await run([tool("find_people", ["school"])], m);
+  eq(r.reply, `${LINE}\n\n${lie}`, "the line, then the reply exactly as written (its unsupported claim is the reply verifier's)");
+  eq(m.payloads.length, 3, "two refusals and the reply: no review call");
+  eq(r.not_run, [{ label: "people search", failed: false }]);
+  const rem = await run([tool("remember_instruction", ["text"])], scripted([...twice("remember_instruction"), text("Got it, I'll keep that in mind from now on.")]), "the 3.9 gpa is outdated, don't reuse it");
+  eq(rem.reply, `The save of that instruction did not run this time, so there is no result from it.\n\n${await baseline([tool("remember_instruction", ["text"])], "Got it, I'll keep that in mind from now on.", "the 3.9 gpa is outdated, don't reuse it")}`.trimEnd());
 });
 
-Deno.test("NR-4 C1: a refused save is said not to have run, even when the reply is about something else; NR-5 one that says so stands", async () => {
-  runs.length = 0;
-  const m = scripted([use("remember_instruction", { instruction: "Never use the 3.9 GPA" }, "a"), text("Start with the PayPal internship: it closes December 6. Want me to prepare it for your approval?")]);
-  const r = await run([remember], m, "the 3.9 gpa is outdated, don't reuse it. what should i do to land a swe internship?");
-  eq(runs, []);
-  ok(/save of that instruction did not run/.test(r.reply) && /PayPal internship/.test(r.reply), r.reply);
-  // NR-5: a reply that already says the call did not run stands as written, with no review.
-  {
-    runs.length = 0;
-    const said = "The people search didn't run: it needs the school. Which school should I search for?";
-    const m2 = scripted([use("find_people", { employers: ["Google"] }, "a"), text(said)]);
-    const r2 = await run([people], m2);
-    eq(r2.reply, said);
-    eq(m2.payloads.length, 2, "no review was needed");
+Deno.test("NR-4 no wording suppresses the not-run line (U1b, U2, U3, U5, U7, S1, S2, an admission)", async () => {
+  const people = tool("find_people", ["school"]), jobs = tool("search_jobs", ["query"]), apps = tool("list_applications", ["scope"]);
+  const cases: [ToolSpec[], any[][], string][] = [
+    [[people], [...twice("find_people"), text("I found no Lakeshore alumni at Google, want me to try another school?")], LINE],
+    [[people], [...twice("find_people"), text("Here are two Lakeshore alumni at Google: Jane Park and Omar Diaz.")], LINE],
+    [[people], [...twice("find_people"), text("The search didn't run on LinkedIn, but there are no Lakeshore alumni at Google on public pages.")], LINE],
+    [[people], [...twice("find_people"), text("I found nobody at Google who could be contacted.")], LINE],
+    [[apps], [...twice("list_applications"), text("Your Stripe application is pending, and Ramp is still reviewing yours.")], "The check of your applications did not run this time"],
+    [[people, jobs], [use("find_people", {}, "a"), use("search_jobs", { query: "swe" }, "j"), use("find_people", {}, "b"), text("I found 3 software roles at Google. I did not check whether they are still open. Which school are you from?")], LINE],
+    [[people], [...twice("find_people"), text("I didn't save anything to your profile. Which school should I search?")], LINE],
+    [[people], [...twice("find_people"), text("The people search didn't run: it needs the school. Which school?")], LINE],
+  ];
+  for (const [tools, steps, line] of cases) {
+    const said = steps.at(-1)![0].text as string;
+    const r = await run(tools, scripted(steps));
+    const rest = r.reply.slice(r.reply.indexOf("\n\n") + 2);
+    ok(r.reply.startsWith(line), `${said} -> ${r.reply}`);
+    eq(rest, await baseline(tools, said), `nothing else changed: ${said}`);
   }
 });
 
-// Review of ag/coach-depth at f7abd6c30 (REJECT): paraphrases of a call that never ran reached the person; sentences from a tool
-// that DID run were removed; an unrelated "couldn't" suppressed the not-run line; a retry that ran and threw was said not to have
-// run; and the not-run line cost an extra model call. Architect ruling: "couldn't/unable to find", "no", "zero", "none" are result
-// claims, never admissions; an admission is only an explicit statement that the action did not happen.
-const tool = (name: string, req: string[], run?: ToolSpec["run"]): ToolSpec => ({ name, effect: "read", description: name, input_schema: { type: "object", properties: Object.fromEntries(req.map((k) => [k, { type: "string", description: k }])), required: req }, run: run ?? (async () => ({ status: "ok", found: 3 })) });
-const twice = (name: string) => [use(name, {}, "a"), use(name, {}, "b")];
-const ASK = "find me lakeshore alumni at google";
-
-Deno.test("NR-6 paraphrases of a result from a call that never ran never reach the person", async () => {
-  const people1 = tool("find_people", ["school"]);
-  for (const lie of ["I couldn't find any Lakeshore alumni at Google on public pages.", "I didn't see anybody from Lakeshore at Google.", "The search turned up zero Lakeshore alumni at Google, and nothing was sent.", "I was unable to find Lakeshore alumni at Google."]) {
-    const r = await run([people1], scripted([...twice("find_people"), text(`${lie} Try your school's alumni directory.`)]), ASK);
-    ok(!r.reply.includes(lie.replace(/[.,].*$/, "")), `${lie} -> ${r.reply}`);
-    ok(/people search did not run/.test(r.reply) && /alumni directory/.test(r.reply), r.reply);
+Deno.test("NR-5 no sentence is ever removed (O1, O2, O3)", async () => {
+  const people = tool("find_people", ["school"]), comp = tool("research_company", ["company"]);
+  const o1 = "Google hires interns each summer, and anyone at Google can refer you. Which school should I search alumni for?";
+  const msg = "find lakeshore alumni at google, and does google hire interns?";
+  const a = await run([people, comp], scripted([use("find_people", { employers: "Google" }, "a"), use("research_company", { company: "Google" }, "c"), use("find_people", { employers: "Google" }, "b"), text(o1)]), msg);
+  const base = await run([people, comp], scripted([use("research_company", { company: "Google" }, "c"), text(o1)]), msg);
+  eq(a.reply, `${LINE}\n\n${base.reply}`, "a sentence the run research covers is kept as the guards keep it");
+  for (const said of ["If anyone at a career fair asks, lead with your 2 internships. Which school should I search?", "Your profile has no summary line yet. Which school should I search?"]) {
+    const r = await run([people], scripted([...twice("find_people"), text(said)]));
+    eq(r.reply, `${LINE}\n\n${await baseline([people], said)}`);
   }
-  const apps = tool("list_applications", ["scope"]);
-  const r = await run([apps], scripted([...twice("list_applications"), text("You have applied to 3 roles so far, all still under review.")]), "have i applied anywhere?");
-  ok(!/applied to 3 roles/.test(r.reply) && /did not run/.test(r.reply), r.reply);
 });
 
-Deno.test("NR-7 a sentence a tool that ran supports is kept; an unrelated 'couldn't' does not stand in for the not-run line", async () => {
-  const people1 = tool("find_people", ["school"]), jobs = tool("search_jobs", ["query"]), check = tool("check_posting_open", ["url"]);
-  const a = await run([people1, jobs], scripted([use("find_people", {}, "a"), use("search_jobs", { query: "swe intern" }, "j"), use("find_people", {}, "b"), text("I found 3 roles for software engineers at Google. Which school should I search alumni for?")]), ASK);
-  ok(/I found 3 roles for software engineers at Google/.test(a.reply), a.reply);
-  const b = await run([check, jobs], scripted([use("check_posting_open", {}, "a"), use("search_jobs", { query: "swe intern" }, "j"), use("check_posting_open", {}, "b"), text("I found 3 open internships at Google that match your goal. Want me to queue the first?")]), "is the google posting still open? and find more google internships");
-  ok(/I found 3 open internships at Google/.test(b.reply) && /open check on that posting did not run/.test(b.reply), b.reply);
-  const c = await run([people1], scripted([...twice("find_people"), text("Here are three ways to reach alumni: the career office, the alumni directory, and club groups. I couldn't promise replies, but the directory is the strongest start.")]), ASK);
-  ok(/people search did not run/.test(c.reply) && /career office/.test(c.reply), c.reply);
-});
-
-Deno.test("NR-8 a retry that ran and threw is said to have failed; the not-run line costs no model call", async () => {
+Deno.test("NR-6 a retry that ran and threw is said to have failed", async () => {
   let n = 0;
   const flaky = tool("find_people", ["school"], async () => { n++; throw new Error("provider 500"); });
-  const a = await run([flaky], scripted([use("find_people", {}, "a"), use("find_people", { school: "Lakeshore" }, "b"), text("The provider had trouble. Want me to try again later?")]), ASK);
-  ok(n === 1 && /people search failed/.test(a.reply) && !/did not run/.test(a.reply), a.reply);
-  const m = scripted([...twice("find_people"), text("Which school should I search for?")]);
-  const b = await run([tool("find_people", ["school"])], m, ASK);
-  ok(/people search did not run/.test(b.reply) && m.payloads.length === 3, `${m.payloads.length} model calls: ${b.reply}`);
-  ok(!m.payloads.some((p) => /find_people/.test(String(p.system))), "no raw tool name in code's review");
+  const r = await run([flaky], scripted([use("find_people", {}, "a"), use("find_people", { school: "Lakeshore" }, "b"), text("The provider had trouble. Want me to try again later?")]));
+  eq(n, 1);
+  ok(r.reply.startsWith("The people search failed this time, so there is no result from it.") && !/did not run/.test(r.reply), r.reply);
+  eq(r.not_run, [{ label: "people search", failed: true }]);
+});
+
+Deno.test("NR-7 every tool the brain can be offered has a human label; an unknown tool is the 'requested step', never its name", async () => {
+  const names = [
+    ...careerTools({ postings: async () => [], alerts: {}, memory: {}, events: {}, confirmations: {}, mail: {}, interviews: {}, digest: {}, outreach: {}, verifier: {}, tailor: {}, hired: {}, wants: {}, posting: async () => null, situation: null, linkCheck: async () => ({}), conversations: {}, market: {}, postingRecheck: async () => ({}), applyFlow: async () => ({}), research: {} } as any).map((t) => t.name),
+    ...capabilityTools({ mail: {}, tracking: true, accounts: async () => [], cursor: null, readNow: null, connectUrl: "x", situation: null, snapshot: null, files: {}, people: { on: true, search: async () => ({}) }, inbox: {}, reply: {} } as any).map((t) => t.name),
+    "create_file", "attach_document", "open_record_file", "compare_paths",
+  ];
+  ok(names.length >= 45, String(names.length));
+  eq(names.filter((x) => !LABELS[x]), [], "tools with no label");
+  for (const x of names) ok(!/_/.test(LABELS[x]) && LABELS[x] !== x, `${x}: ${LABELS[x]}`);
+  eq(labelOf("queue_application"), "requested step");
+  const r = await run([tool("queue_application", ["posting_id"])], scripted([...twice("queue_application"), text("Which posting should I queue?")]), "queue it");
+  ok(r.reply.startsWith("The requested step did not run this time"), r.reply);
+  ok(!/queue_application/.test(r.reply), r.reply);
 });

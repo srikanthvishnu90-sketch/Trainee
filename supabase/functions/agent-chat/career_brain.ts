@@ -16,8 +16,10 @@ import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing 
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
 import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
 import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research/advice.ts";
-import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed } from "../_shared/agent/research/market.ts";
-import { keepSupported } from "../_shared/agent/research/support.ts";
+import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed, type ResearchCheck } from "../_shared/agent/research/market.ts";
+import { bare, keepSupported, personQuestion, recordCheck, splitSentences } from "../_shared/agent/research/support.ts";
+import { confirmedRow, factRows } from "../_shared/agent/memory.ts";
+import { contractBlock, contractsFor, evidenceTurn, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
 import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
@@ -160,7 +162,7 @@ export async function agentTurn(o: {
   // D-062: the capability tools (_shared/agent/capability_tools.ts: Gmail record and tracker, people search, answering an email),
   // under the same withholding as every other tool.
   capabilities?: import("../_shared/agent/loop.ts").ToolSpec[] | null;
-}): Promise<TurnResult & { shorten?: Shorten; research?: Record<string, unknown>; knowledge?: { playbooks: string[]; unknown: string[]; stage: string | null } }> {
+}): Promise<TurnResult & { shorten?: Shorten; research?: Record<string, unknown>; support?: { draft: string; refused: { sentence: string; why: string }[] }; knowledge?: { playbooks: string[]; unknown: string[]; stage: string | null } }> {
   // MIRROR WA-1 gaps (turn_notes.ts): what code read from this message and this conversation, for this turn only. A hypothetical
   // person is answered without their saved facts (the profile is left out of the block) and with every record tool withheld;
   // a hypothetical situation writes nothing.
@@ -219,13 +221,27 @@ export async function agentTurn(o: {
   // D-063 (C4): trace.a keeps a specific advice question's result (research/advice.ts): its one source goes on its own line.
   const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult; a?: AdviceResult } = {};
   const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores, restoreAsk: o.restoreAsk ?? null, cardPending: !!o.cardPending };
+  // REPLY PIPELINE (PIPELINE.on; docs/architect/specs/REPLY-PIPELINE.md): the evidence ledger starts with the person's confirmed record
+  // and what it lacks; each tool result adds its units (loop.ts). The draft cites them; the task contract is stated up front.
+  const ledger = PIPELINE.on && !hypo ? new Ledger(o.now) : null;
+  const contracts = PIPELINE.on ? contractsFor(null, o.message) : [];
+  if (ledger) {
+    const pf = (o.stores as any)?.profile ?? {}, contact = { ...(pf.basics ?? {}), ...(pf.resume_header?.confirmed_at ? pf.resume_header : {}) };
+    // (only what the person confirmed: the same rows the prompt's "Confirmed facts (usable in applications)" shows, D-007)
+    ledger.addRecord(factRows(pf).filter(confirmedRow).map((f: any) => `${String(f?.kind ?? "fact")}: ${String(f?.text ?? "").trim()}`).filter((x: string) => x.length > 8)
+      .concat(["name", "email", "phone", "city"].filter((k) => typeof contact[k] === "string" && contact[k].trim()).map((k) => `contact: ${k} ${contact[k].trim()}`)),
+      ["city", "phone", "email"].filter((k) => !(typeof contact[k] === "string" && contact[k].trim())));
+    // (this chat's earlier posting lines, from tool results an earlier reply already showed, with their links)
+    for (const l of shownPayOf("what is the pay", o.history)) ledger.add("chat", l.text.replace(/^(?:[^.:]*\bdo hold:\s*)+/i, ""), { url: l.url, source: "an earlier reply in this chat" });
+    ctx.ledger = ledger;
+  }
   const tools = [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? []), ...(o.paths ? [pathComparisonTool(o.paths)] : [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : []), ...(o.familyFiles ? [familyFileTool(o.familyFiles, o.files?.ttlHours() ?? 168)] : [])];
   const offered = new Set(tools.map((t) => t.name));
   let result = await runAgentTurn({
     process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts,
       planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !appHypo && offered.has("read_application_mail"), noneClaim: !appHypo, record: () => (ctx.turn as any)?.record, posting: meant.length > 0 && offered.has("get_posting"), shownPay,
       marketRate: !hypo && marketRateAskOf(o.message) && offered.has("research_market"), review: practiceAnswer || !!roast ? o.message : null, familyFile: !hypo && offered.has(FAMILY_FILE_TOOL) ? familyAskOf(o.message) : null }),
-    system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
+    system: careerSystemPrompt(localDay(o.now, o.tz)) + (ledger ? `\n\n${LEDGER_RULE}\n${ledger.block()}\n${contractBlock(contracts)}` : "") + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
     // ADVERSARIAL ROUND 2: an attached file's name and text are not the person's words: no tool reads them as said.
@@ -269,7 +285,44 @@ export async function agentTurn(o: {
   // one batched call) before it may stand in the model's words; without a judge none does.
   // Round 2: also when an open-question research ran in the same turn (trace.r): the market or company result's check is the one
   // that stands, since its sources are the numbered ones the reply cites.
-  if (FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: o.market?.judge ?? null, ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: o.market?.judge ?? null, ask: o.message }) };
+  // Live-11 (C9: 10 of 11 drafted lines dropped and the trace held none of them): a research turn's draft is recorded too.
+  // Live-12 (item 6, C4: "Your city and phone aren't on file" was refused): whether something is on the person's record is code's to
+  // say, from the record itself (their facts, confirmed or not, and their profile's contact fields): true when none of the things the
+  // sentence names is there, false when one is.
+  const recordWords = hypo ? "" : [...(((o.stores as any)?.profile?.facts ?? []) as any[]).map((f) => `${String(f?.kind ?? "")} ${String(f?.name ?? "")} ${String(f?.text ?? "")}`),
+    ...Object.entries({ ...((o.stores as any)?.profile?.basics ?? {}), ...((o.stores as any)?.profile?.resume_header ?? {}) }).filter(([, v]) => typeof v === "string" && v.trim()).map(([k2, v]) => `${k2} ${v}`)].join("\n").toLowerCase();
+  // (CodeRabbit on #849: built before the reply pipeline, which takes it too, so a tagged claim about the record is code's check)
+  // (round 9 of #849: support.ts recordCheck; it answers only for the template alone, and its free part carries no figure, date or
+  // name the record does not hold)
+  const onRecord = hypo ? ((_x: string): boolean | null => null) : recordCheck(recordWords);
+  let piped: Awaited<ReturnType<typeof runReplyPipeline>> | null = null;
+  // The path, by the draft: tagged -> the reply pipeline; untagged -> the support check as before (a stray tag never reaches anyone).
+  // Review of #849 (round 2): the pipeline runs only on a turn that rests on evidence a tool read this turn; a plain advice or chat
+  // turn keeps the path it had before (tags stripped), as the support check never ran on those.
+  const pipeline = ledger && result.reply && result.stopped === "final" ? (isTagged(result.reply) && evidenceTurn(ledger) ? "tagged" : "untagged") : null;
+  if (pipeline === "untagged" && result.reply) result = { ...result, reply: stripTags(result.reply) };
+  if (pipeline === "tagged" && result.show && result.reply) result = { ...result, reply: stripTags(result.reply) };
+  if (pipeline === "tagged" && result.reply && !result.show) {
+    const l0 = replyLength(o.message, o.history);
+    const repair = async (x: { system: string; user: string }) => { const res = await o.model({ system: x.system, messages: [{ role: "user", content: [{ type: "text", text: x.user }] }], tools: [], max_tokens: 500, tool_choice: { type: "none" } } as any); return ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim(); };
+    const names = [...new Set((o.history ?? []).filter((m: any) => typeof m?.content === "string").flatMap((m: any) => (m.content as string).match(/(?<![\p{L}])\p{Lu}[\p{L}&'-]{2,}/gu) ?? []))];
+    piped = await runReplyPipeline(result.reply, ledger!, { judge: o.market?.judge ?? null, repair, own: [...(result.codeLines ?? [])], onRecord, ask: o.message, contracts, names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
+    // Live-12 review (item 2): a link stays only when a ledger unit, a tool result or a File made this turn gave it (after the draft and
+    // after the repair alike: this runs on what the pipeline returns).
+    result = { ...result, reply: stripUnseenLinks(piped.text, [...(result.linksSeen ?? []), ...(result.fileLinks ?? []), ...shownBefore(o.history), ...ledger!.units.map((u) => u.url).filter((u): u is string => !!u)]) };
+  }
+  const researchDraft = !piped && FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final" ? String(result.reply) : null;
+  // Live-12 (item 4): this chat's tool results as source units: the postings this turn read (pay by place, deadline, state) and the
+  // posting lines Trainee's earlier replies gave from them, each with its link.
+  let researchRows: ResearchCheck[] | null = null;
+  const chatUnits = () => [
+    ...[...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].map((p: any) => ({ text: [p?.company, p?.title, p?.location, p?.pay ? `pay ${p.pay}` : "", p?.deadline ? `closes ${p.deadline}` : "", p?.state ? `is ${p.state}` : ""].filter((x) => typeof x === "string" && x.trim()).join(", "), title: "A posting read in this chat", url: typeof p?.url === "string" ? p.url : null,
+      // (CodeRabbit on #849: the posting's own places, its location and the places its pay is given for)
+      places: [p?.location, ...String(p?.pay ?? "").split(/;\s*/).map((x: string) => /^([^:$]+):/.exec(x)?.[1])].filter((x): x is string => typeof x === "string" && /,/.test(x)).map((x) => x.trim()) })).filter((x) => /\d/.test(x.text)),
+    ...(hypo ? [] : shownPayOf("what is the pay", o.history)).map((l) => ({ text: l.text, title: "A posting line shown earlier in this chat", url: l.url })),
+  ];
+  if (piped) { /* the reply pipeline checked it */ }
+  else if (FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: o.market?.judge ?? null, ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: o.market?.judge ?? null, ask: o.message, chat: chatUnits(), trace: (rows) => { researchRows = rows; } }) };
   else if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
   // D-073 review 2: research read pages and none supported an answer, and the model's reply did not stand (the loop removed its
   // unsourced claim, asked once more and stopped: "incomplete_reply"). The person is told what research found, in code's words: that
@@ -306,7 +359,7 @@ export async function agentTurn(o: {
   // D-071 (live-8: the pass did not run on C9 and recorded no reason): every way it does not run says why.
   let shorten: Shorten = { ran: false, outcome: "not_run", why: !result.reply ? "no reply to shorten" : result.stopped !== "final" ? `the turn did not finish (${result.stopped})`
     : trace.r || trace.m ? "a research reply, laid out and sourced in code (never rewritten)" : "" };
-  if (result.reply && result.stopped === "final" && !trace.r && !trace.m) {
+  if (result.reply && result.stopped === "final" && !trace.r && !trace.m && !piped) {
     const l = replyLength(o.message, o.history), bound = overLimit(l), n = textLength(result.reply);
     // D-072 (item 11): a practice turn (a question asked, or a review of their answer) is shortened like any reply unless it shows a
     // code block; the code it names (a call, an index, an operator, a complexity) is kept verbatim (codeKept). Complexity notation
@@ -359,6 +412,8 @@ export async function agentTurn(o: {
       const room = bound - textLength(d.label) - 2;
       const short = await condenseReply(o.model, d.body, { max: room, aim: draftLength.aim }, (long, out) => shortenedOk(long, out, room) && d.recheck(out));
       if (short) { const text = [lead, `${short}\n\n${d.label}`].filter(Boolean).join("\n\n"); result = { ...result, reply: text, show: { ...result.show, text } }; }
+      // Live-11 (C2: a 512-character draft went out and the trace could not say why): what the draft's own length pass did.
+      shorten = { ran: true, outcome: !short ? "rejected" : textLength(result.reply) <= bound ? "accepted" : "shorter", why: short ? "the draft's length pass" : "the draft's length pass: no shorter text passed the draft check with every placeholder", chars: textLength(d.body), bound, ...(short ? { after: textLength(result.reply) } : {}) };
     }
   }
   // D-067 (owner, must-fix (d): "each figure carries its source link and place"): a posting's pay said in the reply comes with that
@@ -371,8 +426,13 @@ export async function agentTurn(o: {
   //   advice (trace.a): every sentence against the passages read; with nothing left, code's not-verified line;
   //   a pay turn (a posting with pay was read, or pay was shown earlier): every sentence with a number against the postings' own
   //     records and the lines shown earlier; with nothing left, the records themselves.
-  if (FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show) {
+  // Live-10 diagnosis: the model's draft before the check, and each sentence the check removed with its reason, ride the turn's trace.
+  const supportTrace: { draft: string; refused: { sentence: string; why: string }[] } | null = FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show ? { draft: String(result.reply), refused: [] } : null;
+  const keepSupportedT: typeof keepSupported = async (r0, src, opts) => { const k = await keepSupported(r0, src, { onRecord, ...(opts ?? {}) }); supportTrace?.refused.push(...((k as any).why ?? [])); return k; };
+  if (FAIL_CLOSED.support && !piped && !trace.m && result.reply && result.stopped === "final" && !result.show) {
     const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);
+    // Live-11 C11: a question to the person ("Which email should go on the resume?") is never judged, when it states no figure.
+    const askOnly = (s: string) => personQuestion(s, [o.message, ...(hypo ? [] : factRows((o.stores as any)?.profile).filter(confirmedRow).map((f: any) => String(f.text ?? "")))].join("\n"));
     const recs = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].filter((p: any) => numbersIn(String(p?.pay ?? "")).length);
     const recLine = (p: any) => `${[p?.company, p?.title].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ")}: ${String(p.pay).trim()}`;
     const letters = (t: string) => /\p{L}/u.test(t.replace(/https?:\/\/\S+/g, "")), links = (t: string) => t.match(/https?:\/\/\S+/g) ?? [];
@@ -380,7 +440,11 @@ export async function agentTurn(o: {
     // read from a posting this turn (its requirements, that its questions are behind a sign-in) is a source the model's sentences
     // may stand on; the person's confirmed facts are a source for what is said about them (D-007).
     const codeLines = (result.codeLines ?? []).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
-    const readSources = (result.readLines ?? []).map((text) => ({ text, title: "Read from the posting this turn" }));
+    const readSources = [...(result.readLines ?? []).map((text) => ({ text, title: "Read from the posting this turn" })),
+      // Ruling 2026-11-14: a File this turn made (its text passed the File's fact guard) is a source for the reply that restates it.
+      ...((result as any).fileTexts?.length ? [{ text: ((result as any).fileTexts as string[]).join("\n"), title: "The File made this turn:", one: true }] : []),
+      // Ruling 2026-11-14 (live-10 C1, "one posting"): a count code knows this turn is a source for that count of that noun only.
+      ...(Array.isArray(result.postings) ? [{ text: `The search this turn returned ${result.postings.length} posting${result.postings.length === 1 ? "" : "s"}.`, title: "Counts code knows this turn" }] : [])];
     // A sentence that restates code's boundary ("… no account, saved application or submission was created.") is that boundary:
     // code's own line takes its place, unjudged.
     for (const line of codeLines) {
@@ -393,7 +457,7 @@ export async function agentTurn(o: {
     if (trace.r) {
       // Code's own lines: the verdict, the first action, and the fallback paragraph code writes (its last sentence carries the File link).
       const own = [...codeLines, trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action, fallbackVerdict(trace.r)].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
-      const k = await keepSupported(result.reply, [...trace.r.facts.map((f) => ({ text: f.quote, title: f.label })), ...trace.r.person.map((text) => ({ text, title: "What the person confirmed" }))], { judge, pure, own, ask: o.message });
+      const k = await keepSupportedT(result.reply, [...trace.r.facts.map((f) => ({ text: f.quote, title: f.label })), ...trace.r.person.map((text) => ({ text, title: "What the person confirmed" }))], { judge, pure, own, ask: o.message });
       // With nothing of the model's left, code's own fallback paragraph (it already ends with the File link, when there is one).
       result = { ...result, reply: letters(k.text) ? k.text : fallbackVerdict(trace.r) };
     } else if (trace.a) {
@@ -402,14 +466,22 @@ export async function agentTurn(o: {
       // so advice that the record and the cited guide state passes, and a recombination is judged as the claim it is.
       const record = hypo ? [] : ownerConfirmedFacts((o.stores as any)?.profile?.facts ?? []).filter((f: any) => f?.kind !== "other" || /^gpa$/i.test(String(f?.name ?? "")))
         .map((f: any) => { const x = factText(f); return x ? `${String(f.kind ?? "fact")}: ${String(f.text ?? x).trim()}` : ""; }).filter(Boolean);
+      // Live-11 C4: the person's own contact on record (the resume header's name and email) is part of their record.
+      // (the confirmed resume header, D-063, else the profile's basics)
+      const head = hypo ? null : (o.stores as any)?.profile?.resume_header, basics = hypo ? null : (o.stores as any)?.profile?.basics;
+      for (const k2 of ["name", "email"] as const) {
+        const v = head?.confirmed_at && typeof head?.[k2] === "string" && head[k2].trim() ? head[k2] : basics?.[k2];
+        if (typeof v === "string" && v.trim()) record.push(`contact: ${k2} ${v.trim()}`);
+      }
       // Ruling (MP-1 C4): the record is ONE passage and one unit (support.ts indexPages `one`); the person's draft or withdrawn facts
       // are a separate passage, read only for a sentence that tells them to remove or update that item (code checks the verb first).
       const recordSource = record.length ? [{ text: record.join("\n"), title: "The person's confirmed record:", one: true }] : [];
       const draftLines = hypo ? [] : (((o.stores as any)?.profile?.facts ?? []) as any[]).filter((f) => f && typeof f === "object" && (f.status !== "confirmed" || f.withdrawn_by_owner) && (f.kind !== "other" || /^gpa$/i.test(String(f.name ?? ""))))
         .map((f) => `${String(f.kind ?? "fact")}: ${String(f.text ?? "").trim()}`).filter((x) => x.length > 8);
-      const REMOVE_OR_UPDATE = /^(?:you could\s+)?(?:(?:remove|drop|cut|delete|update|correct)\b|take\b.*\bout\b|leave\b.*\b(?:off|out)\b)/iu;
-      const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...recordSource, ...readSources],
-        { judge, pure, own: codeLines, ask: o.message, instructions: true, ...(record.length && trace.a.passages.length ? { joint: { guide: trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), record: record.join("\n") } } : {}), ...(draftLines.length ? { also: { when: (s: string) => REMOVE_OR_UPDATE.test(s.trim()), sources: [{ text: draftLines.join("\n"), title: "Not confirmed by the person (do not state as fact):", one: true }] } } : {}) });
+      // (live-11 C4: "… with no GPA since you said 3.9 is outdated" removes it mid-sentence too)
+      const REMOVE_OR_UPDATE = /^(?:you could\s+)?(?:(?:remove|drop|cut|delete|update|correct)\b|take\b.*\bout\b|leave\b.*\b(?:off|out)\b)|(?<![\p{L}])(?:with no|without|leave (?:it|the [\p{L} ]{1,30}) off|leave off)(?![\p{L}])/iu;
+      const k = await keepSupportedT(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...recordSource, ...readSources],
+        { judge, pure, own: codeLines, ask: o.message, instructions: true, ...(record.length && trace.a.passages.length ? { joint: { guide: trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), record: record.join("\n"), drafts: draftLines.join("\n") } } : {}), ...(draftLines.length ? { also: { when: (s: string) => REMOVE_OR_UPDATE.test(s.trim()), sources: [{ text: draftLines.join("\n"), title: "Not confirmed by the person (do not state as fact):", one: true }] } } : {}) });
       result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
     } else if (recs.length || shownPay.length) {
       // Round 3: EVERY sentence of a pay turn is checked (not only those with a number), against the postings' own records and the
@@ -420,11 +492,41 @@ export async function agentTurn(o: {
       // "If Jane Street matched it, their pay would be $95 an hour." said after a Citadel line is not Citadel's pay.
       const said = new Set(o.message.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&'-]*/gu) ?? []);
       const about = shownPay.filter((l) => (l.text.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&'-]*/gu) ?? []).slice(/^\p{Lu}\p{Ll}*\s+\p{Ll}/u.test(l.text) ? 1 : 0).some((w) => said.has(w.toLowerCase().replace(/'s$/, ""))));
-      const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" })), ...readSources], { judge, pure, own: [...about.map((l) => l.text), ...codeLines], ask: o.message });
+      // Live-10 (C1, C11): a pay turn's other sentences are not pay claims. They are checked too, but against what this turn stands
+      // on: each posting's own record (its title, place, fit and verdict as the tool returned them), what a tool read from a posting
+      // (its requirements), and the person's confirmed record (facts about them only, one line each). A pay figure still stands only
+      // on a unit that gives it (layer A: the figure and its names in one unit).
+      const fitOf = (p: any) => { const f = p?.fit; const n = Number.isFinite(f) ? f : Number.isFinite(f?.score) ? f.score : null; const tier = [f?.tier, f?.band, f?.label, p?.tier, p?.band, p?.verdict].find((x) => typeof x === "string" && x.trim()); return [n !== null ? `fit ${n}` : "", tier ?? ""].filter(Boolean); };
+      const postingLine = (p: any) => [[p?.company, p?.title].map((x: any) => String(x ?? "").trim()).filter(Boolean).join(", "), p?.location ? String(p.location).trim() : "", ...fitOf(p), typeof p?.pay === "string" && p.pay.trim() ? p.pay.trim() : ""].filter(Boolean).join(", ");
+      const postingsAll = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])];
+      const recordLines = hypo ? [] : ownerConfirmedFacts((o.stores as any)?.profile?.facts ?? []).filter((f: any) => f?.kind !== "other" || /^gpa$/i.test(String(f?.name ?? ""))).map((f: any) => `${String(f.kind ?? "fact")}: ${String(f.text ?? "").trim()}`).filter((x: string) => x.length > 8);
+      const k = await keepSupportedT(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...postingsAll.map((p: any) => ({ text: postingLine(p), title: "Posting record" })).filter((x) => x.text),
+        ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" })), ...readSources, ...(recordLines.length ? [{ text: recordLines.join("\n"), title: "The person's confirmed record:", one: true }] : [])],
+        { judge, pure: (s: string) => pure(s) || askOnly(s), own: [...about.map((l) => l.text), ...codeLines], ask: o.message, instructions: true });
       const named = recordsNamed(o.message, recs);
-      const mine = [...new Set((named.length ? named : recs.length === 1 ? recs : []).map(recLine))].filter((l) => !numbersIn(l).every((n) => numbersIn(k.text).some((x) => numEq(x, n))));
+      // (live-11 C11: "Chicago pays $28-$49 hourly." already gives the posting's pay for the place asked: its whole table is not added)
+      const mine = [...new Set((named.length ? named : recs.length === 1 ? recs : []).map(recLine))].filter((l) => !numbersIn(l).some((n) => numbersIn(k.text).some((x) => numEq(x, n))));
       result = { ...result, reply: !k.removed.length ? k.text : [k.text, ...(mine.length ? mine : letters(k.text) ? [] : about.length ? [...new Set(about.map((l) => l.text))] : [NOT_CONFIRMED])].filter(Boolean).join("\n") };
     }
+    // A File this turn made is code's: its link goes from fileLinks, sent by the channel after the answer (its own message on Telegram,
+    // its own line on WhatsApp and iMessage, D65-5), whatever the check removed; it is never written into the reply here.
+  }
+  // Live-11 C22 / live-12 (item 1): on a research turn, when no sentence of the model's own words that carries a figure survived, the
+  // reply says that it could not verify a figure, and gives what this chat's tool results do hold for the place or employer asked (a
+  // posting's pay, with its link). Never another employer's pay for this ask (D73-6), and never a page's sentence in place of one.
+  const askWords = new Set(o.message.toLowerCase().match(/\p{L}[\p{L}&'-]*/gu) ?? []);
+  // (live-12 review item 8: every name the ask gives, an employer and a place, must be on the line: "citadel ... chicago" never
+  // gets PayPal's Chicago pay; a name is a word written capitalised in this conversation)
+  const convNames = new Set((o.history ?? []).filter((m: any) => typeof m?.content === "string").flatMap((m: any) => (m.content as string).match(/(?<![\p{L}])\p{Lu}[\p{L}&'-]{2,}/gu) ?? []).map((w: string) => w.toLowerCase().replace(/'s$/, "")));
+  const askNames = [...askWords].filter((w) => w.length > 2 && convNames.has(w) && !/^(?:the|and|what|how|for|with|pay|you|your|are|can)$/.test(w));
+  const shownAsked = shownPay.filter((l) => (l.text.match(/(?<=[\p{L}\p{N},;:(]\s+)\p{Lu}[\p{L}&'-]*/gu) ?? []).some((w) => w.length > 2 && askWords.has(w.toLowerCase())) && askNames.every((w) => new RegExp(`(?<![\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "iu").test(l.text)));
+  const plainS = (x: string) => bare(x).replace(/[.!?]+$/, "").toLowerCase();
+  const figSentences = researchDraft ? researchDraft.split(/\n+/).flatMap((l) => splitSentences(l.replace(/https?:\/\/\S+/g, " "))).map((x) => x.replace(/\[\d+\]/g, " ").trim()).filter((x) => /\p{L}/u.test(x) && numbersIn(x).length) : [];
+  const figSurvived = !!result.reply && figSentences.some((x) => plainS(result.reply!).includes(plainS(x)));
+  if (FAIL_CLOSED.support && (trace.m || trace.r) && result.reply && result.stopped === "final" && !result.show && shownAsked.length && !figSurvived && (figSentences.length || !numbersIn(result.reply.replace(/https?:\/\/\S+/g, " ")).length)) {
+    const known = [...new Set(shownAsked.map((l) => [l.text.replace(/^(?:I|We)\b[^:]{0,80}:\s*/u, "").replace(/^\p{Ll}/u, (c) => c.toUpperCase()), l.url].filter(Boolean).join("\n")))];
+    const honest = /couldn't (?:confirm|verify|find)/i.test(result.reply) ? [] : ["I couldn't verify a figure for that from the pages I read."];
+    result = { ...result, reply: [...honest, result.reply, `What this chat's posting shows:`, ...known].join("\n\n") };
   }
   if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])], shownPayPlaces(o.message, hypo ? [] : o.history)) };
   // D-067 (live-6 C9: research_market ran and the person got an empty message; D-024): the last line of every brain turn. An empty
@@ -437,8 +539,15 @@ export async function agentTurn(o: {
   const looked = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record, (ctx.turn as any)?.ownRecord);
   const editLook = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record, (ctx.turn as any)?.ownRecord);
   if (editTurn && result.reply && !result.show && (editStatus || saysNoApplications(result.reply)) && !result.reply.includes(coverageLine(editLook))) result = { ...result, reply: `${result.reply.trimEnd()}\n\n${coverageLine(editLook)}` };
-  else if (!appHypo && !editTurn && result.reply) {
-    const held = result.show ? (looked.tried && statusQuestion(o.message) ? `${result.reply.trimEnd()}\n\n${coverageLine(looked)}` : result.reply) : applicationsEnforced(result.reply, looked, { message: o.message, codeRan });
+  // Live-11 (C16, C17): the record is stated by code only when the person asked about their applications, or the reply itself
+  // speaks of them; a pitch or a tracker turn that only read the mail is not told the list.
+  const trackerUrl = (result.tool_calls ?? []).some((c) => c.name === "export_tracker" && c.ok) ? ((result as any).fileLinks ?? []).find((u: unknown) => typeof u === "string") as string | undefined : undefined;
+  if (appHypo || editTurn || !result.reply) { /* nothing stated */ }
+  else if (trackerUrl || statusQuestion(o.message) || saysNoApplications(result.reply) || /(?<![\p{L}])(?:appl(?:y|ied|ying|ication|ications)|submitted|rejections?|rejected|heard back|responses?)(?![\p{L}])/iu.test(result.reply)) {
+    // Live-11 C16: a tracker made this turn, when they did not ask about their status, is said by code: that it was made, its link,
+    // and what it holds in one line (the record's count, what was checked); the list itself is the page's.
+    const held = result.show ? (looked.tried && statusQuestion(o.message) ? `${result.reply.trimEnd()}\n\n${coverageLine(looked)}` : result.reply)
+      : trackerUrl && !statusQuestion(o.message) && looked.tried ? trackerReply(result.reply, looked, trackerUrl) : applicationsEnforced(result.reply, looked, { message: o.message, codeRan });
     if (held !== result.reply) result = { ...result, reply: held, flags: [...new Set([...(result.flags ?? []), looked.ok ? "applications_basis" : "applications_unconfirmed"])] };
   }
   const counted = (ctx.turn as any)?.counts?.applied;
@@ -468,7 +577,12 @@ export async function agentTurn(o: {
   const ask = result.show?.intent === RESTORE_ASK_INTENT ? (result.show.meta as any)?.restore_ask : null;
   if (ask && !result.pending_approvals?.length && !o.cardPending) result = { ...result, restore_ask: ask } as typeof result;
   else if (ask) result = { ...result, show: { ...result.show!, meta: {} } };
-  return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
+  const researchTrace = researchDraft && researchRows ? { draft: researchDraft, refused: (researchRows as ResearchCheck[]).filter((x) => x.verdict === "drop").map((x) => ({ sentence: x.sentence, why: "research check: not kept" })), checked: researchRows }
+    : researchDraft ? { draft: researchDraft, refused: researchDraft.split(/\n+/).flatMap((l) => l.split(/(?<=[.!?])\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x) && !String(result.reply ?? "").includes(x.replace(/\s*\[\d+\]/g, "").replace(/[.!?]$/, ""))).map((sentence) => ({ sentence, why: "research check: not kept" })) } : null;
+  const supportAll = supportTrace && supportTrace.refused.length ? supportTrace : researchTrace;
+  const withSupport0 = supportAll ? { ...result, support: supportAll } : result;
+  const withSupport = pipeline ? { ...withSupport0, pipeline, ...(piped ? { piped: { repaired: piped.repaired, calls: piped.calls, judgeCalls: piped.judgeCalls, judgeClaims: piped.judgeClaims, judgeCapped: piped.judgeCapped, fallback: piped.fallback, dropped: piped.dropped } } : {}) } : withSupport0;
+  return know ? { ...withSupport, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : withSupport;
 }
 
 // Review of #790 (rounds 3 and 4): whenever a fact was set aside this turn, code states it itself, once, as the first line, in the
@@ -816,6 +930,15 @@ function coverageCore(look: Look): string {
   if (look.status === "unknown" || (look.status === "failed" && !look.what.length)) return NOT_READ;
   const n = look.found.filter((f) => !/^and \d+ more$/.test(f)).length + Number(/^and (\d+) more$/.exec(look.found.at(-1) ?? "")?.[1] ?? 0);
   if (look.status === "complete") {
+    // Live-11 C6: many entries from one source are listed by date, the source said once (the same facts, a third of the length).
+    const parts = look.found.map((f) => /^(.+), (\d{4}-\d{2}-\d{2}), (from .+)$/.exec(f));
+    if (n >= 4 && parts.every(Boolean) && new Set(parts.map((p) => p![3])).size === 1) {
+      const byDate = new Map<string, string[]>();
+      for (const p of parts) byDate.set(p![2], [...(byDate.get(p![2]) ?? []), p![1]]);
+      // (the mailbox is named once, in what was checked)
+      const from = parts[0]![3].replace(/^(from an employer email) in (\S+)$/, (m, h, box) => look.read.includes(`Gmail account ${box}`) ? h : m);
+      return `Your application record shows ${n} applications, each ${from}: ${[...byDate].map(([d, xs]) => `${d}: ${xs.join(", ")}`).join("; ")}. Checked: ${readList(look.read)}.`;
+    }
     const none = look.nomail ? "Trainee's saved record shows no applications of yours." : "I found no applications of yours.";
     return `${n ? `Your application record shows ${n} application${n === 1 ? "" : "s"}: ${look.found.join("; ")}.` : none} Checked: ${readList(look.read)}${look.nomail ? "; no Gmail connected, so no employer email was checked" : ""}.`;
   }
@@ -859,6 +982,16 @@ function keptSentences(reply: string, strict: boolean, own: string): string {
   }
   const lines = out.map((l) => (anyBullet ? l.replace(/^\s*\d+[.)]\s+/, "") : l)).filter((l, k, xs) => !(/:\s*$/.test(l) && !BULLET.test(xs[k + 1] ?? "")));
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+// Live-11 C16: the reply on a turn that made their tracker: code's line that it was made (its link, url, is the channel's to send), what it holds (the record's
+// count and its coverage; the researched roles), and the model's sentences that say nothing of status.
+export function trackerReply(reply: string, look: Look, url: string): string {
+  const n = look.found.filter((f) => !/^and \d+ more$/.test(f)).length + Number(/^and (\d+) more$/.exec(look.found.at(-1) ?? "")?.[1] ?? 0);
+  const res = look.researched?.length ? ` ${listed(look.researched.map((x) => x.company))} ${look.researched.length === 1 ? "is" : "are"} marked research only, not applications.` : "";
+  const own = look.status === "complete"
+    ? `I made your application tracker (its link follows). It holds the ${n} application${n === 1 ? "" : "s"} in your record. Checked: ${readList(look.read)}${look.nomail ? "; no Gmail connected, so no employer email was checked" : ""}.${look.changes?.length ? ` ${look.changes.join(" ")}` : ""}${res}`
+    : `I made your application tracker (its link follows). ${coverageLine(look)}`;
+  return [own, keptSentences(reply, true, own)].filter(Boolean).join("\n\n");
 }
 export function heldReply(reply: string, look: Look, strict = true): string {
   const own = coverageLine(look);

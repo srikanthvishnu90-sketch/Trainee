@@ -42,7 +42,7 @@ export function payPostingsOf(out: unknown): PaySource[] {
     const byPlace = Array.isArray(inner?.pay_by_place) ? inner.pay_by_place.map((r: any) => `${r?.place ?? ""}: ${r?.pay ?? ""}`).join("; ") : "";
     const u = String(url ?? "");
     const place = String(inner?.location ?? x?.location ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
-    return (pay || byPlace) && /^https:\/\//.test(u) ? { company: (inner?.company ?? x?.company ?? null) || null, title: (inner?.title ?? x?.title ?? null) || null, pay: [pay, byPlace].filter(Boolean).join("; "), url: u, ...(place ? { place } : {}) } : null;
+    return (pay || byPlace) && /^https:\/\//.test(u) ? { company: (inner?.company ?? x?.company ?? null) || null, title: (inner?.title ?? x?.title ?? null) || null, pay: (pay && byPlace && byPlace.split("; ").every((x: string) => pay.replace(/\s+/g, "").includes(x.replace(/\s+/g, ""))) ? [pay] : [pay, byPlace]).filter(Boolean).join("; ") /* live-10 C11: a by-place list the pay already gives is not given twice */, url: u, ...(place ? { place } : {}) } : null;
   };
   const xs: (PaySource | null)[] = [];
   if (Array.isArray(o.postings)) for (const p of o.postings.slice(0, 50)) xs.push(one(p, p?.url));
@@ -77,6 +77,7 @@ export interface TurnResult {
   // Gap #5 (D-024): the calls refused for a missing input that never ran this turn, by label (never a tool name), for the meta.
   not_run?: { label: string; failed: boolean }[];
   notRunText?: string; // the not-run lines code put at the head of the reply (and of a shown text), for a pass that rebuilds that text
+  fileTexts?: string[]; // the text of a File made this turn that passed its fact guard (file_tool.ts)
   fileLinks?: string[]; // FILE KINDS: links to the files create_file made this turn, minted by code; the channel sends them, the model never writes them
 }
 
@@ -320,8 +321,9 @@ export async function runAgentTurn(o: Parameters<typeof runAgentTurnInner>[0]): 
   const typed = [o.said ?? o.message, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
   const fileLinks = o.ctx.turn?.fileLinks ?? [], paySources = o.ctx.turn?.paySources ?? [];
   const { codeLines: lines0, readLines } = turnLines(seen);
+  const fileTexts = ((o.ctx.turn as any)?.fileTexts ?? []) as string[];
   const codeLines = [...notRunLines, ...lines0];
-  return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), ...(paySources.length ? { paySources } : {}), ...(codeLines.length ? { codeLines } : {}), ...(readLines.length ? { readLines } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
+  return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), ...(paySources.length ? { paySources } : {}), ...(codeLines.length ? { codeLines } : {}), ...(readLines.length ? { readLines } : {}), ...(fileTexts.length ? { fileTexts } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
 }
 // The closed-posting notes code would write for this turn's results, and the posting lines a tool read (see TurnResult.codeLines).
 export function turnLines(seen: string[]): { codeLines: string[]; readLines: string[] } {
@@ -335,7 +337,14 @@ export function turnLines(seen: string[]): { codeLines: string[]; readLines: str
       const req = p.requirements && typeof p.requirements === "object" ? p.requirements : null;
       if (req) for (const k of ["required", "preferred"]) for (const x of Array.isArray(req[k]) ? req[k] : []) if (typeof x === "string" && x.trim()) readLines.push(x.trim());
       if (typeof p.boundary === "string" && p.boundary.trim()) { readLines.push(p.boundary.trim()); codeLines.push(p.boundary.trim()); }
-      if (p.sign_in_required === true) readLines.push(`To apply, the person signs in to the employer's careers site themselves; the application's questions are behind that sign-in${typeof p.board === "string" ? ` (${p.board})` : ""}.`);
+      const co = typeof p.posting?.company === "string" ? p.posting.company : typeof p.company === "string" ? p.company : "the employer";
+      if (p.sign_in_required === true) readLines.push(`To apply, the person signs in to, or creates, their own account on ${co}'s ${typeof p.board === "string" ? `${p.board} ` : ""}careers site themselves; ${co}'s own application questions are behind that sign-in, so they were not read.`);
+      // Live-11 C11: what the tool read of the posting itself (open or closed, its deadline) is a source too.
+      if (p.posting && typeof p.posting === "object") {
+        const st = typeof p.posting.state === "string" ? p.posting.state : typeof p.status === "string" ? p.status : "";
+        const dl = [p.posting.deadline, p.posting.closes, p.posting.close_date, p.deadline].find((x) => typeof x === "string" && x.trim());
+        if (st || dl) readLines.push(`${co}'s posting${p.posting.title ? ` ${p.posting.title}` : ""} is ${st || "listed"}${dl ? `; it closes ${dl}` : ""}.`);
+      }
     }
   }
   return { codeLines: [...new Set(codeLines)], readLines: [...new Set(readLines)] };
@@ -559,6 +568,8 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         continue;
       }
       try {
+        // (what a File tool adds to the turn while it runs: its link and its text, for the ledger; CodeRabbit on #849)
+        const fl0 = (o.ctx.turn?.fileLinks ?? []).length, ft0 = (((o.ctx.turn as any)?.fileTexts ?? []) as string[]).length;
         const out = await t.run(input, o.ctx);
         // REPLY SHAPE: a staged document passes the same guards as a reply (facts about the person, money, links) or the model is told why not.
         const att = u.name === "attach_document" && out && typeof out === "object" ? (out as any).attachment : null;
@@ -572,7 +583,12 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         }
         rec.outcome = "ok";
         tool_calls.push({ name: t.name, ok: true, effect: t.effectOf ? t.effectOf(out) : t.effect, ...(args ? { args } : {}) });
-        results.push({ type: "tool_result", tool_use_id: u.id, content: resultText(out) });
+        // REPLY PIPELINE: with the evidence ledger on, the units this result adds ride it, numbered, for the draft to cite.
+        const led = (o.ctx as any).ledger as { fromToolResult: (n: string, x: unknown, f?: { fileUrl?: string | null; fileTexts?: string[] }) => string[]; block: (ids?: string[]) => string } | undefined;
+        const evIds = led ? led.fromToolResult(u.name, out, { fileUrl: (o.ctx.turn?.fileLinks ?? []).slice(fl0).at(-1) ?? null, fileTexts: (((o.ctx.turn as any)?.fileTexts ?? []) as string[]).slice(ft0) }) : [];
+        // (inside the result's own JSON, as one more field, so the result reads as it always did)
+        const withEv = evIds.length && out && typeof out === "object" && !Array.isArray(out) ? { ...(out as Record<string, unknown>), evidence: led!.block(evIds).split("\n") } : out;
+        results.push({ type: "tool_result", tool_use_id: u.id, content: resultText(withEv) });
         seen.push(resultText(out));
         if (u.name === "search_jobs" && out && Array.isArray((out as any).postings)) found = (out as any).postings.slice(0, 50);
         // D-070 (live-7 C11): every posting a tool read this turn with its stated pay and link (get_posting, inspect_apply_flow,

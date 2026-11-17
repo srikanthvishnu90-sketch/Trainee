@@ -15,7 +15,7 @@ import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
 import { stripUrls } from "./reply.ts";
 import { parseDraft, readAlike } from "./draft_json.ts";
 import { type SourceKind, sourceKind } from "../../research_web.ts";
-import { bare, decide, indexPages, markSupported, OUTAGE_LINE, quoteOf, supportOf, type SupportJudge, type Verdict, type Wanted } from "./support.ts";
+import { bare, clausesOf, decide, indexPages, personQuestion, markSupported, noClaim, OUTAGE_LINE, quoteOf, splitSentences, supportOf, type SupportJudge, type Verdict, type Wanted } from "./support.ts";
 
 export interface MarketDeps {
   search: SearchProvider;
@@ -752,7 +752,7 @@ export function pureUnconfirmed(s: string, ask: string): boolean {
 // named by a kept point citing that source (a file reply's figures must be on a kept point); the inline answer ends with its numbered sources (each a page fetched this turn, with its
 // read date). With nothing left, the answer is the kept points themselves; with no source at all, only a sentence saying research
 // could not confirm an answer, else the plain no-source line.
-export function enforceMarketReply(reply: string, r: MarketResult, shown: { text: string; url: string | null }[] = [], pre?: { body?: string; unconfirmed?: (s: string) => boolean }): string {
+export function enforceMarketReply(reply: string, r: MarketResult, shown: { text: string; url: string | null }[] = [], pre?: { body?: string; unconfirmed?: (s: string) => boolean; noPool?: boolean }): string {
   // FAIL_CLOSED.support: this function cannot ask the judge, so on its own it lets no sentence of the model's through (the reply is
   // read as empty: the kept lines answer); enforceMarketReplySupported checks the reply and passes what stood as `pre`. A result
   // that was not built with the switch on has lines no one checked: it is answered as not confirmed, with its pages.
@@ -856,9 +856,13 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
   const pool: Cited[] = [...r.points, ...(r.comparison?.rows ?? []).flatMap((x) => x.cells.flatMap((c, j) => c ? [{ text: `${r.comparison!.options[j]}: ${c.value}`, cite: c.cite }] : [])), ...[...r.conditions, ...r.risks].filter((x) => said1.has(x.text))];
   // A line that stands only on self-reported or anecdotal sources carries the label the source list gives them (D-060).
   const tagOf = (p: Cited) => labelOk(`${p.text} ${p.cite.map((n) => `[${n}]`).join("")}`) ? "" : p.cite.every((n) => kindOf(n) === "anecdote") ? " (anecdote)" : " (self-reported)";
-  const lineOf = (p: Cited) => `${p.text.replace(/[.]?$/, "")}${tagOf(p)} ${p.cite.map((n) => `[${n}]`).join("")}.`;
+  // (live-12 C9: a page's markdown emphasis, "**$391k**", is not shown)
+  const lineOf = (p: Cited) => `${noEmphasis(p.text).replace(/[.]?$/, "")}${tagOf(p)} ${p.cite.map((n) => `[${n}]`).join("")}.`;
   const byPart = parts.map((pt) => pool.find((p) => covers(p.text, pt))).filter(Boolean) as Cited[];
-  if (!body && r.format === "file") body = r.points.slice(0, 3).filter((p) => labelOk(`${p.text} ${p.cite.map((n) => `[${n}]`).join("")}`)).map(lineOf).join(" ");
+  // Live-12 (C9, C22): with the support check, a page's sentence never stands in for the model's: when none of the model's sentences
+  // stood, the reply says it could not verify an answer (career_brain.ts adds what this chat's tool results hold, with their links).
+  if (pre?.noPool && r.format !== "file") body = body || NOT_CONFIRMED;
+  else if (!body && r.format === "file") body = r.points.slice(0, 3).filter((p) => labelOk(`${p.text} ${p.cite.map((n) => `[${n}]`).join("")}`)).map(lineOf).join(" ");
   else if (!body) body = [...new Set([...byPart, ...pool])].slice(0, Math.max(3, byPart.length)).map(lineOf).join(paras ? "\n\n" : " ");
   else if (r.format !== "file") {
     const has = (p: Cited) => plainOf(body).includes(plainOf(p.text));
@@ -884,10 +888,12 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
 // replaced by the page's own sentence in quotation marks with its citation; one with no page sentence is removed. With the switch
 // off this is enforceMarketReply.
 const plainLine = (s: string) => bare(s).replace(/\s*[.!?]+$/, "");
-export async function enforceMarketReplySupported(reply: string, r: MarketResult, shown: { text: string; url: string | null }[] = [], o: { judge?: SupportJudge | null; ask?: string } = {}): Promise<string> {
+const noEmphasis = (t: string) => String(t ?? "").replace(/\*\*|__/g, "");
+export interface ResearchCheck { sentence: string; verdict: string; unit: string | null; url: string | null; passage: string | null }
+export async function enforceMarketReplySupported(reply: string, r: MarketResult, shown: { text: string; url: string | null }[] = [], o: { judge?: SupportJudge | null; ask?: string; chat?: { text: string; title?: string; url: string | null; places?: string[] }[]; trace?: (rows: ResearchCheck[]) => void } = {}): Promise<string> {
   if (!FAIL_CLOSED.support) return enforceMarketReply(reply, r, shown);
   const ask = String(o.ask ?? "");
-  const pieces = (t: string) => String(t ?? "").split(/\n+/).flatMap((l) => stripUrls(l).split(/(?<=[.!?]["')*_]*(?:\s*\[\d+\])*)\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
+  const pieces = (t: string) => String(t ?? "").split(/\n+/).flatMap((l) => splitSentences(stripUrls(l), /(?<=[.!?]["')*_]*(?:\s*\[\d+\])*)\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
   const shownWhole = (s: string) => shown.some((l) => plainLine(l.text) === plainLine(s));
   const sup = r.status === "ok" ? supportOf(r) : null;
   // Round 6: the judge could not answer: code's own clause and the pages read, nothing of the model's.
@@ -897,12 +903,21 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
     return enforceMarketReply(all.filter((s, k) => (s === first && all.indexOf(s) === k) || shownWhole(s)).join("\n"), r, shown, { unconfirmed: (s) => s === first });
   }
   const max = r.sources.length, inline = r.format !== "file";
+  // Live-12 (item 4): this chat's tool results (a posting's pay by place, its deadline and state, with its link) are source units on a
+  // research turn too, read after the pages; a sentence that stands on one carries that link, not a page number.
+  const chat = (o.chat ?? []).filter((c) => c && c.text);
+  const nPages = sup.idx.pages.length;
+  // (CodeRabbit on #849: a posting's own places ride its unit, so "Chicago, IL" in it is read as a place, never as an owner)
+  const cIdx = chat.length ? indexPages(chat.map((c) => ({ text: c.text, title: c.title ?? "Read in this chat", url: c.url ?? undefined, places: c.places ?? [] })), sup.idx.read, sup.idx.subjects, { ask: sup.idx.ask }) : null;
+  const idx = cIdx ? { ...sup.idx, pages: [...sup.idx.pages, ...cIdx.pages] } : sup.idx;
+  const chatPages = chat.map((_, j) => nPages + j);
+  const chatLinks: string[] = [];
   const kept: Cited[] = [...r.points, ...(r.comparison?.rows ?? []).flatMap((x) => x.cells.flatMap((c) => c ? [{ text: c.value, cite: c.cite }] : [])), ...r.conditions, ...r.risks];
   const kindOf = (n: number) => r.sources.find((x) => x.n === n)?.kind;
   const tag = (text: string, cite: number[]) => !cite.length || cite.some((c) => { const k = kindOf(c); return !k || k === "official" || k === "reported"; }) || UNVERIFIED_LABEL.test(text) ? "" : cite.every((n) => kindOf(n) === "anecdote") ? " (anecdote)" : " (self-reported)";
   // 2026-11-14: a quoted unit already ends its sentence ('"… at Citadel."'): in the messages layout (whose numbers are taken out) no
   // second stop is added after it.
-  const show = (text: string, cite: number[]) => inline ? `${text.replace(/[.]?$/, "")}${tag(text, cite)} ${cite.map((n) => `[${n}]`).join("")}${r.layout === "messages" && /[.!?]["”]$/.test(text) && !tag(text, cite) ? "" : "."}` : text;
+  const show = (text0: string, cite: number[]) => { const text = noEmphasis(text0); return inline ? `${text.replace(/[.]?$/, "")}${tag(text, cite)} ${cite.map((n) => `[${n}]`).join("")}${r.layout === "messages" && /[.!?]["”]$/.test(text) && !tag(text, cite) ? "" : "."}` : text; };
   const wants: Wanted[] = [], rows: (string | number)[][] = [], cited: number[][] = [];
   for (const para of r.layout === "messages" && inline ? reply.split(/\n\s*\n/) : [reply]) {
     const row: (string | number)[] = [];
@@ -910,19 +925,46 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
       const line = kept.find((p) => plainLine(p.text) === plainLine(s));
       if (line) { row.push(show(line.text, line.cite)); continue; }
       if (pureUnconfirmed(s, ask) || shownWhole(s)) { row.push(bare(s)); continue; }
+      // Live-12 (item 2): a hedge, a caveat or a gap admitted (no figure, no name, no date), or a question with no figure, is not judged.
+      if (noClaim(s) || personQuestion(s, ask)) { row.push(bare(s)); continue; }
       const cs = [...s.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])).filter((n) => n >= 1 && n <= max).map((n) => sup.pageOfN[n - 1]).filter((k) => k >= 0);
       const cites = /\[\d+\]/.test(s);
       cited[wants.length] = [...s.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])).filter((n) => n >= 1 && n <= max);
-      row.push(wants.length); wants.push({ claim: bare(s), pages: cites ? (cs.length ? cs : [-1]) : sup.pageOfN.length ? sup.pageOfN : [-1] });
+      row.push(wants.length); wants.push({ claim: bare(s), pages: [...(cites ? (cs.length ? cs : [-1]) : sup.pageOfN.length ? sup.pageOfN : [-1]), ...chatPages] });
     }
     rows.push(row);
   }
-  const vs = await decide(wants, sup.idx, o.judge);
+  const vs = await decide(wants, idx, o.judge);
+  // Live-12 (item 5): a refused sentence of joined clauses stands when every clause stands on its own unit (or makes no claim).
+  const cl = vs.map((v, k) => v.how === "drop" ? clausesOf(wants[k].claim) : []).map((cs) => cs.length > 1 ? cs : []);
+  const cw: Wanted[] = [], of: number[] = [];
+  cl.forEach((cs, k) => { for (const c of cs) if (!noClaim(c)) { cw.push({ claim: c, pages: wants[k].pages }); of.push(k); } });
+  const vc = cw.length ? await decide(cw, idx, o.judge) : [];
+  const cpages: number[][] = wants.map(() => []);
+  cl.forEach((cs, k) => {
+    if (!cs.length) return;
+    const mine = of.flatMap((x, j) => x === k ? [vc[j]] : []);
+    if (mine.every((v) => v.how === "model")) { const ps = mine.map((v) => (v as { page: number }).page); cpages[k] = ps; vs[k] = { how: "model", sentence: wants[k].claim, page: ps[0] ?? (sup.pageOfN[0] ?? 0) }; }
+  });
+  // Live-12 (item 7): what each sentence was checked against, for the trace (a $0 replay reads the units back).
+  const unitOf = (k: number) => { const v = vs[k]; if (v.how === "drop") return null; const pg = idx.pages[v.page]; return pg?.sentences.find((u) => u.text === v.sentence) ?? null; };
+  o.trace?.(wants.map((w, k) => { const u = unitOf(k); return { sentence: w.claim, verdict: vs[k].how, unit: vs[k].how === "drop" ? null : (vs[k] as { sentence: string }).sentence, url: u?.url || null, passage: u?.passage ?? null }; }));
   const said = new Set(kept.map((p) => plainLine(p.text.replace(/^"(.*)"$/s, "$1")).toLowerCase()).filter((k) => rows.flat().some((x) => typeof x === "string" && plainLine(x.replace(/"/g, "")).toLowerCase().includes(k))));
-  const anyStood = rows.flat().some((x) => typeof x === "string" || (vs[x].how !== "drop" && sup.pageOfN.indexOf(vs[x].page) >= 0));
-  const body = rows.map((row) => row.map((x) => {
+  const onChat = (x: number) => vs[x].how !== "drop" && (vs[x] as { page: number }).page >= nPages;
+  const anyStood = rows.flat().some((x) => typeof x === "string" || (vs[x].how !== "drop" && (sup.pageOfN.indexOf((vs[x] as { page: number }).page) >= 0 || onChat(x) || cpages[x].length > 0)));
+  const outRows = rows.map((row) => row.map((x) => {
     if (typeof x === "string") return x;
     const v = vs[x], n = v.how === "drop" ? 0 : sup.pageOfN.indexOf(v.page) + 1;
+    // A sentence that stood on this chat's tool results (wholly, or clause by clause with pages): its pages' numbers and the chat's links.
+    const ps = cpages[x].length ? cpages[x] : v.how !== "drop" && onChat(x) ? [v.page] : [];
+    if (v.how === "model" && ps.length) {
+      const ns = [...new Set(ps.map((p) => sup.pageOfN.indexOf(p) + 1).filter((m) => m >= 1))];
+      for (const p of ps) if (p >= nPages) { const u = chat[p - nPages]?.url; if (u && !chatLinks.includes(u)) chatLinks.push(u); }
+      const key = plainLine(wants[x].claim).toLowerCase();
+      if (said.has(key)) return "";
+      said.add(key);
+      return ns.length ? show(wants[x].claim, ns) : `${wants[x].claim.replace(/[.]?$/, "")}.`;
+    }
     if (v.how === "drop" || n < 1) {
       // 2026-11-14: a refused sentence that gives a kept line's figures from that line's own source is replaced by the kept line
       // (already checked), said once; never a figure the kept line does not have. Only when some sentence of the model's stands:
@@ -942,8 +984,21 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
     if (said.has(key)) return "";
     said.add(key);
     return show(text, [n]);
-  }).filter(Boolean).join(" ")).filter(Boolean).join("\n\n");
-  return enforceMarketReply("", r, shown, { body });
+  }));
+  // Live-11 C9: a paragraph whose first kept sentence opens on a pronoun ("It calls the bonus ...") right after a sentence that was
+  // removed points at that sentence: it goes (a fragment with no subject of its own). (CodeRabbit on #849: only then; a pronoun
+  // whose sentence before it stood, or that opens the reply, keeps its paragraph.)
+  const flat = outRows.flatMap((row, i) => row.map((t, j) => ({ i, j, t })));
+  const body = outRows.map((row, i) => {
+    const j0 = row.findIndex(Boolean);
+    if (j0 < 0) return "";
+    const at = flat.findIndex((f) => f.i === i && f.j === j0), prev = at > 0 ? flat[at - 1] : null;
+    return prev && !prev.t && /^(?:It|They|This|These|That|Those|He|She|Its|Their)\b/.test(row[j0].trim()) ? "" : row.filter(Boolean).join(" ");
+  }).filter(Boolean).join("\n\n");
+  // (a body of hedges alone answers nothing: it is said only beside a sentence that stood; else code says it could not verify one)
+  const answered = rows.flat().some((x) => typeof x === "number" && vs[x].how !== "drop") || rows.flat().some((x) => typeof x === "string" && !noClaim(x) && !personQuestion(x, ask));
+  const withChat = chatLinks.length && body ? `${body}\n${chatLinks.join("\n")}` : body;
+  return enforceMarketReply("", r, shown, { body: answered ? withChat : "" });
 }
 function sourceLine(s: MarketSource): string {
   const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });

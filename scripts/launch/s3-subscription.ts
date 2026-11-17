@@ -17,7 +17,7 @@
 //   - it is a subscription run (mode "subscription") whose every pass recorded the CLI's apiKeySource "none" and the
 //     runner's environment check (run.ts brainEnvCheck, nothing overridden: D-089 B3);
 //   - the brain is the one the candidate serves, the harness and the judge fingerprint are the candidate's own;
-//   - it is ONE sitting: exactly five passes with distinct labels and strictly increasing run_at, all within 24 hours;
+//   - it is ONE sitting: exactly five passes with distinct labels and run ids and strictly increasing run_at, all within 24 hours;
 //   - each pass is not stopped, its item ids are exactly the dev set's at the candidate (no case missing, extra or repeated),
 //     with the brain's replies, the end state and every raw judge answer of each case;
 //   - re-judged by code from those raw answers (run.ts parseJudge, judges.ts parseJudgeB, harness.ts checkExpect/outcomeOf,
@@ -46,12 +46,13 @@ export const S3_SUBSCRIPTION = { set: "dev", setPath: "evals/career/heldout-live
 // candidate means the evidence was scored by other rules, so it does not count.
 export const EVAL_CODE: readonly string[] = ["evals/career/run.ts", "evals/career/judges.ts", "evals/career/harness.ts", S3_SUBSCRIPTION.setPath, "evals/subscription/claude_cli.ts"];
 const SHA40 = /^[0-9a-f]{40}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 const short = (s: string) => s.slice(0, 10);
 
 export type RawJudge = { judge: "a" | "b"; text?: string; error?: string };
 export interface EvidenceItem { id: string; pass: boolean; replies: string[]; state: unknown; brain_error?: string; judge_raw: RawJudge[] }
-export interface EvidencePass { label: string; run_at: string; api_key_source: string; env_check: unknown; env_overrides: unknown; stopped: string | null; total: number; passed: number; items: EvidenceItem[] }
+export interface EvidencePass { label: string; run_at: string; run_id: string; api_key_source: string; env_check: unknown; env_overrides: unknown; stopped: string | null; total: number; passed: number; items: EvidenceItem[] }
 export interface Evidence { kind: string; version: number; mode: string; sha: string; reply_tree: string; eval_tree: string; set: string; brain: string; harness: string; judge_model: string; judge_model_2: string; judge_prompt_sha: string; passes: EvidencePass[] }
 export interface SubMeasurement { sha: string; path: string; set: string; size: number; passes: number; passed: number; worst: number; rate: number; perPass: number[]; harness: string; judges: string; replyTree: string; evalTree: string }
 export type Tree = (sha: string, paths: readonly string[]) => Promise<string | null>;
@@ -108,8 +109,10 @@ export async function verifySubscriptionEvidence(text: string, o: { path: string
   if (!Array.isArray(ev.passes) || ev.passes.length !== S3_SUBSCRIPTION.passes) return no(`${Array.isArray(ev.passes) ? ev.passes.length : 0} passes, not ${S3_SUBSCRIPTION.passes}`);
   if (o.path !== sittingPath(ev.sha, ev.passes[0]?.run_at)) return no(`it is recorded at ${o.path}, not at its own path ${sittingPath(ev.sha, ev.passes[0]?.run_at)}`);
   // ONE sitting (review of #853, B1): five distinct passes, run one after another within 24 hours, never chosen from more.
-  const labels = ev.passes.map((p) => p?.label), times = ev.passes.map((p) => String(p?.run_at));
+  const labels = ev.passes.map((p) => p?.label), times = ev.passes.map((p) => String(p?.run_at)), runIds = ev.passes.map((p) => p?.run_id);
   if (new Set(labels).size !== labels.length) return no(`pass labels repeat (${labels.join(", ")}): five copies of one pass are not five passes`);
+  // run.ts writes a random run_id for every pass: a pass copied under new labels and times keeps its run_id.
+  if (runIds.some((r) => typeof r !== "string" || !UUID.test(r)) || new Set(runIds).size !== runIds.length) return no(`pass run ids are missing or repeat (${runIds.join(", ")}): five copies of one pass are not five passes`);
   const ms = times.map((t) => ISO.test(t) ? Date.parse(t) : NaN);
   if (ms.some((t) => !Number.isFinite(t))) return no(`a pass's run_at is not an ISO time (${times.join(", ")})`);
   for (let k = 1; k < ms.length; k++) if (!(ms[k] > ms[k - 1])) return no(`pass ${k + 1} ran at ${times[k]}, not after pass ${k} (${times[k - 1]}): the passes must be distinct and in order`);
@@ -189,7 +192,7 @@ export function packEvidence(results: any[], o: { sha: string; replyTree: string
     kind: EVIDENCE_KIND, version: EVIDENCE_VERSION, mode: sorted.every((r) => r?.subscription) ? "subscription" : "api", sha: o.sha, reply_tree: o.replyTree, eval_tree: o.evalTree,
     set: r0.set, brain: r0.brain, harness: r0.harness, judge_model: r0.judge_model, judge_model_2: r0.judge_model_2, judge_prompt_sha: r0.judge_prompt_sha,
     passes: sorted.map((r) => ({
-      label: r.label, run_at: r.run_at, api_key_source: r.subscription?.api_key_source ?? "unknown", env_check: r.subscription?.env_check ?? null, env_overrides: r.subscription?.env_overrides ?? null,
+      label: r.label, run_at: r.run_at, run_id: r.subscription?.run_id ?? null, api_key_source: r.subscription?.api_key_source ?? "unknown", env_check: r.subscription?.env_check ?? null, env_overrides: r.subscription?.env_overrides ?? null,
       stopped: r.stopped ?? null, total: r.total, passed: r.passed,
       items: (r.items ?? []).map((x: any) => ({ id: x.id, pass: !!x.pass, replies: x.replies ?? [], state: x.state ?? null,
         ...(/^brain error/.test(String(x.note ?? "")) ? { brain_error: String(x.note) } : {}), judge_raw: x.judge_raw ?? [] })),

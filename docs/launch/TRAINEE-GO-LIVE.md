@@ -101,6 +101,13 @@ only on your machine. Run it on the **final** release candidate, after everythin
 your environment sets anything that changes the brain, the gateway or the judges (`CAREER_*`, `ANTHROPIC_*` other than
 the removed key, `MODEL_*`, `EVAL_*` and the release switches; it names what to unset).
 
+**Before your first sitting: both copies of the brain-eval workflow must ignore sittings.** A push to `ci/brain-eval`
+runs that branch's own `.github/workflows/brain-eval.yml`, and a push under `evals/career/**` starts a PAID API eval
+(about $8.50 for five passes). Do not push any sitting until both trunk's copy and `ci/brain-eval`'s copy list
+`'!evals/career/subscription/**'` right after `evals/career/**`:
+`git fetch origin && git show origin/ci/brain-eval:.github/workflows/brain-eval.yml | grep -n "evals/career/subscription"` and the
+same with `origin/trunk` must both print the line. If either does not, stop: pushing a sitting would spend money.
+
 **One sitting, and every sitting is pushed.** A sitting is the five passes run one after another, within 24 hours,
 packed together. Push every sitting you start, including one that is BELOW the bar, refused or given up after a pass or
 two: S3 is decided by the FIRST sitting recorded on `ci/brain-eval` for the candidate's reply code and eval code

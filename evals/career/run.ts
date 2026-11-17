@@ -418,6 +418,8 @@ if (import.meta.main) {
     cost_usd: costs, unpriced_calls: meter.unpriced + judgeMeter.unpriced, quote_usd: quote.total_usd, spend_line: spend, ledger: sharedLedger ? "shared" : "process-local",
     ...(subscription ? { subscription: { mode: "claude CLI on the owner's subscription (D-089); API spend $0; usd figures are notional", cli: cliStats,
       api_key_source: (cliStats as { apiKeySource?: string | null } | null)?.apiKeySource ?? null,
+      // D-091: one random id per pass, so one pass copied under five labels is five copies, not five passes.
+      run_id: crypto.randomUUID(),
       sha: new TextDecoder().decode((await new Deno.Command("git", { args: ["rev-parse", "HEAD"], stdout: "piped" }).output()).stdout).trim(),
       env_check: brainEnvCheck(), env_overrides: envOverrides } } : {}),
     budget_usd: budget, spent_before_usd: before, target_usd: target, hard_usd: hard, brain_turn_ms: BRAIN_TURN_MS, brain_calls: meter.calls, brain_failed_calls: meter.failed,

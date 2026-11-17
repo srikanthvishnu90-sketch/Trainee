@@ -13,7 +13,8 @@ import { HARNESS } from "../../evals/career/harness.ts";
 import { checklistOf, JUDGE_A_MODEL, JUDGE_B_MODEL, judgeFingerprint } from "../../evals/career/judges.ts";
 import { brainEnvCheck, type EvalItem, JUDGE_PROMPT } from "../../evals/career/run.ts";
 import { RELEASE_CONFIG_PATH } from "../../supabase/functions/agent-chat/release_config.ts";
-import { meetsSubscriptionBar, packEvidence, type Sitting, sittingPath, type SubMeasurement, verifySubscriptionEvidence } from "../../scripts/launch/s3-subscription.ts";
+import { meetsSubscriptionBar, packEvidence, type Sitting, sittingPath, type SubMeasurement, SUBSCRIPTION_DIR, subscriptionMeasurementOf, verifySubscriptionEvidence } from "../../scripts/launch/s3-subscription.ts";
+import { parse as parseYaml } from "npm:yaml@2.9.1";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -35,7 +36,7 @@ function item(it: EvalItem, pass: boolean, state: unknown = null) {
 // Pass k of one sitting (k = 1..5, an hour apart) with `fails` failing cases (the first ones).
 const pass = (k: number, fails = 0, set: EvalItem[] = SET) => {
   const items = set.map((it, i) => item(it, i >= fails));
-  return { label: `s3sub-p${k}`, run_at: `2026-11-16T1${k}:00:00Z`, api_key_source: "none", env_check: brainEnvCheck(), env_overrides: [], stopped: null, total: set.length, passed: set.length - fails, items };
+  return { label: `s3sub-p${k}`, run_at: `2026-11-16T1${k}:00:00Z`, run_id: `00000000-0000-4000-8000-00000000000${k}`, api_key_source: "none", env_check: brainEnvCheck(), env_overrides: [], stopped: null, total: set.length, passed: set.length - fails, items };
 };
 function evidence(o: { sha?: string; fails?: number[]; set?: EvalItem[]; reply?: string; eval?: string } = {}): any {
   return {
@@ -47,11 +48,11 @@ function evidence(o: { sha?: string; fails?: number[]; set?: EvalItem[]; reply?:
 // A sitting recorded at its own path.
 const rec = (ev: any): Sitting => ({ path: sittingPath(ev.sha, ev.passes?.[0]?.run_at ?? "none"), text: JSON.stringify(ev) });
 
-interface World { sittings: Sitting[]; trees: Record<string, string>; evalTrees: Record<string, string>; parents: Record<string, string>; sets: Record<string, string>; deployed: string; log: string }
+interface World { sittings: Sitting[]; trees: Record<string, string>; evalTrees: Record<string, string>; parents: Record<string, string>; sets: Record<string, string>; configs: Record<string, string>; deployed: string; log: string }
 function world(...evs: any[]): World {
   return {
     sittings: (evs.length ? evs : [evidence()]).map(rec), trees: { [C]: "T2", [B]: "T2", [A]: "T1", [W]: "T1", [D]: "T1", [X]: "T9" },
-    evalTrees: { [C]: "V2", [B]: "V2", [A]: "V1", [W]: "V1", [D]: "V1", [X]: "V2" }, parents: { [C]: B, [B]: A, [A]: W }, sets: {}, deployed: W, log: LOG_HEAD,
+    evalTrees: { [C]: "V2", [B]: "V2", [A]: "V1", [W]: "V1", [D]: "V1", [X]: "V2" }, parents: { [C]: B, [B]: A, [A]: W }, sets: {}, configs: {}, deployed: W, log: LOG_HEAD,
   };
 }
 const isReply = (paths: readonly string[]) => paths.length === REPLY_CODE.length && paths.every((p, i) => p === REPLY_CODE[i]);
@@ -60,7 +61,7 @@ function sources(w: World): Sources {
   const src = {
     checkRuns: async () => [], lastDeployedSha: async () => w.deployed, firstParent: async () => [], pull: async () => null, reviews: async () => [],
     pullFiles: async () => [], ledger: async () => "", scoreLog: async () => w.log, firstAdded: async () => null, secretsAudit: async () => ({ code: 0, out: "" }),
-    fileAt: async (sha: string, path: string) => path === RELEASE_CONFIG_PATH ? CONFIG : path === SET_PATH ? (w.sets[sha] ?? SET_TEXT) : null,
+    fileAt: async (sha: string, path: string) => path === RELEASE_CONFIG_PATH ? (w.configs[sha] ?? CONFIG) : path === SET_PATH ? (w.sets[sha] ?? SET_TEXT) : null,
     resolve: async (rev: string) => [A, B, C, W, D, X].find((s) => s.startsWith(rev)) ?? null,
     parent: async (sha: string) => w.parents[sha] ?? null,
     isAncestor: async () => false,
@@ -294,7 +295,7 @@ Deno.test("D-091 against any other deployed SHA: the bar AND no regression from 
 // run.ts's result shape for the passes of one sitting: the pass fields, items with note, subscription.{api_key_source, sha, env}.
 function resultsOf(ev: any) {
   return ev.passes.map((p: any) => ({ label: p.label, run_at: p.run_at, set: ev.set, brain: ev.brain, harness: ev.harness, judge_model: ev.judge_model,
-    judge_model_2: ev.judge_model_2, judge_prompt_sha: ev.judge_prompt_sha, subscription: { mode: "claude CLI", api_key_source: "none", sha: C, env_check: brainEnvCheck(), env_overrides: [] },
+    judge_model_2: ev.judge_model_2, judge_prompt_sha: ev.judge_prompt_sha, subscription: { mode: "claude CLI", api_key_source: "none", sha: C, run_id: p.run_id, env_check: brainEnvCheck(), env_overrides: [] },
     total: p.total, passed: p.passed, stopped: null, items: p.items.map((x: any) => ({ ...x, failed: [], score: 5, note: "[judge: pass] ok" })) }));
 }
 Deno.test("D-091: the owner's packer turns run.ts --subscription result files into evidence S3 accepts (one format)", async () => {
@@ -363,4 +364,57 @@ Deno.test("D-091 refusal (mutation review): an old evidence version, judge B's m
   // A measured SHA without reply code (and a candidate without it) is never a measurement, whatever the evidence says.
   const w = world(); w.trees = {}; const ev = { ...evidence(), reply_tree: null };
   ok(/reply-code tree .* is not the reply code of the measured cccccccccc/.test((await verifySubscriptionEvidence(JSON.stringify(ev), { path: rec(ev).path, candidate: C, lineage: [C], tree: treeOf(w), setText: SET_TEXT, brain: "staged" })).why));
+});
+
+Deno.test("B1 (review of #854): a sitting pushed to ci/brain-eval never starts the paid brain eval (the push paths exclude it)", () => {
+  const wf: any = parseYaml(Deno.readTextFileSync(`${ROOT}/.github/workflows/brain-eval.yml`));
+  const paths: string[] = wf.on.push.paths;
+  // GitHub's rule: the patterns are read in order and the last one that matches a file decides; a "!" pattern excludes.
+  const glob = (g: string) => new RegExp("^" + g.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*/g, "\u0000").replace(/\*/g, "[^/]*").replace(/\u0000/g, ".*") + "$");
+  const runs = (file: string) => paths.reduce((on, p) => p.startsWith("!") ? (glob(p.slice(1)).test(file) ? false : on) : (glob(p).test(file) ? true : on), false);
+  ok(paths.includes("!evals/career/subscription/**") && paths.indexOf("!evals/career/subscription/**") > paths.indexOf("evals/career/**"), JSON.stringify(paths));
+  eq(runs(sittingPath(C, "2026-11-16T11:00:00Z")), false, "a sitting alone starts no eval");
+  eq(runs(`${SUBSCRIPTION_DIR}/${C}/x.json`), false);
+  eq(runs("evals/career/run.ts"), true, "the eval code still does");
+  eq(runs("evals/career/SCORE-LOG.md"), true);
+});
+Deno.test("B4 (review of #854): an existing CI measurement beats a subscription sitting; the deployed side is verified with the deployed brain", async () => {
+  // Five qualifying CI passes of the candidate at 38/38: S3 judges them (D-056 here), never the BELOW sitting beside them.
+  const row = (passed: number) => `| 2026-11-16 10:00:00 | ${C.slice(0, 7)} | dev | staged | 38 | ${passed} | ${(passed / 38 * 100).toFixed(1)}% | claude x; both-pass; judge=claude | no | 4242; harness: ${HARNESS} |\n`;
+  const ci = world(evidence({ fails: [0, 0, 9, 0, 0] })); ci.log = LOG_HEAD + row(38).repeat(5);
+  const r = await judge(ci); eq(r.pass, true, r.text); ok(!/SUBSCRIPTION/.test(r.text) && /OWNER RULING D-056/.test(r.text), r.text);
+  // A deployed SHA that served the router: its own sitting is verified against the router, the brain it served.
+  const routerConfig = CONFIG.replace(/^export const PRODUCTION_BRAIN(\s*:\s*ServedBrain)?\s*=\s*"staged"\s*;/m, 'export const PRODUCTION_BRAIN: ServedBrain = "router";');
+  ok(routerConfig !== CONFIG);
+  const w = world(); w.deployed = D; w.parents[A] = D; w.evalTrees[D] = "V2"; w.configs[D] = routerConfig;
+  w.sittings = [...world().sittings, rec({ ...evidence({ sha: D, fails: [1, 1, 1, 1, 1], reply: "R:T1", eval: "E:V2" }), brain: "router" })];
+  await accepted(w);
+});
+Deno.test("B4 (review of #854): judge B is re-scored on the LAST reply; a missing end state is null; a non-sitting file is skipped; no reply code is no pair", async () => {
+  const early = evidence({ fails: [0, 0, 0, 0, 0] }); early.passes[0].items[3].replies = [`Hi. ${QUOTE}.`, "Anything else?"];
+  await refused(world(early), /pass 1 .*claims pass, but its transcript and judge answers give fail/);
+  // A case without a recorded state: judge B's quote "null" is found in the state read as null, as the runner judged it.
+  const nul = evidence({ fails: [0, 0, 0, 0, 0] });
+  for (const p of nul.passes) { const it = SET[2]; p.items[2] = { ...item(it, true), replies: ["Hi."], judge_raw: [{ judge: "a", text: rawA(it, true) }, { judge: "b", text: JSON.stringify({ checks: checklistOf(it).map((c) => ({ n: c.n, met: true, quote: "null" })), score: 4, note: "x" }) }] }; delete p.items[2].state; }
+  await accepted(world(nul));
+  const notes = world(); notes.sittings = [{ path: `${SUBSCRIPTION_DIR}/README.md`, text: "how to push a sitting" }, ...notes.sittings];
+  await accepted(notes);
+  // A JSON copy of a BELOW sitting kept at a path that is not a sitting's is not a sitting: it decides nothing.
+  const copy = world(); copy.sittings = [{ path: `${SUBSCRIPTION_DIR}/${C}/notes/below.json`, text: JSON.stringify(evidence({ fails: [0, 0, 9, 0, 0] })) }, ...copy.sittings];
+  await accepted(copy);
+  // A candidate without reply code: no pair, so no sitting decides (not even one that claims null trees).
+  const w = world(); const src = sources(w) as any; const tree = treeOf(w);
+  src.tree = async (sha: string, p: readonly string[]) => sha === C ? null : await tree(sha, p);
+  w.sittings = [rec({ ...evidence(), reply_tree: null, eval_tree: null })];
+  eq((await subscriptionMeasurementOf(src, C, [C], "staged")).found, false);
+  // The bar itself needs five passes.
+  const m: SubMeasurement = { sha: C, path: "p", set: "dev", size: 38, passes: 4, passed: 152, worst: 38, rate: 1, perPass: [38, 38, 38, 38], harness: HARNESS, judges: FP, replyTree: "R:T2", evalTree: "E:V2" };
+  eq(meetsSubscriptionBar(m), false);
+});
+Deno.test("PROBE1b: one pass copied under five labels and times keeps its run id, and is refused", async () => {
+  const ev = evidence(); const p = ev.passes[1];
+  ev.passes = [1, 2, 3, 4, 5].map((k) => ({ ...p, label: `s3sub-p${k}`, run_at: `2026-11-16T1${k}:00:00Z` }));
+  await refused(world(ev), /pass run ids are missing or repeat/);
+  const none = evidence(); delete none.passes[3].run_id;
+  await refused(world(none), /pass run ids are missing or repeat/);
 });

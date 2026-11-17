@@ -24,7 +24,9 @@ The fix is for the drafting model to say which unit each sentence rests on, and 
        names as a known ATS board (Workday, Greenhouse, Lever, Ashby, SmartRecruiters, Workable and so on), or as a host the posting's
        own text names, else "... at <Employer>" in its title, else to no one. A job board or aggregator (simplify.jobs, joinhandshake,
        wellfound, builtin, ziprecruiter, levels.fyi) never owns a posting. A year in the title names the role and dates no figure only
-       when it is the turn's year or later (`new Ledger(now)`); "Summer 2023" still dates it (round 10 of #849);
+       while it is current by the turn's clock (`new Ledger(now)`, `titleYearsCurrent`). A season counts until it ends: Summer
+       to Aug 31, Fall to Dec 31, Spring to Jun 30, Winter to Mar 31; a bare year to Dec 31. "Summer 2023", or "Summer 2026" read in
+       November 2026, still dates the figure (rounds 10 and 11 of #849);
      - its deadline and state;
      - a search's count;
      - requirements;
@@ -71,7 +73,10 @@ The fix is for the drafting model to say which unit each sentence rests on, and 
      ("Applications are open through December 6, 2026") is read as the sentence's subject word (round 9 of #849). That word only relaxes
      layer A; the clause still goes to the judge.
    - An employer that no unit names ("Stripe's internship is in Seattle", when no tool result names Stripe) is a subject too, and is
-     carried like any other: "It pays $60 an hour" after it never stands on another employer's unit (round 10 of #849).
+     carried like any other: "It pays $60 an hour" after it never stands on another employer's unit (round 10 of #849). It never
+     stands on a unit that names no one either (round 11). It must be a name: a sentence's first word that is a function word or an
+     imperative opener ("Don't", "Never", "Please", "Also", "Politely") names no one. The object of advice ("Lead with Pixelforge")
+     is not carried.
    - What is sent is what was verified: a dropped sentence changes what the next one refers back to, so the check runs again on what
      stood until nothing more fails.
    - On the untagged path (`keepSupported`), a clause split off a refused sentence keeps the sentence's subject: a clause that names
@@ -125,7 +130,8 @@ quote of the page"; D73-1 "the reply is built from the kept lines"). On the tagg
 Judge calls are capped per reply (round 9 of #849, `REPLY_JUDGE_MAX_CALLS` = 4, `REPLY_JUDGE_MAX_CLAIMS` = 32; trunk's `decide` used
 2 calls of 8 claims). Each verification pass puts all its new claims in one call, and a (claim, passage) pair is asked once per reply.
 Past the cap a claim is not asked and counts as "no": it fails closed. The trace (`piped`) records `calls` (repair calls),
-`judgeCalls`, `judgeClaims` and `judgeCapped`.
+`judgeCalls`, `judgeClaims` and `judgeCapped`. A judge answer of the wrong length (or none) is asked once more per reply while the
+cap holds, as `decide` does; a second bad answer fails closed (round 11 of #849).
 
 There is one small call per reply, only when something fails. On live-12's drafts, 7 of 26 turns would need it (they had refusals
 or were far over length). That is about 1.1k input and 60 output tokens per failing sentence, about $0.005 per repaired turn, or

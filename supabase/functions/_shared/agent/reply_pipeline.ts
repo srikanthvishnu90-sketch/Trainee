@@ -13,7 +13,7 @@
 //             code's words; the answer is verified again; what still fails is dropped. It replaces the shortener and the quote fallback.
 //   fallback  after the drop, when nothing left answers, code says what it could not verify and what the ledger holds (a posting's
 //             pay with its link).
-import { ADVICE_CLAIM, clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, noClaim, ownAction, personQuestion, plainTalk, recordOnly, splitSentences, type SupportJudge, urlEmployer } from "./research/support.ts";
+import { ADVICE_CLAIM, bare, clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, noClaim, ownAction, personQuestion, plainTalk, recordOnly, splitSentences, type SupportJudge, urlEmployer } from "./research/support.ts";
 
 // ON (ruling 2026-11-14): the drafting prompt asks for tags and every tool result carries its units. The path is chosen by the draft:
 // a TAGGED draft goes through this pipeline (no page quote is ever put in place of a sentence); an UNTAGGED one (a model that ignored
@@ -61,8 +61,9 @@ export class Ledger {
       const who = [company, p?.title].filter((x) => typeof x === "string" && x.trim()).join(", ");
       // (the posting's title names the role: a year in it, "Summer 2027", dates no figure of the unit; round 10: only this year or a
       // later one, by the turn's clock: "Summer 2023" still dates the figure, so a claim in the present tense must carry it)
-      const thisYear = new Date(this.now).getUTCFullYear();
-      const named = typeof p?.title === "string" && p.title.trim() && (p.title.match(/(?<!\d)(?:19|20)\d\d(?!\d)/g) ?? []).every((y: string) => Number(y) >= thisYear) ? [p.title.trim()] : [];
+      // (round 11: a season or term counts until it ends: Summer to Aug 31, Fall or Autumn to Dec 31, Spring to Jun 30, Winter to Mar 31;
+      // a bare year to Dec 31. "Summer 2026" read in November 2026 is over, so it dates the figure)
+      const named = typeof p?.title === "string" && p.title.trim() && titleYearsCurrent(p.title, this.now) ? [p.title.trim()] : [];
       // (the posting's own places, so layer A reads "Chicago, IL" there as a place, never as an owner)
       const places = [p?.location, ...String(p?.pay ?? "").split(/;\s*/).map((x: string) => /^([^:]+):/.exec(x)?.[1])].filter((x): x is string => typeof x === "string" && /,/.test(x)).map((x) => x.trim());
       if (typeof p?.pay === "string" && p.pay.trim()) for (const part of p.pay.split(/;\s*/)) ids.push(this.add("chat", `${who}${p?.location ? ` (${p.location})` : ""}: pay ${part.trim()}`, { url, source: name, places, owner: company, named }));
@@ -116,6 +117,13 @@ export class Ledger {
     const us = ids ? this.units.filter((u) => ids.includes(u.id)) : this.units;
     return us.map((u) => `[${u.id}] (${u.kind === "page" ? `page${u.host ? ` ${u.host}` : ""}${u.source ? `, ${u.source}` : ""}` : u.kind === "chat" ? "this chat's tool result" : u.kind === "absent" ? "the person's record lacks" : "the person's confirmed record"}) ${u.text}`).join("\n");
   }
+}
+const SEASON_END: Record<string, [number, number]> = { summer: [7, 31], fall: [11, 31], autumn: [11, 31], spring: [5, 30], winter: [2, 31] };
+export function titleYearsCurrent(title: string, now: number): boolean {
+  return [...String(title).matchAll(/(?:(summer|fall|autumn|spring|winter)\s*[-–,]?\s*)?(?<!\d)((?:19|20)\d\d)(?!\d)/giu)].every((m) => {
+    const [mo, d] = SEASON_END[(m[1] ?? "").toLowerCase()] ?? [11, 31];
+    return Date.UTC(Number(m[2]), mo, d, 23, 59, 59) >= now;
+  });
 }
 const hostOf = (u: unknown) => { try { return typeof u === "string" ? new URL(u).hostname : null; } catch { return null; } };
 
@@ -185,6 +193,11 @@ const OPENER = /^(?:want|would|shall|should|can|could|do|did|does|is|are|was|wer
 // Round 10 of #849 (D-088): what the judge is asked about advice or Trainee's own offer: that it states no fact the passage does not.
 // SUPPORT_JUDGE_SYSTEM reads this shape (support.ts ADVICE_CLAIM).
 export const adviceClaim = (sentence: string, subject: string | null) => `${ADVICE_CLAIM}${subject ? ` (it is about ${subject})` : ""}: "${sentence}"`;
+// Round 11 of #849: a sentence's first word that is a function word or an imperative opener, never a name: an auxiliary or discourse
+// opener (OPENER), an imperative (DIRECTIVE), a common word (NOT_NAME), a negative contraction ("Don't", "Won't"), an adverb in -ly
+// ("Politely", "Ideally"), or a discourse adverb.
+const FUNCTION_OPENER = (w: string) => { const x = w.replace(/['’]s$/, ""); return OPENER.test(x) || DIRECTIVE.test(x) || NOT_NAME.test(x) || /n['’]t$/i.test(w) || /^\p{L}{3,}ly$/iu.test(x) ||
+  /^(?:never|always|just|maybe|perhaps|then|first|second|third|next|also|even|only|still|ever|soon|now|later|again|quick|tip|heads|honestly|anyway|besides|otherwise|instead|therefore|thus|hence|so|yet|once|here|there|now)$/i.test(x); };
 // (round 9: an imperative opener, never a quantifier, an auxiliary or a discourse word: "Apply early" is advice; "Most interns…",
 // "Also, interns…" are not)
 const DIRECTIVE = /^(?:apply|send|ask|check|look|focus|use|keep|try|start|let|let's|remember|please|aim|pick|choose|avoid|skip|write|mention|lead|tailor|follow|reach|prepare|practice|practise|review|read|bring|save|plan|consider|add|make|say|tell|put|show|list|drop|cut|open|be|do|don't|never|always)$/i;
@@ -243,9 +256,18 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   // subject too: read as a page reads one (unitNames: "X's", "X pays", "at X"), and found in no unit at all. It is carried like any
   // other, so "It pays $60 an hour" after it never stands on another employer's unit.
   const allText = ledger.units.map((u) => u.text).join("\n");
-  const unknownIn = (t: string): string | null => unitNames({ id: "", kind: "page", text: t, host: null }, true).find((w) => !owners.some((x) => nameFoundIn(x, w) || nameFoundIn(w, x)) && !nameFoundIn(w, allText) && !SOURCE.test(w)) ?? null;
+  // (round 11: a name, never a capitalised function word or an imperative opener read as one: "Don't ask…", "Never…", "Politely…",
+  // "Also…" name no one; a single word that opens the sentence counts only when it is none of those classes)
+  const unknownIn = (t: string): string | null => unitNames({ id: "", kind: "page", text: t, host: null }, true).find((w) => {
+    if (owners.some((x) => nameFoundIn(x, w) || nameFoundIn(w, x)) || nameFoundIn(w, allText) || SOURCE.test(w)) return false;
+    const opens = bare(t).replace(/^["'“‘(]+/, "").toLowerCase().startsWith(w.toLowerCase());
+    return !(opens && !/\s/.test(w) && FUNCTION_OPENER(w));
+  }) ?? null;
+  // (round 11, N4: an employer no unit names stands on no unit: a sentence carried from it never rests on a unit that names no one)
+  const unknownSubject = (w: string | null) => !!w && !owners.some((x) => x === w) && !nameFoundIn(w, allText);
   // (a sentence code does not check, a question or a caveat, still names what the next one refers back to)
-  const carryPast = (t: string) => { const m = mentioned(t); if (m.length) carried = m.length === 1 ? m[0] : null; else { const u = unknownIn(t); if (u) carried = u; } };
+  // (`unknown`: an advice sentence's object, "Lead with Pixelforge", is not a subject; only a statement carries an unknown employer)
+  const carryPast = (t: string, unknown = true) => { const m = mentioned(t); if (m.length) carried = m.length === 1 ? m[0] : null; else if (unknown) { const u = unknownIn(t); if (u) carried = u; } };
   // Round 9 of #849 (B2): code's record check speaks only for the "isn't on file" template alone, never for a clause joined to it,
   // and never for one that names an employer of this turn; every other clause is checked as usual.
   const recordOk = recordOnly(o.onRecord);
@@ -272,12 +294,12 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     // The record's verdict comes before the plain-sentence rule: a sentence about the record that the record contradicts fails.
     if (rec(text) === false) { failures.push({ sentence: text, reason: "it is not what the person's record holds" }); bad.add(`${a}:${b}`); return; }
     if (free(text)) {
-      const subj = mentioned(text)[0] ?? carried;
+      const subj = mentioned(text)[0] ?? unknownIn(text) ?? carried;
       const pool0 = ids.length ? ids.map((id) => ledger.get(id)).filter((u): u is EvidenceUnit => !!u) : ledger.units;
-      const pool = pool0.filter((u) => u.source !== "an earlier reply in this chat" && (subj ? mine(u, subj) || (!u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
+      const pool = pool0.filter((u) => u.source !== "an earlier reply in this chat" && (subj ? mine(u, subj) || (!unknownSubject(subj) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
       if (ids.length) citeAt.set(`${a}:${b}`, ids);
       checks.push({ a, b, clause: text, units: pool, claim: text, subject: subj, advice: true, untagged: !ids.length });
-      return carryPast(text);
+      return carryPast(text, false);
     }
     // Review of #849: a sentence with no figure, no date and no name needs no tag (LEDGER_RULE says so); only one that names or
     // counts something must cite a unit.
@@ -311,7 +333,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
       // (a carried subject may not rest on a line from an earlier reply whose owner is unknown: it may be another employer's; a soft
       // subject may rest on a unit that names no employer, and the judge is shown the subject)
       const allowedUnits = units.filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") &&
-        (mine(u, subject) || (!!subject && !ownSubj && !u.owner && (anyNamed.get(u.id) ?? []).length === 0)));
+        (mine(u, subject) || (!!subject && !ownSubj && !unknownSubject(subject) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0)));
       if (!allowedUnits.length) return fail(a, b, text, subject ? `no cited unit is about ${subject}` : "it names no employer, and every unit that could hold it is one employer's", subject);
       checks.push({ a, b, clause: c, units: allowedUnits, claim: text, subject, soft: !ownSubj, untagged: !ids.length });
     }
@@ -432,7 +454,7 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
   // are verified in the place they will be sent, after what stood, with its subject carried into them. The judge is asked each
   // (claim, passage) pair once per reply.
   const memo = new Map<string, "yes" | "no">();
-  let judgeCalls = 0, judgeClaims = 0, judgeCapped = false;
+  let judgeCalls = 0, judgeClaims = 0, judgeCapped = false, retried = false;
   const judge: SupportJudge | null = o.judge ? async (cs) => {
     const key = (c: { claim: string; source: string }) => `${c.claim}\u0000${c.source}`;
     const need = cs.filter((c, j) => !memo.has(key(c)) && cs.findIndex((d) => key(d) === key(c)) === j);
@@ -442,8 +464,14 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
       if (over.length) { judgeCapped = true; for (const c of over) memo.set(key(c), "no"); }
       if (asked.length) {
         judgeCalls++; judgeClaims += asked.length;
-        const got = await o.judge!(asked);
-        if (!Array.isArray(got) || got.length !== asked.length) return got;
+        let got = await Promise.resolve().then(() => o.judge!(asked)).catch(() => null);
+        // (round 11, N1: an answer of the wrong length, or none, is asked once more per reply while the cap holds, as support.ts decide
+        // does; a second bad answer fails closed)
+        if ((!Array.isArray(got) || got.length !== asked.length) && !retried && judgeCalls < REPLY_JUDGE_MAX_CALLS && judgeClaims + asked.length <= REPLY_JUDGE_MAX_CLAIMS) {
+          retried = true; judgeCalls++; judgeClaims += asked.length;
+          got = await Promise.resolve().then(() => o.judge!(asked)).catch(() => null);
+        }
+        if (!Array.isArray(got) || got.length !== asked.length) return asked.length === cs.length ? (got ?? []) as ("yes" | "no")[] : cs.map((c) => memo.get(key(c)) ?? "no");
         asked.forEach((c, j) => memo.set(key(c), got[j]));
       }
     }

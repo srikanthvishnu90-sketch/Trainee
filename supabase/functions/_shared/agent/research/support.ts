@@ -102,9 +102,11 @@ const KNOWN_PLACE = /^(?:U\.?S\.?A?\.?|United States|America|UK|U\.K\.|United Ki
 // A "your X" claims a fact about the person only when X names a record fact; those must be in the record or the ask.
 const RECORD_NOUN = /^(?:degree|degrees|major|minor|gpa|school|university|college|internship|internships|employer|company|certification|certifications|certificate|award|awards|phone|email|address|city|visa|citizenship|salary|offer|offers|graduation|clearance|license|patent|patents|publication|publications|thesis)$/i;
 const Q_AT = /(?<![\p{L}])(?:at|from)\s+(?!all\b|this\b|that\b|the moment\b|least\b|most\b|home\b|first\b)\p{L}/iu;
+// Round 11 of #849 (N2): "one" after a determiner is a pronoun, not a figure ("Which one do you prefer?", "that one", "each one").
+const pronounOne = (t: string) => t.replace(/(?<![\p{L}])(which|that|this|the|each|any|every|another|other|either|neither|no|some|a better|a different)\s+ones?(?![\p{L}])/giu, "$1 option");
 export function personQuestion(s: string, allowed = ""): boolean {
   const allowedText = String(allowed ?? "").toLowerCase();
-  const b = bare(String(s ?? "")).replace(/[’‘]/g, "'").trim();
+  const b = pronounOne(bare(String(s ?? "")).replace(/[’‘]/g, "'").trim());
   if (!b || /["\u201c\u201d]/.test(b) || /[,;:]/.test(b.replace(/[?.]+$/, ""))) return false;
   if (!/\?\s*$/.test(b) && !ASK_THEM.test(b)) return false;
   const words = b.replace(/[?.!]+$/, "").split(/\s+/).filter(Boolean);
@@ -123,7 +125,7 @@ export function personQuestion(s: string, allowed = ""): boolean {
 // or talk: the same fail-closed tests as an exempt question (no time or period word, nothing that presupposes an event or a state,
 // no "at/from <name>", every "your X" in the record or the ask). Anything else is judged.
 export function plainTalk(s: string, allowed = ""): boolean {
-  const b = bare(String(s ?? "")).replace(/[’‘]/g, "'").trim();
+  const b = pronounOne(bare(String(s ?? "")).replace(/[’‘]/g, "'").trim());
   if (!/\p{L}/u.test(b) || /\d/.test(b) || MONTH_OR_DAY.test(b) || Q_PERIOD.test(b) || ASSERTS_IN_Q.test(b) || PAST_EVENT.test(b) || ASSERTS_STATUS.test(b)) return false;
   if (Q_PRESUPPOSES.test(b) || Q_AT.test(b) || /(?<![\p{L}])(?:hiring|hires|hired|froze|layoffs?|reorg\w*|acquired|merger|ipo|funding|raised|closes|opens|opened|posted|listed|removed|cancel\w*|aware)(?![\p{L}])/iu.test(b)) return false;
   const allowedText = String(allowed ?? "").toLowerCase();

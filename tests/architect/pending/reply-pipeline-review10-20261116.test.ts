@@ -85,7 +85,7 @@ Deno.test("#849 round 10 R2: only a known ATS board or a host the posting names 
 
 Deno.test("#849 round 10 R3: a year in a posting's title names the role only from the turn's year on", async () => {
   const mk = (title: string, now = NOW) => { const l = new Ledger(now); l.fromToolResult("get_posting", { posting: { company: "PayPal", title, pay: "$28-$49 an hour", url: "https://paypal.example/x" } }); return l; };
-  for (const [title, now, stands] of [["SWE Intern - Summer 2023", NOW, false], ["SWE Intern - Summer 2027", NOW, true], ["SWE Intern - Summer 2026", NOW, true], ["SWE Intern - Summer 2027", Date.parse("2028-02-01T00:00:00Z"), false]] as const) {
+  for (const [title, now, stands] of [["SWE Intern - Summer 2023", NOW, false], ["SWE Intern - Summer 2027", NOW, true], ["SWE Intern - Summer 2026", NOW, false /* amended in round 11 (N3): that summer ended Aug 31 */], ["SWE Intern - Fall 2026", NOW, true], ["SWE Intern - Summer 2027", Date.parse("2028-02-01T00:00:00Z"), false]] as const) {
     const l = mk(title, now);
     const out = await runReplyPipeline(`PayPal pays $28-$49 an hour [${l.units[0].id}].`, l, { judge: yes, ask: "what does it pay", repair: null });
     eq(out.text.startsWith("PayPal pays $28-$49 an hour."), stands, `${title} at ${new Date(now).toISOString().slice(0, 10)}: ${out.text}`);

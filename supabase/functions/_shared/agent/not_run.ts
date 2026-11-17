@@ -9,6 +9,8 @@
 //      like STANDING_REFUSED, not reply prose. A claim in the reply that would need the refused call's result is left to the
 //      reply verifier (PR #849): a refused call contributes no evidence, so such a claim has no support there.
 
+import { leakedWords } from "./reply_guards.ts";
+
 // Every tool the brain can be offered, by a human label (never its name). Closed: a tool not here is the "requested step".
 export const LABELS: Readonly<Record<string, string>> = Object.freeze({
   add_profile_fact: "save of that fact", attach_document: "file attachment", brief_from_invite: "interview brief from that invite",
@@ -38,24 +40,54 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 // Per CALL (review rv3, N1): each refused call is resolved only by a LATER call to the same tool that ran and agrees with every
 // argument the refused call had (its retry); a call to the same tool with other arguments (another employer) does not resolve it. An unresolved refused call is
 // "failed" when its retry ran and threw (not when it asked the person a question, AskPerson), otherwise "did not run".
+// Whether a later call repeats a refused one: the same tool, and no argument the refused call had is given another value.
+const repeats = (refused: CallRec, later: CallRec) => later.name === refused.name && Object.entries(refused.input ?? {}).filter(([, v]) => filled(v)).every(([k, v]) => !filled(later.input?.[k]) || same(later.input?.[k], v));
+// How many earlier refused calls this call repeats (loop.ts: one retry per call; a second refusal ends that call for the turn).
+export const refusedBefore = (log: CallRec[], call: CallRec): number => log.filter((r) => r.outcome === "refused" && repeats(r, call)).length;
 export function unrunCalls(log: CallRec[]): { name: string; args: string[]; failed: boolean }[] {
   const out: { name: string; args: string[]; failed: boolean }[] = [];
   log.forEach((r, i) => {
     if (r.outcome !== "refused") return;
-    const own = Object.entries(r.input ?? {}).filter(([, v]) => filled(v));
     // A later call that ran is its retry when no argument both carry disagrees (the missing one filled, others kept or left out).
-    const retries = log.slice(i + 1).filter((x) => x.name === r.name && x.outcome !== "refused" && own.every(([k, v]) => !filled(x.input?.[k]) || same(x.input?.[k], v)));
+    const retries = log.slice(i + 1).filter((x) => x.outcome !== "refused" && repeats(r, x));
     if (retries.some((x) => x.outcome === "ok")) return;
-    const args = own.flatMap(([, v]) => Array.isArray(v) ? v : [v]).filter((v): v is string => typeof v === "string" && !!v.trim()).map((v) => v.trim().slice(0, 60));
+    const args = subjectArgs(r.input ?? {});
     const failed = retries.some((x) => x.outcome === "threw");
     if (!out.some((o) => o.name === r.name && same(o.args, args) && o.failed === failed)) out.push({ name: r.name, args, failed });
   });
   // A call refused with no arguments and the same call refused again later are one line; a fuller refused call covers an emptier one.
   return out.filter((o, i) => !out.some((p, j) => j !== i && p.name === o.name && p.failed === o.failed && o.args.length < p.args.length && o.args.every((a) => p.args.includes(a))));
 }
+// Review rv4 (A2: an id, F-002, and a draft body were echoed into the line): the line names only a call's human SUBJECT, the
+// company, employer, firm, role, title or school it was about, from a closed list of argument names. Never an id, a draft body,
+// a note, a recipient or any other free text; a value that is long, holds a link, a line break or a digit-bearing token, or that
+// the leak guard (reply_guards.ts leakedWords) flags, is left out.
+export const SUBJECT_ARGS: readonly string[] = Object.freeze(["company", "companies", "employer", "employers", "firm", "firms", "role", "roles", "title", "school"]);
+const LEAK_FREE = { tools: [] as string[], typed: "", postings: new Map() };
+const subjectOk = (v: string) => v.length <= 60 && v.split(/\s+/).length <= 6 && !/[\n\r]|https?:|www\.|[@<>{}\[\]|\\]/i.test(v) && !/\S*\d\S*[_-]\S*|\S*[_-]\S*\d\S*/.test(v) && !leakedWords(v, LEAK_FREE).length;
+export function subjectArgs(input: Record<string, unknown>): string[] {
+  return SUBJECT_ARGS.flatMap((k) => { const v = input?.[k]; return Array.isArray(v) ? v : [v]; })
+    .filter((v): v is string => typeof v === "string" && !!v.trim()).map((v) => v.trim().replace(/\s+/g, " ")).filter(subjectOk);
+}
 export function notRunLine(name: string, failed = false, args: string[] = []): string {
-  const what = `${labelOf(name)}${args.length ? ` for ${args.slice(0, 2).join(" and ")}` : ""}`;
-  return failed ? `The ${what} failed this time, so there is no result from it.` : `The ${what} did not run this time, so there is no result from it.`;
+  const say = (a: string[]) => { const what = `${labelOf(name)}${a.length ? ` for ${a.join(" and ")}` : ""}`; return failed ? `The ${what} failed this time, so there is no result from it.` : `The ${what} did not run this time, so there is no result from it.`; };
+  const line = say(args.filter(subjectOk).slice(0, 2));
+  // The whole line goes through the leak guard too; a line it flags names no subject.
+  return leakedWords(line, LEAK_FREE).length ? say([]) : line;
+}
+// Review rv4 (A1: career_brain's length pass dropped the line): code's not-run lines are put back at the head of any text a later
+// pass rewrote (a condense, a pipeline, an enforcer), once each, wherever the rewrite left them. Idempotent: a text that already
+// opens with them is returned as it is.
+export function withNotRun(text: string, lines: readonly string[] | undefined): string {
+  const t = String(text ?? "");
+  if (!lines?.length) return t;
+  const lead = lines.join(" ");
+  const rest = t.startsWith(lead) ? t.slice(lead.length) : null;
+  if (rest !== null && lines.every((l) => !rest.includes(l))) return t;
+  let body = t;
+  for (const l of lines) body = body.split(`${l} `).join("").split(l).join("");
+  body = body.trim().replace(/\n{3,}/g, "\n\n");
+  return [lead, body].filter((x) => x.trim()).join("\n\n");
 }
 // Whether a required input is missing: absent, null, or empty or whitespace only (review rv3, N10).
 export const missingRequired = (input: Record<string, unknown>, required: string[]): string[] => required.filter((k) => !filled(input[k]) || (Array.isArray(input[k]) && (input[k] as unknown[]).every((x) => !filled(x))));

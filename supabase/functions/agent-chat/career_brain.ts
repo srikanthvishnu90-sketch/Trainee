@@ -1,6 +1,7 @@
 // Which brain answers a career turn (WO-002, D-008): the CareerHost router unless CAREER_BRAIN=agent, and the agent turn
 // itself (model + tools over the person's career state).
 import type { LinkCheck } from "../_shared/link_check.ts";
+import { withNotRun } from "../_shared/agent/not_run.ts";
 import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, INCOMPLETE_AFTER_SAVE_REPLY, INCOMPLETE_REPLY, MAX_STEPS_AFTER_SAVE_REPLY, MAX_STEPS_REPLY, MODEL_ERROR_AFTER_SAVE_REPLY, MODEL_ERROR_REPLY, REFUSED_FILE_TODO, runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
 import { careerTools, type OutreachDeps, type TailorTools } from "../_shared/agent/career_tools.ts";
 import { importContactsFile, MX_NOT_WIRED, type MxResolver, type Verifier } from "../_shared/career_contacts.ts";
@@ -359,8 +360,12 @@ export async function agentTurn(o: {
   // D-071 (live-8: the pass did not run on C9 and recorded no reason): every way it does not run says why.
   let shorten: Shorten = { ran: false, outcome: "not_run", why: !result.reply ? "no reply to shorten" : result.stopped !== "final" ? `the turn did not finish (${result.stopped})`
     : trace.r || trace.m ? "a research reply, laid out and sourced in code (never rewritten)" : "" };
+  // Review rv4 (A1): code's not-run lines (loop.ts) are not the model's to shorten: the pass reads the reply without them, they do
+  // not count toward its bound, and they are put back at the head after it (withNotRun, again after every later rewrite below).
+  const nrLead = result.notRunText ?? "", nrLines = result.notRunLines ?? [];
+  const nrBody = (t: string) => nrLead && t.startsWith(nrLead) ? t.slice(nrLead.length).trim() : t;
   if (result.reply && result.stopped === "final" && !trace.r && !trace.m && !piped) {
-    const l = replyLength(o.message, o.history), bound = overLimit(l), n = textLength(result.reply);
+    const l = replyLength(o.message, o.history), bound = overLimit(l), n = textLength(nrBody(result.reply));
     // D-072 (item 11): a practice turn (a question asked, or a review of their answer) is shortened like any reply unless it shows a
     // code block; the code it names (a call, an index, an operator, a complexity) is kept verbatim (codeKept). Complexity notation
     // alone ("O(n) time") is not code. Every other turn keeps D-067's rule: code in the message or the reply is never shortened.
@@ -377,7 +382,7 @@ export async function agentTurn(o: {
       // 602 would have passed the far bound): a shorter text that passes every preservation check (every figure, link and
       // [placeholder] kept, the boundary and the caveat kept, at most one question, a rewrite of this same reply) is used even when
       // it is still over the bound, and it gets ONE more pass toward the bound under the same checks against the original reply.
-      const long = result.reply, seen = { out: "" };
+      const long = nrBody(result.reply), seen = { out: "" };
       const faithful = (from: string) => (l0: string, out: string) => shortenedOk(l0, out, Number.POSITIVE_INFINITY) && shortenedOk(from, out, Number.POSITIVE_INFINITY) && (!practiceTurn || codeKept(from, out));
       // D-073 (live-9: 7 shorter texts still over the bound, the second pass stopping short of it; C4, C6, C11 refused for dropping
       // a caveat or a figure): each pass is told the number to reach (the kind's upper end, inside the scorer's D-066 kind bound)
@@ -395,7 +400,7 @@ export async function agentTurn(o: {
       const after = short ? textLength(short) : null;
       if (short && after! > bound) why = `shorter but still over the bound (${after} > ${bound})`;
       shorten = { ran: true, outcome: !short ? "rejected" : after! <= bound ? "accepted" : "shorter", why, chars: n, bound, passes, ...(short ? { after: after! } : {}) };
-      if (short) result = { ...result, reply: trace.a ? enforceAdviceReply(short, trace.a) : short };
+      if (short) result = { ...result, reply: withNotRun(trace.a ? enforceAdviceReply(short, trace.a) : short, nrLines) };
     }
   }
   // D-065 (G3 for drafts): a draft shown by draft_followup (labelled "Draft, not sent." after it, D-067) over the draft bound is shortened once BEFORE it is
@@ -413,7 +418,7 @@ export async function agentTurn(o: {
       const short = await condenseReply(o.model, d.body, { max: room, aim: draftLength.aim }, (long, out) => shortenedOk(long, out, room) && d.recheck(out));
       if (short) { const text = [lead, `${short}\n\n${d.label}`].filter(Boolean).join("\n\n"); result = { ...result, reply: text, show: { ...result.show, text } }; }
       // Live-11 (C2: a 512-character draft went out and the trace could not say why): what the draft's own length pass did.
-      shorten = { ran: true, outcome: !short ? "rejected" : textLength(result.reply) <= bound ? "accepted" : "shorter", why: short ? "the draft's length pass" : "the draft's length pass: no shorter text passed the draft check with every placeholder", chars: textLength(d.body), bound, ...(short ? { after: textLength(result.reply) } : {}) };
+      shorten = { ran: true, outcome: !short ? "rejected" : textLength(nrBody(result.reply)) <= bound ? "accepted" : "shorter", why: short ? "the draft's length pass" : "the draft's length pass: no shorter text passed the draft check with every placeholder", chars: textLength(d.body), bound, ...(short ? { after: textLength(nrBody(result.reply)) } : {}) };
     }
   }
   // D-067 (owner, must-fix (d): "each figure carries its source link and place"): a posting's pay said in the reply comes with that
@@ -555,6 +560,11 @@ export async function agentTurn(o: {
   // D-071 (live-8 C9: research ran, kept nothing, and the trace could not say why): what the research did with its pages and draft.
   const research = trace.m ? { kind: "kind" in trace.m ? "company" : "market", status: trace.m.status, ...((trace.m as any).audit ?? {}) } : null;
   result = { ...result, reply: nonEmptyReply(result, trace.m), shorten, ...(research ? { research } : {}) } as typeof result;
+  // Review rv4 (A1): whatever rewrote the reply or the shown text above, code's not-run lines lead it, once each.
+  if (nrLines.length) {
+    const show = result.show ? { ...result.show, text: withNotRun(result.show.text, nrLines), ...(Array.isArray(result.show.parts) ? { parts: [nrLead, ...result.show.parts.filter((x) => x !== nrLead)] } : {}) } : undefined;
+    result = { ...result, reply: withNotRun(result.reply, nrLines), ...(show ? { show } : {}) };
+  }
   // Review of #790: a fact code set aside this turn is said to the person, by name, on every path. When the reply does not carry
   // the fact's own figures, its line goes after the reply, in the fact's own words. A turn whose reply is a card (an exact payload)
   // cannot carry it, so nothing is set aside on that turn: the fact goes back as it was.

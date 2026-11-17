@@ -9,7 +9,7 @@ import { stripRemoved } from "../mail_security.ts";
 import { bracketUntraced, credentialAsks, factSources, missingAck, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, misquotedAsks, smallTalkPitch, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
 import { urlsIn } from "../channel_shape.ts";
 import { STANDING_REFUSED, standingRefusal } from "./memory.ts";
-import { type CallRec, labelOf, missingInputResult, missingRequired, notRunLine, unrunCalls } from "./not_run.ts";
+import { type CallRec, labelOf, missingInputResult, missingRequired, notRunLine, refusedBefore, unrunCalls } from "./not_run.ts";
 export type Effect = "read" | "write_own" | "external";
 // `turn` is this turn's own record, filled by runAgentTurn: the person's message (a confirmation must come from it) and
 // the ids of facts added during the turn (a fact can never be confirmed in the turn that added it).
@@ -77,6 +77,7 @@ export interface TurnResult {
   // Gap #5 (D-024): the calls refused for a missing input that never ran this turn, by label (never a tool name), for the meta.
   not_run?: { label: string; failed: boolean }[];
   notRunText?: string; // the not-run lines code put at the head of the reply (and of a shown text), for a pass that rebuilds that text
+  notRunLines?: string[]; // the same lines one by one (not_run.ts withNotRun puts them back after any later rewrite)
   fileTexts?: string[]; // the text of a File made this turn that passed its fact guard (file_tool.ts)
   fileLinks?: string[]; // FILE KINDS: links to the files create_file made this turn, minted by code; the channel sends them, the model never writes them
 }
@@ -310,7 +311,7 @@ export async function runAgentTurn(o: Parameters<typeof runAgentTurnInner>[0]): 
   if (unrun.length) {
     const lead = notRunLines.join(" "), withLead = (t: unknown) => [lead, String(t ?? "")].filter((x) => x.trim()).join("\n\n");
     const show = r.show ? { ...r.show, text: withLead(r.show.text), ...(Array.isArray(r.show.parts) ? { parts: [lead, ...r.show.parts] } : {}) } : undefined;
-    r = { ...r, reply: withLead(r.reply), ...(show ? { show } : {}), notRunText: lead, not_run: unrun.map((c) => ({ label: labelOf(c.name), failed: c.failed })) };
+    r = { ...r, reply: withLead(r.reply), ...(show ? { show } : {}), notRunText: lead, notRunLines, not_run: unrun.map((c) => ({ label: labelOf(c.name), failed: c.failed })) };
   }
   // The output guard (mail_security.ts): a code, password or link token that this turn removed from the person's mail, or that
   // sat in a security email Trainee did not read, never reaches the chat reply, whatever the model wrote.
@@ -399,7 +400,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
   // Gap #5 (D-024, live-12 C1, C19): the tools refused this turn for a missing required input, with how many times. One more
   // call is allowed after the first refusal; a tool that never ran is never reported as having found or saved anything.
   // Kept on the turn's own record so runAgentTurn adds the not-run line on EVERY way the turn ends.
-  const refusedInput = new Map<string, number>(), calls: CallRec[] = [];
+  const calls: CallRec[] = [];
   Object.assign(o.ctx.turn, { calls });
   // WO-061 (H028, H035, H007, H033): code's review of its own draft rides in that one call's system prompt, never in
   // the conversation. As a user-role message the model took it for the person's words, refused it out loud ("I can't
@@ -550,10 +551,12 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       const input = u.input && typeof u.input === "object" ? u.input : {};
       const missing = missingRequired(input, t.input_schema.required || []);
       const rec: CallRec = { name: t.name, input: JSON.parse(JSON.stringify(input)), outcome: "refused" };
+      // Review rv4: the one retry is per CALL, not per tool. The earlier refusals this call repeats (same tool, no argument both
+      // carry disagrees: unrunCalls' retry rule) count; a call to the same tool about something else has its own retry.
+      const before = refusedBefore(calls, rec);
       calls.push(rec);
-      if (missing.length || (refusedInput.get(t.name) ?? 0) >= 2) {
-        const n = (refusedInput.get(t.name) ?? 0) + 1;
-        refusedInput.set(t.name, n);
+      if (missing.length || before >= 2) {
+        const n = before + 1;
         fail(t.effect, missingInputResult(t, missing, n), missing.length ? `missing required input: ${missing.join(", ")}` : "not run: refused twice for a missing input this turn");
         continue;
       }

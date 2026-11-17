@@ -58,6 +58,7 @@ import { modelDerive } from "../_shared/agent/research/derive.ts";
 import { RESEARCH_DRAFT_MAX_TOKENS } from "../_shared/agent/research/draft_json.ts";
 import { modelSupportJudge } from "../_shared/agent/research/support.ts";
 import { replyFlagsMeta } from "../_shared/agent/loop.ts"; // flag-only reply checks saved with the turn (Greptile on #566)
+import { withNotRun } from "../_shared/agent/not_run.ts"; // Gap #5: code's not-run lines lead the reply after every rewrite
 import { gatewayGroundSearch, memoryGroundCache } from "../_shared/agent/research/ground.ts";
 const researchCache = memoryGroundCache();
 const webResearchCache = memoryWebCache(); // D-060: per instance, like researchCache
@@ -1613,9 +1614,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           if (peopleTrace && !turn.show && turn.stopped === "final") turn.reply = enforcePeopleReply(turn.reply, peopleTrace);
           // D-067 (D-024): the brain's reply is never sent blank, after every check code ran on it.
           turn.reply = nonEmptyReply(turn);
+          // Gap #5, review rv4 (A1): a rewrite here (the people caveat above) never drops code's not-run lines (not_run.ts).
+          turn.reply = withNotRun(turn.reply, turn.notRunLines);
           out = { reply: turn.reply, intent: turn.show?.intent ?? (turn.tool_calls.some((c: any) => c.name === "draft_followup") ? FOLLOWUP_INTENT : "agent"), resultStatus: turn.stopped, contained: false, handler: "agent", ...(turn.show?.parts ? { parts: turn.show.parts } : {}),
             ...(turnDocuments.length ? { result: { documents: turnDocuments } } : {}) };
-          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, ...((turn as any).shorten ? { shorten: (turn as any).shorten } : {}), ...((turn as any).set_aside ? { set_aside: (turn as any).set_aside } : {}), ...((turn as any).research ? { research: (turn as any).research } : {}), ...((turn as any).support ? { support: (turn as any).support } : {}), ...((turn as any).pipeline ? { pipeline: (turn as any).pipeline, ...((turn as any).piped ? { piped: (turn as any).piped } : {}) } : {}), pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
+          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, ...(turn.not_run?.length ? { not_run: turn.not_run } : {}), ...((turn as any).shorten ? { shorten: (turn as any).shorten } : {}), ...((turn as any).set_aside ? { set_aside: (turn as any).set_aside } : {}), ...((turn as any).research ? { research: (turn as any).research } : {}), ...((turn as any).support ? { support: (turn as any).support } : {}), ...((turn as any).pipeline ? { pipeline: (turn as any).pipeline, ...((turn as any).piped ? { piped: (turn as any).piped } : {}) } : {}), pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
             // flag-only reply checks (loop.ts): saved with the turn so remaining reply problems can be counted (Greptile on #566)
             ...replyFlagsMeta(turn as { flags?: unknown }), ...(turn.show?.meta ?? {}) };
         }

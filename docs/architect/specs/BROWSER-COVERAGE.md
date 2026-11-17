@@ -173,3 +173,30 @@ it at 0 the same lane does 22.5 apps/min. On real postings a run that reached Su
 per-provider pace, fill 1.6 s, guard 2.5 s). The apply VM has no per-person serial cap (the claim widens each person's share when
 fewer people are queued) and no host cap unless the owner sets one; the limits are memory (about 450 MB a context) and each
 portal's own refusals.
+
+### Round 2 (architect rulings of 2026-11-16), measured in CI (`browser-bench`, branches `bench/browser-strict-r2` / `-r3`, never a PR)
+
+Rulings applied: the apply VM drives Ashby (migration `20261116120000`, not applied live); the dry run stays strict (Personio's
+Turnstile is a handed-off wall); open postings only (each row re-checked at the start of its run, closed rows reported apart);
+`checkSettleMs` unchanged. CI 44021741347 measured head dd0672e8, CI 44026400136 head 951df0b3 (Teamtailor job_id and slider, Workable
+drawn radio, Greenhouse react-select chips, the simulated upload's progress events). "Answered" counts reached Submit, with the
+upload simulated in brackets.
+
+| provider | sample: headline, r2 → r3 | sample answered, r2 → r3 | held-out headline, r2 → r3 | held-out answered, r2 → r3 |
+|---|---|---|---|---|
+| ashby | 1 → 1 | 11 → 12 | 2 → 2 | 13 → 13 |
+| breezy | 0 → 0 | 1 (+8) → 1 (+8) | 0 → 0 | 0 (+10) → 0 (+10) |
+| greenhouse | 0 → 0 | 0 → 0 (+13) | 1 → 0 | 1 → 0 (+14) |
+| lever | 5 → 5 | 19 → 18 | 5 → 5 | 12 → 12 |
+| recruitee | 0 → 0 | 2 → 1 | 0 → 0 | 0 → 0 |
+| teamtailor | 0 → 0 | 0 → 0 (+3) | 0 → 0 | 0 → 0 (+8) |
+| workable | 1 → 1 | 1 → 1 (+7) | 0 → 0 | 0 (+2) → 0 (+7) |
+| bamboohr, personio, smartrecruiters, workday | 0 | 0 (bot check / sign-in walls, handed off) | 0 | 0 |
+| **all 220** | **7 → 7** | **34 (+8) → 33 (+31)** | **8 → 7** | **26 (+12) → 25 (+39)** |
+| open only | 7 / 196 | 34 (+8) → 33 (+31) of 196 | 8 / 191 | 26 (+12) → 25 (+39) of 191 |
+
+Closed: 24 of the sample (9 at the start of the run) and 29 of the held-out (13 at the start). The headline (no custom answers) stays
+where it was by construction; the answered column is where execution shows: 42 → 64 of 220 (sample) and 38 → 64 (held-out) reach the
+instant before Submit once answered. Left after r3, by count: Recruitee phone reformats with other digits (`value_changed_by_page`,
+11 to 16), Workable steps with no Submit word (`no_submit_control`, 3 to 4), Breezy unnamed page flags (fixed after r3, aea3d3a7) and
+`salaryCurrency`, Ashby's own dropdown in the live page (still `options_not_readable`).

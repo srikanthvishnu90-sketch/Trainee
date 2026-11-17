@@ -23,7 +23,8 @@
 //   Other server tools are dropped and counted (`stats.serverToolsDropped`).
 // - Images in messages are replaced by "[image omitted]".
 
-// apiKeySource: "none" while every call's init event reported "none"; otherwise the first other value seen (that call was refused).
+// apiKeySource: "none" while every call's init event reported "none"; otherwise the first other value seen (that call was
+// refused). S3 evidence carries it (D-091).
 export interface CliStats { calls: number; failed: number; serverToolsDropped: number; webSearches: number; ms: number; apiKeySource: string | null }
 export const stats: CliStats = { calls: 0, failed: 0, serverToolsDropped: 0, webSearches: 0, ms: 0, apiKeySource: null };
 

@@ -3,6 +3,8 @@
 //   NR-12 (A2) the line never echoes raw call arguments: only a whitelisted subject (company, employer, firm, role, title, school),
 //              never an id, a draft body, a note or a recipient, and the whole line passes the leak guard
 //   NR-13 the one retry is per CALL, not per tool: a call about something else after a call refused twice still runs
+//   NR-15 (rv5, probe rv5-cd/probes/a5_retry.ts) a refused call is resolved when the same tool later ran with the inputs it lacked:
+//         order, case, a string for a list, a count, or firms named for "trading firms" never leave a false not-run line
 //   NR-14 the not-run labels reach the turn's stored meta (body.meta via agentMeta) through the real handler (Postgres 16)
 //   deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/pending/tool-not-run-rv4-20261117.test.ts
 import assertNode from "node:assert/strict";
@@ -100,7 +102,8 @@ Deno.test("NR-13 the one retry is per call, not per tool: another call to the sa
   const res = (k: number) => JSON.parse(String(m.payloads[k].messages.at(-1).content.find((b: any) => b.type === "tool_result").content));
   eq([res(1).retry_allowed, res(2).retry_allowed, res(3).retry_allowed], [true, false, true], "the Meta call is not the Google call's third try");
   eq(runs, ['find_people:{"school":"Lakeshore","employers":"Meta"}'], "the other call ran");
-  ok(r.reply.startsWith("The people search for Google did not run this time") && !/for Meta did not run/.test(r.reply), r.reply);
+  // Architect ruling (review rv5): the same tool then ran with the input the Google calls lacked (school), so they are resolved too.
+  ok(!r.not_run && !/did not run/.test(r.reply), r.reply);
 });
 
 Deno.test({ name: "NR-14 the not-run labels reach the turn's stored meta through the real handler", sanitizeOps: false, sanitizeResources: false, ignore: canRun() !== null && canRun() !== "FAIL", fn: async () => {
@@ -113,3 +116,27 @@ Deno.test({ name: "NR-14 the not-run labels reach the turn's stored meta through
     eq(meta?.not_run, [{ label: "people search", failed: false }], JSON.stringify(meta));
   } finally { await close(); }
 } });
+
+Deno.test("NR-15 (rv5) a refused call is resolved by a later run of the same tool with the inputs it lacked, never by comparing JSON", async () => {
+  const seen: string[] = [];
+  const fp: ToolSpec = { name: "find_people", effect: "read", description: "find_people",
+    input_schema: { type: "object", properties: { school: { type: "string" }, employers: { type: "array", items: { type: "string" } }, count: { type: "integer" }, role: { type: "string" } }, required: ["school", "employers"] } as any,
+    run: async (i) => { seen.push(JSON.stringify(i)); return { status: "ok", leads: [{ name: "Ana Ruiz", employer: "Google" }] }; } };
+  const cases: [string, unknown, unknown][] = [
+    ["order", { employers: ["Google", "Jane Street"] }, { school: "Lakeshore", employers: ["Jane Street", "Google"] }],
+    ["case", { employers: ["google"] }, { school: "Lakeshore", employers: ["Google"] }],
+    ["string->array", { employers: "Google" }, { school: "Lakeshore", employers: ["Google"] }],
+    ["count", { employers: ["Google"], count: 3 }, { school: "Lakeshore", employers: ["Google"], count: 5 }],
+    ["trading firms named", { employers: ["Google", "trading firms"] }, { school: "Lakeshore", employers: ["Google", "Jane Street", "Citadel"] }],
+  ];
+  for (const [label, a, b] of cases) {
+    seen.length = 0;
+    const r = await run([fp], scripted([use("find_people", a, "a"), use("find_people", b, "b"), text("I found Ana Ruiz, a Lakeshore alum at Google.")]), "find 3 lakeshore alumni at google or trading firms");
+    eq(seen.length, 1, `${label}: the retry ran`);
+    ok(!r.not_run && !/did not run|failed this time/.test(r.reply), `${label}: ${r.reply}`);
+  }
+  // A later run that still lacks what the refused call lacked does not resolve it (another tool, or the same input still missing).
+  const other = tool("research_company", ["company"]);
+  const r2 = await run([fp, other], scripted([use("find_people", { employers: ["Google"] }, "a"), use("research_company", { company: "Google" }, "c"), use("find_people", { employers: ["Google"] }, "b"), text("Google hires interns.")]));
+  ok(r2.reply.startsWith("The people search for Google did not run this time"), r2.reply);
+});

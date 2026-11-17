@@ -1615,6 +1615,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // D-067 (D-024): the brain's reply is never sent blank, after every check code ran on it.
           turn.reply = nonEmptyReply(turn);
           // Gap #5, review rv4 (A1): a rewrite here (the people caveat above) never drops code's not-run lines (not_run.ts).
+          // (Review rv5: the search judge's rewrite, FEATURE 5 below, is on the other branch of this if, the router's turn: it never
+          // rewrites a brain turn's reply, and a router turn has no brain tool calls, so no not-run lines to keep.)
           turn.reply = withNotRun(turn.reply, turn.notRunLines);
           out = { reply: turn.reply, intent: turn.show?.intent ?? (turn.tool_calls.some((c: any) => c.name === "draft_followup") ? FOLLOWUP_INTENT : "agent"), resultStatus: turn.stopped, contained: false, handler: "agent", ...(turn.show?.parts ? { parts: turn.show.parts } : {}),
             ...(turnDocuments.length ? { result: { documents: turnDocuments } } : {}) };

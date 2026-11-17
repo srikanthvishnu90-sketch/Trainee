@@ -550,7 +550,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       if (!t) { fail(null, `unknown tool: ${u.name}`); continue; }
       const input = u.input && typeof u.input === "object" ? u.input : {};
       const missing = missingRequired(input, t.input_schema.required || []);
-      const rec: CallRec = { name: t.name, input: JSON.parse(JSON.stringify(input)), outcome: "refused" };
+      const rec: CallRec = { name: t.name, input: JSON.parse(JSON.stringify(input)), outcome: "refused", missing };
       // Review rv4: the one retry is per CALL, not per tool. The earlier refusals this call repeats (same tool, no argument both
       // carry disagrees: unrunCalls' retry rule) count; a call to the same tool about something else has its own retry.
       const before = refusedBefore(calls, rec);

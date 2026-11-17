@@ -34,22 +34,30 @@ export const labelOf = (name: string): string => LABELS[name] ?? "requested step
 
 // One entry per tool call this turn, in order (loop.ts keeps it on the turn's record): what it was asked and how it ended.
 export type CallOutcome = "refused" | "ok" | "threw" | "asked";
-export interface CallRec { name: string; input: Record<string, unknown>; outcome: CallOutcome }
+// missing: the required inputs a refused call lacked (loop.ts), for the rule that resolves it (unrunCalls).
+export interface CallRec { name: string; input: Record<string, unknown>; outcome: CallOutcome; missing?: string[] }
 const filled = (v: unknown) => v !== undefined && v !== null && !(typeof v === "string" && !v.trim()) && !(Array.isArray(v) && !v.length);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 // Per CALL (review rv3, N1): each refused call is resolved only by a LATER call to the same tool that ran and agrees with every
 // argument the refused call had (its retry); a call to the same tool with other arguments (another employer) does not resolve it. An unresolved refused call is
 // "failed" when its retry ran and threw (not when it asked the person a question, AskPerson), otherwise "did not run".
 // Whether a later call repeats a refused one: the same tool, and no argument the refused call had is given another value.
-const repeats = (refused: CallRec, later: CallRec) => later.name === refused.name && Object.entries(refused.input ?? {}).filter(([, v]) => filled(v)).every(([k, v]) => !filled(later.input?.[k]) || same(later.input?.[k], v));
+// Review rv5: arguments are compared as values, never as JSON: a string and a one-item list are the same, case, order and
+// repeats do not matter, and a number (a count) never makes two calls different.
+const norm = (v: unknown): string[] | null => typeof v === "number" || typeof v === "boolean" ? null
+  : [...new Set((Array.isArray(v) ? v : [v]).filter(filled).map((x) => String(x).trim().toLowerCase().replace(/\s+/g, " ")))].sort();
+const sameValue = (a: unknown, b: unknown) => { const x = norm(a), y = norm(b); return x === null || y === null || JSON.stringify(x) === JSON.stringify(y); };
+const repeats = (refused: CallRec, later: CallRec) => later.name === refused.name && Object.entries(refused.input ?? {}).filter(([, v]) => filled(v)).every(([k, v]) => !filled(later.input?.[k]) || sameValue(later.input?.[k], v));
 // How many earlier refused calls this call repeats (loop.ts: one retry per call; a second refusal ends that call for the turn).
 export const refusedBefore = (log: CallRec[], call: CallRec): number => log.filter((r) => r.outcome === "refused" && repeats(r, call)).length;
 export function unrunCalls(log: CallRec[]): { name: string; args: string[]; failed: boolean }[] {
   const out: { name: string; args: string[]; failed: boolean }[] = [];
   log.forEach((r, i) => {
     if (r.outcome !== "refused") return;
-    // A later call that ran is its retry when no argument both carry disagrees (the missing one filled, others kept or left out).
-    const retries = log.slice(i + 1).filter((x) => x.outcome !== "refused" && repeats(r, x));
+    // Architect ruling (review rv5): a refused call is RESOLVED when the same tool later ran this turn with every required input
+    // the refused call lacked now present, whatever its other arguments (another order, case or count, firms it named for "trading
+    // firms"). Only a call never resolved gets the line; it "failed" when such a later call ran and threw.
+    const retries = log.slice(i + 1).filter((x) => x.name === r.name && x.outcome !== "refused" && (r.missing ?? []).every((k) => filled(x.input?.[k])));
     if (retries.some((x) => x.outcome === "ok")) return;
     const args = subjectArgs(r.input ?? {});
     const failed = retries.some((x) => x.outcome === "threw");

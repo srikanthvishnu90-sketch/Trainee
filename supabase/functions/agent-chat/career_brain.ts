@@ -13,6 +13,7 @@ import { FAMILY_TITLE, familyAskOf, type FamilyMakeDeps } from "../_shared/file_
 import type { FileService } from "../_shared/file_service.ts";
 import { careerSystemPrompt, MIRROR_RULES, shapeRulesFor } from "../_shared/agent/prompt.ts";
 import { approvalRulesText } from "../_shared/agent/approval_rules.ts";
+import { contractNote, contractOf } from "../_shared/agent/task_contracts.ts";
 import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing } from "../_shared/agent/memory.ts";
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
 import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
@@ -201,9 +202,11 @@ export async function agentTurn(o: {
   // Review of #790 (round 3): a plain yes or no to code's own restore question (the marker the turn before carried).
   const restoreFact = o.restoreAsk && !hypo ? ((o.stores as any)?.profile?.facts ?? []).find((f: any) => f?.id === o.restoreAsk!.fact_id && f.withdrawn_by_owner) : null;
   const restoreAnswer = restoreFact ? plainAnswer(o.message) : null;
+  // Gap #2 (coach depth): the task contract for the kind of task this message is (task_contracts.ts), one per turn.
+  const task = contractOf(o.message, o.history);
   const turnNotes = [restoreAnswer ? restoreAnswerNote(restoreAnswer, String(restoreFact.id), String(restoreFact.text || restoreFact.title)) : "", stale.length ? staleFactNote(stale.map((f) => String(f.title || f.text))) : "", maybe.length ? factCorrectionNote(maybe.map((f) => String(f.title || f.text))) : "", practiceAnswer ? practiceAnswerNote() : "", hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
     correction ? correctionNote(correction) : "", typeof o.whileWorking === "string" ? whileWorkingNote(o.whileWorking) : severalAsks(o.message) ? multiAskNote() : "",
-    draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", historyAsk ? historyNote() : "", shownPay.length ? shownPayNote(shownPay) : "", lengthNote(replyLength(o.message, o.history))].filter(Boolean);
+    draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", historyAsk ? historyNote() : "", shownPay.length ? shownPayNote(shownPay) : "", task ? contractNote(task) : "", lengthNote(replyLength(o.message, o.history))].filter(Boolean);
   const hypoWithheld = [...(hypo === "persona" ? PERSONA_WITHHELD : hypo ? HYPOTHETICAL_WITHHELD : []), ...(statesNothing(o.message) ? ["add_profile_fact"] : [])];
   const block = o.known ? personBlock({ profile: hypo === "persona" ? null : o.stores.profile, ...o.known }) : null;
   const notes: string[] = [];

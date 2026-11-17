@@ -1114,16 +1114,30 @@ async function recheckFilled(page, filled, ctx0, { settleMs = 300 } = {}) {
   await settle();
   let lost = await dropped();
   if (!lost.length) return [];
+  // Review of the rs-11 split (probe p11-phone-reset-country, 2026-11-17): a phone box its widget reset to a bare dial code is set
+  // again only to be read back as exactly the approved number: its digits with their own country code, or its national digits beside
+  // the approved dial code that the widget itself shows (fillText's own readback). A re-set that reads back as anything else (the
+  // widget kept its own country and stripped the approved code) is not the approved phone: it stays lost and the run stops, named.
+  const heldBefore = await heldNow(page, lost, { menus: false }).catch(() => []);
+  const reset = new Set(lost.filter((f, i) => bareDial(f, heldBefore[i] || {})));
+  const unsure = [];
   const qs = await page.evaluate(EXTRACT).catch(() => []);
   for (const f of lost) {
     if (!["text", "textarea", "select"].includes(f.kind)) continue;
     const now = qs.find((x) => x.label === f.d.label && x.kind === f.d.kind && x.name === f.d.name);
     if (!now) continue;
     let r; try { r = await doFill(page, now, { status: "fill", value: f.value, source: f.source }, ctx); } catch { r = { ok: false }; }
-    if (r.ok) { f.d = now; f.refilled = true; }
+    if (r.ok) { f.d = now; f.refilled = true; } else if (reset.has(f)) unsure.push(f);
   }
   await settle();
   lost = await dropped();
+  // Read again once the page settled (a widget that strips the code does it a moment after the input): exact digits, or the shown code.
+  const reHeld = reset.size ? await heldNow(page, [...reset], { menus: false }).catch(() => []) : [];
+  for (const [i, f] of [...reset].entries()) {
+    const h = reHeld[i] || {}, now = Array.isArray(h.held) ? h.held.join(" ") : String(h.held ?? "");
+    if (!(digitsOf(now) && digitsOf(now) === digitsOf(f.value)) && !(await phoneSame(page, f.d, f.value, now))) unsure.push(f);
+  }
+  for (const f of unsure) if (!lost.includes(f)) lost.push(f);
   return lost.map((f) => f.label);
 }
 // Round 2 (review of #818), item 10: an option in a placeholder's words, or a disabled one, is no answer, whatever its value

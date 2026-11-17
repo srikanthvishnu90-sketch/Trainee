@@ -162,13 +162,15 @@ test("(a) HANDLER: entries the router presented, confirmed by the person's exact
   // turn's own profile object, stamps included — not a snapshot
   // taken before the step ran.
   const after = yes.ctx.profile;
+  // D-095 (owner, 2026-11-17): the confirmed resume's header values (ids resume-header:*) are extra confirmed facts bound to
+  // that resume, each with its own event (r.header); only the counts' derivation changed: entries + header facts.
   const stampedFacts = (after.facts || []).filter((f) => f && f.confirmation_event_id);
-  assert.equal(stampedFacts.length, drafts.length, "the stamped facts carry their confirmation event id — the field the executor's trust contract reads");
+  assert.equal(stampedFacts.length, drafts.length + (r.header || 0), "the stamped facts carry their confirmation event id — the field the executor's trust contract reads");
   for (const f of stampedFacts) {
     assert.ok(String(f.provenance || "").startsWith(RESUME_CONFIRM_PROVENANCE), `provenance is the owner-confirmation stamp: ${f.provenance}`);
   }
   const recorded = events.dump().filter((e) => e.kind === "fact_confirmed");
-  assert.equal(recorded.length, drafts.length, "one persisted fact_confirmed event per stamped entry");
+  assert.equal(recorded.length, drafts.length + (r.header || 0), "one persisted fact_confirmed event per stamped entry (and per header fact, D-095)");
   for (const f of stampedFacts) {
     assert.ok(recorded.some((e) => e.detail && e.detail.confirmation_event_id === f.confirmation_event_id), `fact ${f.id} names its recorded event`);
   }

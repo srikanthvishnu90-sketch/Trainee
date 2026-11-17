@@ -12,6 +12,7 @@ import { capacityNote } from "../../../supabase/functions/_shared/agent/turn_not
 import { APPROVAL_RULES, approvalRulesText, PER_ITEM_APPROVAL } from "../../../supabase/functions/_shared/agent/approval_rules.ts";
 import { isApproval, parseCardReply, YES_WINDOW_MS } from "../../../supabase/functions/_shared/career_apply_cards.ts";
 import { careerTools } from "../../../supabase/functions/_shared/agent/career_tools.ts";
+import { memoryWantStore } from "../../../supabase/functions/_shared/career_apply_want.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -45,7 +46,7 @@ Deno.test("CU-1 the approval rules the brain reads are built from the approval c
 
 // Review of f7abd6c30: each rule the brain is told is what the card code does (parseCardReply), and no fixed text the brain reads
 // (the core prompt's "what can you do" line, queue_applications' description) still says approval is per card.
-Deno.test("CU-1b each approval rule holds in the card parser; no prompt or tool description says approval is per card", () => {
+Deno.test("CU-1b each approval rule holds in the card code; no prompt, tool description or run note says approval is per card", async () => {
   const r = (t: string) => parseCardReply(t);
   ok(APPROVAL_RULES.batchYes && isApproval(r("yes")) && (r("yes") as any).except.length === 0, "one yes approves the whole card");
   ok(APPROVAL_RULES.subsets && isApproval(r("yes except 3")) && JSON.stringify((r("yes except 3") as any).except) === "[3]" && JSON.stringify((r("only 1, 2 and 5") as any).only) === "[1,2,5]", "subsets");
@@ -53,6 +54,15 @@ Deno.test("CU-1b each approval rule holds in the card parser; no prompt or tool 
   ok(/an unclear reply approves nothing/.test(approvalRulesText()));
   for (const t of careerTools({ postings: async () => [], wants: {} as any } as any)) ok(!PER_ITEM_APPROVAL.test(t.description), `${t.name}: ${PER_ITEM_APPROVAL.exec(t.description)?.[0]}`);
   ok(!PER_ITEM_APPROVAL.test(careerSystemPrompt("2026-11-16")), PER_ITEM_APPROVAL.exec(careerSystemPrompt("2026-11-16"))?.[0]);
+  // Review rv2: the run note queue_applications returns, and D-R9-2's every-page-delivered condition.
+  const queue = careerTools({ postings: async () => [], alerts: null, wants: memoryWantStore() } as any).find((t) => t.name === "queue_applications")!;
+  ok(queue.description.length <= 400 && /browser/.test(queue.description) && /approv/i.test(queue.description), queue.description);
+  const out: any = await queue.run({ postings: [{ url: "https://job-boards.greenhouse.io/acme/jobs/4000001", company: "Acme", title: "Data Analyst 1" }] }, { userId: "u1", threadId: "t1", now: Date.UTC(2026, 9, 20, 15), state: {}, turn: { message: "apply me", added: [] } } as any);
+  ok(typeof out.note === "string" && !PER_ITEM_APPROVAL.test(out.note), `run note: ${out.note}`);
+  ok(PER_ITEM_APPROVAL.test("The Trainee extension prepares each posting in the person's browser and shows a card; it goes only after they approve that card."), "the old run note is caught");
+  ok(APPROVAL_RULES.allPagesDelivered && /only once every page of it has reached them/.test(approvalRulesText()));
+  const cards = Deno.readTextFileSync(new URL("../../../supabase/functions/_shared/career_apply_cards.ts", import.meta.url));
+  ok(/card_pages_undelivered[\s\S]{0,200}nothing was approved/.test(cards), "the card code refuses a yes to a card whose pages were not all delivered");
   for (const old of ["they review and approve each card in the Trainee extension", "each application goes only on their approval in the extension", "each goes only after they approve its card in the Trainee extension"]) ok(PER_ITEM_APPROVAL.test(old), old);
 });
 

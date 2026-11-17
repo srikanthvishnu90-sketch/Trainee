@@ -42,8 +42,9 @@ export function supabaseBatchFile(admin: any, env: { get(k: string): string | un
   return async (userId, rows) => {
     try {
       const deps = supabaseReviewDeps(admin, userId, env), items = await batchItemsFor(rows, deps);
-      if (!items) return null;
+      if (!items) { console.error("batch file: an application of the batch could not be read; no File"); return null; }
       const made = await createFileService({ store: supabaseFileKindStore(admin), env, now: Date.now }).createBatch!(userId, items);
+      if (!made.ok) console.error("batch file:", made.error);
       const url = made.ok ? made.url ?? made.webApp : null;
       return made.ok && url ? { id: made.id, url } : null;
     } catch (e) {

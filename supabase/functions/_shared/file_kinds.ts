@@ -128,6 +128,7 @@ class V {
 // payload hash the yes binds. Its stored data is what the card's file_sha covers (20261116140000), so nothing here is optional
 // guesswork: an item that does not validate refuses the whole File, and the card is then shown as before.
 export const BATCH_FILE_MAX = 10000;
+export const BATCH_FILE_BYTES = 5_000_000; // a sanity bound on the stored File (career_watch_kv), far above a batch of hundreds
 function batchOf(raw: unknown, v: V) {
   const b = v.obj(raw, "batch");
   const items = v.list(b.items, "batch.items", 1, BATCH_FILE_MAX).map((it: any, i: number) => {
@@ -366,7 +367,8 @@ export function validateKind(kind: string, raw: unknown, o: { trusted?: boolean;
   let data: any;
   try { data = fn(raw, v); } catch (e) { return { ok: false, errors: [`data: could not be read (${e instanceof Error ? e.message : String(e)})`] }; }
   // A resume File carries its PDF (re-review of #644 (4): a real one- or two-page resume runs to tens of KB); every other kind stays small.
-  const max = kind === "draft" && data?.variant === "resume" ? RESUME_B64_MAX + 8_000 : 24_000;
+  // D-094: a batch File lists every application of the batch with its exact answers, so it is bounded by the batch, not a page.
+  const max = kind === "draft" && data?.variant === "resume" ? RESUME_B64_MAX + 8_000 : kind === "application_review" && data?.batch ? BATCH_FILE_BYTES : 24_000;
   if (!v.errors.length && JSON.stringify(data).length > max) v.err("data", `is over ${Math.round(max / 1000)} KB`);
   return v.errors.length ? { ok: false, errors: v.errors.slice(0, 12) } : { ok: true, data: JSON.parse(JSON.stringify(data)) };
 }

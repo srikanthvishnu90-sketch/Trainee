@@ -276,7 +276,11 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       },
       stop: async () => {},
     };
-    runner = createRunnerHandler({ env: { get: (k: string) => RUNNER_ENV[k] ?? (k === "SUPABASE_URL" ? SUPABASE_URL : k === "SUPABASE_SERVICE_ROLE_KEY" ? SERVICE_KEY : undefined) }, host: host as any, fetch: ((i: any, n?: any) => globalThis.fetch(i, n)) as typeof fetch, waitUntil: (p) => { prepWaits.push(p); } });
+    // As career-cloud-runner/index.ts: the pushed card names each application's role and its posting's own terms (withRoles),
+    // read with the service role (the client is made below, once the handler pointed fetch at the database double).
+    let describeWith: ((user: string, rows: any[]) => Promise<any[]>) | undefined;
+    runner = createRunnerHandler({ env: { get: (k: string) => RUNNER_ENV[k] ?? (k === "SUPABASE_URL" ? SUPABASE_URL : k === "SUPABASE_SERVICE_ROLE_KEY" ? SERVICE_KEY : undefined) }, host: host as any, fetch: ((i: any, n?: any) => globalThis.fetch(i, n)) as typeof fetch, waitUntil: (p) => { prepWaits.push(p); },
+      describe: (user, rows) => describeWith ? describeWith(user, rows) : Promise.resolve(rows) });
     // A started sandbox runs on its own machine, with that machine's real clock (its card's expiry, its attempts' times),
     // between the person's turns: the pinned clock is lifted while it runs and pinned again where it stood.
     const settlePrepare = async () => {
@@ -302,6 +306,7 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
     // The product's own modules, loaded after the handler pointed fetch at the database double.
     const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.117.1");
     const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
+    { const { withRoles } = await import("../../../supabase/functions/_shared/career_apply_cards.ts"); describeWith = (user, rows) => withRoles(admin, user, rows); }
     const { runSendWorker, mailHash } = await import("../../../supabase/functions/_shared/career_send_rail.ts");
     const { supabaseOutreachStore } = await import("../../../supabase/functions/_shared/career_outreach.ts");
     const { restQueue, runCloudJob } = await import("../../../workers/career-cloud/worker.ts");

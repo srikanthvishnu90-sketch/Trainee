@@ -65,6 +65,8 @@ function synthesize(needs, prior = {}) {
     if (Object.prototype.hasOwnProperty.call(answers, n.label)) { unanswerable.push({ label: n.label, reason: "answered_still_asked" }); continue; }
     let v;
     if (n.kind === "checkbox") v = "Yes";
+    // A slider or number box: a number within its own bounds (the lowest, else 1).
+    else if (n.kind === "range" || n.input === "range" || n.input === "number" || n.kind === "number") v = String(n.min !== undefined && n.min !== "" ? n.min : 1);
     else if (["radio", "buttons", "select", "checkgroup"].includes(n.kind) || (n.options && n.options.length)) v = choiceAnswer(n);
     else v = textAnswer(n.label, n.kind);
     if (v === null || v === undefined || v === "") { unanswerable.push({ label: n.label, reason: "no_option_to_pick" }); continue; }

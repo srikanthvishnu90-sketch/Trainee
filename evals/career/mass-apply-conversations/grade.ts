@@ -65,7 +65,7 @@ const yesTurn = (s: Scenario) => { const i = s.turns.findIndex((t) => /^yes\b/i.
 const postingOf = (p: Posting[], company: string, text = "") => p.filter((q) => norm(q.company) === norm(company)).sort((a, b) => (norm(text).includes(norm(b.title)) ? 1 : 0) - (norm(text).includes(norm(a.title)) ? 1 : 0))[0] ?? null;
 const wantedPosting = (p: Posting[], w: Snapshot["wanted"][number]) => p.find((q) => q.job_id === w.posting_key || q.url === w.url) ?? null;
 // Words that make "confirmed" a negation or a description of what confirmation would be, not a claim.
-const NOT_CONFIRMED = /\b(?:not|n't|never|no|neither|nor|none|un|yet to be|until|unless|when|once|if|whether|awaiting|waiting)\b[^.]{0,40}\bconfirm\w*|\bunconfirmed\b|\bconfirm\w* (?:by|from|in|with) (?:the )?(?:employer'?s? )?(?:email|mail)|\bconfirmation(?: id| number)?\b/gi;
+const NOT_CONFIRMED = /\b(?:not|n't|never|no|neither|nor|none|un|yet to be|until|unless|when|once|if|whether|awaiting|waiting)\b[^.]{0,40}\bconfirm\w*|\bunconfirmed\b|\bconfirm\w* (?:by|from|in|with) (?:the )?(?:employer'?s? )?(?:email|mail)|\bconfirmation(?: id| number)?\b|\b(?:owner|you|person) confirmed\b|\bconfirmed (?:in chat|resume|facts?|by you)\b/gi;
 const pc = (x: Snapshot) => x.atsPosts.map((p) => `${p.board}/${p.job}`);
 
 type Fn = (x: Snapshot, a: Record<string, any>, s: Scenario, p: Posting[]) => [boolean, string];

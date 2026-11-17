@@ -94,14 +94,17 @@ async function resumeConfirmed(o: { events?: ReturnType<typeof memoryEvents>; sh
 Deno.test("1. the router's own reply shows the entries; the person's yes evidences each, with its event and its upload link", async () => {
   const { pasted, yes, r, events, profile, seen } = await resumeConfirmed();
   // The router's reply itself (no listing added here): every entry's words, before the yes.
-  const unshown = profile.facts.filter((f: any) => !String(pasted.out.reply).replace(/\s+/g, " ").toLowerCase().includes(String(f.text).replace(/\s+/g, " ").toLowerCase()));
+  // architect amendment (D-092 MA05 design): the header facts are shown as the reply's "At the top:" line, not as entries.
+  const unshown = profile.facts.filter((f: any) => !String(f.id).startsWith("resume-header:")).filter((f: any) => !String(pasted.out.reply).replace(/\s+/g, " ").toLowerCase().includes(String(f.text).replace(/\s+/g, " ").toLowerCase()));
   eq(unshown.length, 0, `the router's reply shows every entry: ${String(pasted.out.reply).slice(0, 300)}`);
   eq(seen.upload?.ref, "agent_messages:1", "the link to their own upload");
   eq(seen.upload?.sha256, await sha256Hex(PASTED));
   eq([yes.out.intent, yes.out.resultStatus], ["career_resume_ingest", "completed"], "the router's own confirm of the pasted resume");
   const n = profile.facts.length;
   assert(n >= 10, `the fixture resume is read as many facts (${n})`);
-  eq(r.stamped, n, "each confirmed fact is stamped");
+  // architect amendment (D-092 MA05 design, 2026-11-16): the confirmed resume header's values are extra confirmed facts
+  // (resume entries + header facts), each with its own event; stamped counts the entries, r.header the header facts.
+  eq(r.stamped + (r.header ?? 0), n, "each confirmed fact is stamped");
   eq(events.rows.length, n, "one fact_confirmed event per fact");
   for (const e of events.rows) {
     eq(e.kind, "fact_confirmed");

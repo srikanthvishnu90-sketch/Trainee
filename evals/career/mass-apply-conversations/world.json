@@ -1,5 +1,5 @@
 {
- "_about": "The conversation eval's own postings, added to the e2e world's 20 (evals/career/tasks/tasks.json + e2e/tasks.json extra_postings). Fictional employers on made-up boards; the stub ATS answers every one (127.0.0.1); nothing reaches a real employer. `scale` is the SCALE scenario's batch (pasted as links).",
+ "_about": "The conversation eval's own postings, added to the e2e world's 20 (evals/career/tasks/tasks.json + e2e/tasks.json extra_postings). Fictional employers on made-up boards; the stub ATS answers every one (127.0.0.1); nothing reaches a real employer. `scale` is the SCALE scenario's batch (pasted as links). `person` is every scenario's fictional person: the e2e fixture resume with a real two-word name and a plain contact line, so a confirmed header can fill first name, last name, email and phone.",
  "postings": [
   {
    "job_id": "greenhouse:northwind:9101",
@@ -1059,5 +1059,16 @@
    "url": "https://boards.greenhouse.io/indigolabsco/jobs/9049",
    "description": "Operations Analyst. Requirements: Excel, SQL, reporting. Entry level."
   }
- ]
+ ],
+ "person": {
+  "first": "Jordan",
+  "last": "Rivera",
+  "name": "Jordan Rivera",
+  "city": "Chicago, IL",
+  "email": "jordan.rivera@example.test",
+  "phone": "+1 555-0177",
+  "resume": "TEST RESUME - synthetic fixture, not a real person\n\nJordan Rivera\nChicago, IL | jordan.rivera@example.test | +1 555-0177\nGitHub: https://github.com/example-testcase (TEST)\n\nEDUCATION\nTEST University - B.S. Computer Science, GPA 3.7, graduating May 2028\n- Coursework: Data Structures, Algorithms, Databases, Probability and Statistics, Corporate Finance\n\nEXPERIENCE\nSoftware Engineering Intern, TEST Systems Inc, June 2025 - August 2025\n- Built a reporting dashboard in React and Python used by 200 internal users\n- Cut weekly reporting time by 40% by automating data pulls from PostgreSQL\n\nFinance Intern, Example Capital (TEST), June 2024 - August 2024\n- Built a three-statement financial model in Excel for a fictional retail company\n- Prepared 10 pages of investment committee materials\n\nPROJECTS\nDeployBoard (TEST project)\n- Built DeployBoard in Go to deploy containerised apps on Kubernetes, deployed on AWS EKS for 12 student teams\n\nMarketSim valuation project (TEST)\n- Built DCF and comparable-company models in Excel for 8 fictional companies\n\nLEADERSHIP\nPresident, TEST University Investing Club, September 2025 - May 2026\n- Led TEST University Investing Club of 45 members; organised a stock-pitch competition with 20 participants\n\nSKILLS\nPython, JavaScript, React, Kubernetes, Docker, Go, PostgreSQL, Excel, Financial Modeling\n",
+  "shape": "student",
+  "workAuth": false
+ }
 }

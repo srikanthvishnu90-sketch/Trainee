@@ -27,7 +27,7 @@ async function confirm(o: { header?: any; shown?: string; events?: any } = {}) {
 Deno.test("a confirmed header: name, email and phone are kept by the trust contract, each with its own recorded event", async () => {
   const events = heldEvents();
   const { r, answers } = await confirm({ events });
-  eq(r.stamped, 5);
+  eq(r.header, 5);
   eq(answers, { full_name: "Maya Fictional", first_name: "Maya", last_name: "Fictional", email: "maya.fictional@example.test", phone: "+1 555-0142" });
   eq(events.rows().filter((e) => e.kind === "fact_confirmed").length, 5);
 });

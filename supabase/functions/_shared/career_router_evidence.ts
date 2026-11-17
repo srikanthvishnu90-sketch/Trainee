@@ -38,7 +38,8 @@ export interface Shown { text: string; message_ids: string[] }
 export interface Upload { kind: "message" | "file"; ref: string; sha256: string; text: string; at?: string | null }
 // held: the facts the router confirmed that could not be evidenced, put back to drafts (the host's record is the truth: a
 // fact no application may use is not called confirmed).
-export interface EvidenceResult { stamped: number; unshown: number; untraced: number; refused: number; held: string[] }
+// header: the resume header's values added as confirmed facts (evidenceResumeHeader), beside the entries counted in stamped.
+export interface EvidenceResult { stamped: number; unshown: number; untraced: number; refused: number; held: string[]; header?: number }
 
 export async function sha256Hex(s: string) {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
@@ -62,6 +63,10 @@ const undo = (p: string, fixes: { from: string; to: string }[]) => fixes.slice()
 // becomes a confirmed fact with its own persisted fact_confirmed event and the same owner provenance as the resume's entries
 // (typed_profile_fields.ts projects kind "profile" Full name / First name / Last name / Email / Phone). Nothing is split
 // on a guess: a first and a last name only from a name of exactly two words. An unconfirmed header is never used.
+// The fact's source_ref names the upload but not its hash: career_apply_profile_for (20261026120018) keeps an
+// upload-hashed fact only while that hash is the confirmed resume record's, and the send's facts (engine_input.ts) are read
+// without that filter, so a header fact dropped at preparation but present at the send made every application "changed"
+// (a confirmed resume FILE beside a pasted text). Each header confirmation replaces the previous header facts by id.
 export const HEADER_FACT_PREFIX = "resume-header:";
 // deno-lint-ignore no-explicit-any
 export async function evidenceResumeHeader(o: { userId: string; now: number; message: string; before: any; after: any; shown: Shown | null | undefined; upload: Upload | null | undefined; events: EventStore | null | undefined }): Promise<number> {
@@ -87,7 +92,7 @@ export async function evidenceResumeHeader(o: { userId: string; now: number; mes
       detail: { id, kind: "profile", confirmation_event_id: event, message_sha256, upload: { kind: o.upload.kind, ref: o.upload.ref, sha256: o.upload.sha256 }, via: "router: their yes to the resume header shown to them" } });
     if (!kept) continue;
     o.after.facts.push({ id, kind: "profile", name: label, value, text: `${label}: ${value}`, status: "confirmed", needs_confirmation: false, source: "resume-header",
-      provenance: `${RESUME_CONFIRM_PROVENANCE} (${at})`, confirmation_event_id: event, confirmed_at: at, source_ref: { upload: o.upload.ref, upload_sha256: o.upload.sha256 } });
+      provenance: `${RESUME_CONFIRM_PROVENANCE} (${at})`, confirmation_event_id: event, confirmed_at: at, source_ref: { upload: o.upload.ref, header: true } });
     n++;
   }
   return n;
@@ -103,7 +108,7 @@ export async function evidenceResumeConfirmation(o: {
 }): Promise<EvidenceResult> {
   const r: EvidenceResult = { stamped: 0, unshown: 0, untraced: 0, refused: 0, held: [] };
   if (!o.out || !CONFIRMING.has(String(o.out.intent)) || o.out.resultStatus !== "completed") return r;
-  r.stamped += await evidenceResumeHeader(o);
+  r.header = await evidenceResumeHeader(o);
   const facts = Array.isArray(o.after?.facts) ? o.after.facts : [];
   // deno-lint-ignore no-explicit-any
   const drafts = new Set((Array.isArray(o.before?.facts) ? o.before.facts : []).filter((f: any) => f && f.needs_confirmation === true).map((f: any) => f.id));

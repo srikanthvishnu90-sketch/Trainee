@@ -107,9 +107,12 @@ Deno.test({ name: "handler (a1): the router's reply shows each entry's words; th
   eq(unshown.length, 0, `every entry's words are shown before the yes (${unshown.length} of ${facts.length} not shown): ${pasted.reply.slice(0, 300)}`);
   const yes = await chat.say("yes, that's my resume");
   ok(yes);
-  eq(await count(`select count(*) from public.career_events where user_id = '${person}' and kind = 'fact_confirmed' and detail->'upload'->>'ref' like 'agent_messages:%'`), facts.length,
+  // architect amendment (D-092 MA05 design, 2026-11-16): resume entries + header facts. The confirmed header's values are extra
+  // confirmed facts with their own events (ids resume-header:*); only the expected count and its derivation changed.
+  const header = await count(`select count(*) from public.career_events where user_id = '${person}' and kind = 'fact_confirmed' and detail->>'id' like 'resume-header:%'`);
+  eq(await count(`select count(*) from public.career_events where user_id = '${person}' and kind = 'fact_confirmed' and detail->'upload'->>'ref' like 'agent_messages:%'`), facts.length + header,
     `one provenance event per entry, naming the upload: ${yes.reply}`);
-  eq(await executorFacts(person), facts.length, "the executor's facts are exactly those entries");
+  eq(await executorFacts(person), facts.length + header, "the executor's facts are exactly those entries");
 } });
 
 Deno.test({ name: "handler (a3): entries shown, the event write broken: nothing is confirmed and the reply says so", sanitizeResources: false, sanitizeOps: false, async fn() {

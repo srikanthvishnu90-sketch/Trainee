@@ -54,7 +54,7 @@ export interface ScenarioResult { id: string; title: string; score: number; must
 
 export async function runConversations(o: { label: string; model: "fake" | "subscription"; only?: string[]; judge?: boolean; quiet?: boolean }) {
   const scen = SCENARIOS.filter((s) => !o.only?.length || o.only.includes(s.id));
-  const tasks: E2ETask[] = scen.map((s) => ({ id: s.id, area: "apply", kind: "task", setup: s.setup, turns: s.turns, oracle: s.oracle as any, expect: { apply: { min: 0 } } }));
+  const tasks: E2ETask[] = scen.map((s) => ({ id: s.id, area: "apply", kind: "task", setup: s.setup, turns: s.turns, oracle: s.oracle as any, expect: { apply: { min: 0 } }, ...(Deno.env.get("MAC_FIXTURE_PERSON") ? {} : { person: WORLD.person }) }));
   const snaps = new Map<string, Snapshot>();
   const t0 = performance.now();
   const run = await runE2E({ label: o.label, brain: "production", model: o.model, tasks, postings: [...WORLD.postings, ...WORLD.scale], openGate: true, quiet: true,

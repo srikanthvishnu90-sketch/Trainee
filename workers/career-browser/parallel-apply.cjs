@@ -337,6 +337,9 @@ function isApplicationForm(form = [], own = 0) {
   if (STRICT_EVIDENCE) return has(Q_NAME) && email && more;
   return email && ((has(Q_NAME) && (more || own >= 1)) || (own >= 2 && fields.length >= 2));
 }
+// Boards whose own Submit is disabled until their required questions are answered, read from a capture (Personio, 2026-11-16:
+// tests/fixtures/runner-strict/personio-adragos-2840187.html).
+const DISABLED_UNTIL_VALID = new Set(["personio"]);
 function pickControls(snap) {
   const none = { form: null, submit: null, next: null, refuse: null };
   const ctl = (snap.controls || []).filter((c) => !c.signin);
@@ -344,15 +347,23 @@ function pickControls(snap) {
   // The application lives in a frame of this page (an ATS's embedded form): no form of the parent page is the application.
   if (snap.frameApp) return { ...none, refuse: "application_in_frame" };
   // `was`: this run already took the form as the application (a board that swaps the upload's input for a chip once the resume is set).
-  const ownSubmit = (f) => Math.max(0, ...ctl.filter((c) => c.form === f.i && controlLabel(c) === "yes").map((c) => (NAMES_APPLICATION.test(c.text) ? 2 : 1)));
+  // A form's own Submit that the page keeps disabled until its required questions are answered (Personio's "Bewerbung senden",
+  // strict run of 2026-11-16: 19 of 20 Personio postings read as "no form" once a disabled control stopped counting) is still that
+  // form's Submit for finding the form: the pick says `disabled`, and the control is pressed only once the page has enabled it
+  // (attempt: submit_disabled otherwise). A disabled control is never pressed and never opened.
+  // Only on a board whose recorded behaviour is exactly that (DISABLED_UNTIL_VALID): anywhere else a disabled Submit stays no Submit
+  // and nothing is typed (round 2, review of #818: tests/career-engine-round2-targeting-browser.test.cjs "disabled").
+  const asEnabled = (c) => (c.disabled && snap.waitsForValid ? { ...c, disabled: false } : c);
+  const ownSubmit = (f) => Math.max(0, ...ctl.filter((c) => c.form === f.i && controlLabel(asEnabled(c)) === "yes").map((c) => (NAMES_APPLICATION.test(c.text) ? 2 : 1)));
   const apps = forms.filter((f) => f.was || isApplicationForm(f, ownSubmit(f)));
+  const chose = (f, c) => ({ ...none, form: f.i, submit: c.c, ...(c.disabled ? { disabled: true } : {}) });
   for (const f of apps) {
-    const own = ctl.filter((c) => c.form === f.i && c.vis), labels = own.map((c) => controlLabel(c)), cands = own.filter((c, i) => labels[i] === "yes");
+    const own = ctl.filter((c) => c.form === f.i && c.vis), labels = own.map((c) => controlLabel(asEnabled(c))), cands = own.filter((c, i) => labels[i] === "yes");
     if (labels.includes("conflict")) return { ...none, refuse: "ambiguous_submit" };
-    if (cands.length === 1) return { ...none, form: f.i, submit: cands[0].c };
+    if (cands.length === 1) return chose(f, cands[0]);
     // Two or more Submit-worded controls in one form: only when exactly one is the form's declared Submit and it is the last of them.
     const declared = cands.filter((c) => c.type === "submit" && (c.tag === "BUTTON" || c.tag === "INPUT"));
-    if (cands.length > 1) { if (declared.length === 1 && declared[0] === cands[cands.length - 1]) return { ...none, form: f.i, submit: declared[0].c }; return { ...none, refuse: "ambiguous_submit" }; }
+    if (cands.length > 1) { if (declared.length === 1 && declared[0] === cands[cands.length - 1]) return chose(f, declared[0]); return { ...none, refuse: "ambiguous_submit" }; }
   }
   // A form shown in steps (Breezy): one visible "Continue" (not a submit, so pressing it posts nothing) with the form's Submit
   // drawn but hidden until the last step. Two such controls, a submit-typed one, or no hidden Submit beside it: not a step form.
@@ -1025,6 +1036,7 @@ async function attempt(browser, p, opts, timing) {
         const n = await f.evaluate(() => [document.forms.length, [...document.forms].some((x) => x.querySelector("input[type=file]") || x.querySelectorAll("input:not([type=hidden]), select, textarea").length >= 3)]).catch(() => [1, false]);
         snap.otherFrameForms += n[0]; if (n[1]) snap.frameApp = true;
       }
+      snap.waitsForValid = DISABLED_UNTIL_VALID.has(p.ats);
       lastPick = pickControls(snap);
       await page.evaluate(MARK, lastPick);
       return lastPick;
@@ -1186,6 +1198,13 @@ async function attempt(browser, p, opts, timing) {
     await gate("submit");
     await stopAtWall(page, p.url);
     if (!(await markSubmit())) throw new NeedsUser("no_submit_control", p.url);
+    // A Submit the page still keeps disabled once everything is filled (its own check is not satisfied): a moment for the page to
+    // enable it, then handed back, never pressed.
+    if (lastPick.disabled) {
+      await page.waitForSelector("[data-upmore-submit]:not([disabled]):not([aria-disabled='true'])", { timeout: 3000 }).catch(() => null);
+      if (!(await markSubmit())) throw new NeedsUser("no_submit_control", p.url);
+      if (lastPick.disabled) { const e = new NeedsUser("field_not_filled", "submit_disabled"); e.needs = [{ label: "submit_disabled: the page keeps its Submit disabled", reason: "form_rejects_value" }]; throw e; }
+    }
     // A form in which nothing was filled from the approved application is never the application (no name, no email, no resume).
     if (!fr.filled.length) throw new NeedsUser("no_application_form_found", p.url);
     // Review of #797: the control about to be pressed is the filled form's own (submitTieRefusal), so the address checked below
@@ -1245,6 +1264,8 @@ async function attempt(browser, p, opts, timing) {
     notOnFollowed();
     // The control about to be pressed, for the caller's own check (the strict bench refuses one inside a sign-in form).
     const submitInfo = await page.$eval("[data-upmore-submit]", (b) => { const f = b.closest("form"); return { signin: !!b.closest("[data-upmore-signin]"), form: f ? f.getAttribute("action") || "" : null }; }).catch(() => ({ signin: false, form: null }));
+    // The checks between the last fill and the click (settle, re-reads, the guard), for throughput measurement only.
+    timing.guard = Date.now() - t1 - timing.fill;
     if (opts.onPhase) await opts.onPhase("submitting", audit, submitInfo);
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
@@ -1321,7 +1342,7 @@ async function applyOne(browser, p, opts = {}) {
       return { ...out, ...r, timing: t, ms: Date.now() - started };
     } catch (e) {
       if (e instanceof NeedsUser && !t.submitClicked) {
-        const r = { ...out, ...(e.detail ? { check: e.detail } : {}), ...(e.diag ? { diag: e.diag } : {}), status: HANDOFF_REASONS.includes(e.reason) ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, wall: e.wall || undefined, needs: e.needs || undefined, filled_labels: e.filled || [], at: e.at || null, ...(e.alsoCheck ? { also_check: e.alsoCheck } : {}), ms: Date.now() - started };
+        const r = { ...out, ...(e.detail ? { check: e.detail } : {}), ...(e.diag ? { diag: e.diag } : {}), status: HANDOFF_REASONS.includes(e.reason) ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, wall: e.wall || undefined, needs: e.needs || undefined, filled_labels: e.filled || [], at: e.at || null, ...(e.alsoCheck ? { also_check: e.alsoCheck } : {}), timing: t, ms: Date.now() - started };
         // D-072: a stop at a wall the rules keep carries its hand-off (workers/career-browser/handoff.cjs); any other stop carries none.
         const h = buildHandoff(r, p);
         if (h) r.handoff = h;

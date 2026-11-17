@@ -215,7 +215,7 @@ async function strictPosting(browser, item, o) {
   if (out.reason === "strict_reached_submit") r.result = r.upload_simulated ? "ready_except_upload" : "pass";
   else if (out.reason === "missing_required_answer" && CUSTOM_ONLY(out.needs)) r.result = "ready_if_answered";
   if (out.status === "submitted_page_confirmed" || out.status === "unknown_outcome") { r.result = "fail"; r.reason = `BREACH: runner reported ${out.status}`; }
-  r.diag = out.diag || null; r.check = out.check || null;
+  r.diag = out.diag || null; r.check = out.check || null; r.timing = out.timing || null;
   // D-072: the wall the run stopped at, the page it stopped on, and the hand-off the runner produced there (or none).
   r.wall = out.wall || null; r.at = out.at || null; r.handoff = out.handoff || null; r.filled_count = (out.filled_labels || []).length;
   r.d072 = d072.classify(r);

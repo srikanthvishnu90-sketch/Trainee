@@ -40,7 +40,9 @@ export async function snapshotOf(x: TaskTrace): Promise<Snapshot> {
   const mine = new Set(jobs.map((r) => /\/([^/?#]+)\/jobs\/(\d+)/.exec(String(r.url ?? ""))).filter(Boolean).map((m) => `${m![1]}/${m![2]}`));
   return {
     said: x.said, replies: x.replies, intents: x.intents, turnMs: x.turnMs.map(Math.round), scripted: scriptedIndices(x.task.turns, x.said),
-    thread: x.thread.map((m) => ({ content: String(m.content ?? ""), meta: m.meta ?? null })),
+    // The thread, then the texts Trainee queued to the person outside it (career_outbox: the scheduled receipts), in order.
+    thread: [...x.thread.map((m) => ({ content: String(m.content ?? ""), meta: m.meta ?? null })),
+      ...(((await j(x.pg, `select json_agg(json_build_object('content', text, 'kind', kind) order by created_at, key) from public.career_outbox where user_id = '${u}' and kind = 'receipt'`)) ?? []) as any[]).map((r) => ({ content: String(r.content ?? ""), meta: { outbox: r.kind } }))],
     // Only this person's: a send the cloud worker finishes during a later scenario's turns belongs to the person it was approved for.
     atsPosts: x.atsPosts.filter((p) => mine.has(`${p.board}/${p.job}`)).map((p) => ({ board: p.board, job: p.job, files: p.files, fields: p.fields, confirmation_id: p.confirmation_id })),
     postsAt: x.atsPostsAt, jobsAt: x.jobsAt, wallMs: x.wallMs.map(Math.round), requested: x.requested,

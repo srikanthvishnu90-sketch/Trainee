@@ -313,6 +313,8 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
     const { factsFromPayload } = await import("../../../workers/career-browser/approve-first.ts");
     const { hashApplyPayload } = await import("../../../supabase/functions/_shared/career_apply_store.ts");
     const outreach = supabaseOutreachStore(admin);
+    const { runReceipts } = await import("../../../supabase/functions/_shared/career_proactive_run.ts");
+    const alertStore = (await import("../../../supabase/functions/_shared/career_alert_store.ts")).supabaseAlertStore(admin);
     const queue = restQueue({ url: SUPABASE_URL, key: SERVICE_KEY });
     const workerLog: string[] = [], sendLog: string[] = [];
     // One scheduler tick: the sending rail (as career-send runs it) and the cloud apply worker (as cloudLoop runs one job).
@@ -334,6 +336,14 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       let jobs: any[] = [];
       try { jobs = await queue.claim(25); } catch (e: any) { workerLog.push(`apply claim: ${String(e?.message ?? e).slice(0, 200)}`); }
       for (const job of jobs) await runCloudJob(job, { queue, runEngine: stubEngine(job, hashApplyPayload, factsFromPayload) as any, log: (l: string) => workerLog.push(l) });
+      // The scheduled receipts (career-proactive's receipts step, as its index.ts reads them): each finished application said
+      // once in the person's outbox (D-024: confirmed only with the employer's proof, else said unconfirmed). Conversation evals only.
+      if (o.onTask) await runReceipts({ outbox: alertStore, now: Date.now(), finished: async (since: string) => {
+        const { data, error } = await admin.from("career_apply_jobs").select("id,user_id,company,url,state,reason,confirmation_id,email_confirmed_at,evidence,source")
+          .in("state", ["confirmed", "submitted_unconfirmed", "needs_user", "failed", "not_submitted", "unknown_outcome"]).gte("updated_at", since).or("source.is.null,source.neq.email").limit(2000);
+        if (error) throw new Error(error.message);
+        return data ?? [];
+      } }).catch((e: any) => workerLog.push(`receipts: ${String(e?.message ?? e).slice(0, 160)}`));
     };
     const spent = async () => Number(await json(pg, "select coalesce(sum(usd_micros), 0) from public.agent_turn_costs")) / 1e6;
     for (const t of tasks) {

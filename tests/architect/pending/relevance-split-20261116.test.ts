@@ -6,7 +6,7 @@
 import assertNode from "node:assert/strict";
 import { CareerRouter, CareerTailor } from "../../../supabase/functions/_shared/router_core.career.js";
 import { agentTurn } from "../../../supabase/functions/agent-chat/career_brain.ts";
-import { edgeRenderer, memoryResumeStore, relevanceSplit, tailorForPosting } from "../../../supabase/functions/_shared/career_tailor.ts";
+import { edgeRenderer, memoryResumeStore, relevanceSplit, relevantTo, tailorForPosting } from "../../../supabase/functions/_shared/career_tailor.ts";
 import { POSTINGS } from "../../../evals/mirror/instinct-wa-batch1/world.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -94,5 +94,27 @@ Deno.test("CU-2b the split reads whole words and stack; the changelog says it on
   // The plain render prints both headings, and there the changelog says it.
   const plain: any = await tailorForPosting({ ...base, deps: { render: real, resumes: memoryResumeStore() } } as any);
   ok(/Split your experience for this posting/.test(String(plain.changelog)), String(plain.changelog));
+});
+
+// Review rv2 of ag/cd-d-relevance-split: ONE relevance judgement (relevantTo) for the split and the changelog, from skills, stack
+// and the kind of work in the entry's own words, never title-word overlap. A marketing posting at a software company makes the
+// go-to-market role relevant; a software posting makes the founder and AI-tooling roles relevant.
+Deno.test("CU-2c one judgement for the split and the changelog; the kind of work decides, not title words", async () => {
+  const profile = personaProfile();
+  const make = (title: string, desc: string) => tailorForPosting({ userId: "00000000-0000-4000-8000-000000001614", profile, posting: { text: `${title} at Acme\n\n${desc}`, job_id: "x", company: "Acme" }, deps: { render: edgeRenderer(), resumes: memoryResumeStore() }, now: NOW, reviewDraft: true, split: "relevance" } as any);
+  const heads = (v: any, sec: string) => v.detail.doc.lines.filter((l: any) => l.section === sec && l.type === "entry").map((l: any) => String(l.text).split(",")[0]);
+  const mkt: any = await make("Software Marketing Intern", "Write launch content for our software products.");
+  ok(heads(mkt, "Relevant Experience").includes("Elmstead") && !heads(mkt, "Relevant Experience").includes("Pixelforge"), `marketing: ${heads(mkt, "Relevant Experience").join(" | ")}`);
+  const p = POSTINGS[0];
+  const swe: any = await make(p.title, p.description);
+  for (const e of ["Rallyup", "Waypoint", "Ondo", "Harbor Global", "Pixelforge", "Crestline Partners"]) ok(heads(swe, "Relevant Experience").includes(e), `software: ${e} is not relevant: ${heads(swe, "Relevant Experience").join(" | ")}`);
+  ok(heads(swe, "Additional Experience").includes("Elmstead"), heads(swe, "Additional Experience").join(" | "));
+  // One judgement: an entry is under Relevant Experience exactly when relevantTo says so.
+  const jd = CareerTailor.parseJD(`${p.title} at Acme\n\n${p.description}`);
+  const entries = swe.detail.doc.lines.filter((l: any) => l.type === "entry" && /Experience$/.test(l.section));
+  const judged = relevantTo(jd, profile, entries.map((l: any) => String(l.factIds[0])));
+  for (const l of entries) eq(l.section === "Relevant Experience", judged.has(String(l.factIds[0])), String(l.text).slice(0, 40));
+  // And the changelog does not call an entry under Relevant Experience one "this posting doesn't ask for".
+  ok(!/doesn't ask for/.test(String(swe.changelog)) && /Split your experience for this posting: 6 under Relevant Experience/.test(String(swe.changelog)), String(swe.changelog));
 });
 

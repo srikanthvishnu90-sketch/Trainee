@@ -119,3 +119,16 @@ Deno.test("'apply to 20 more like those': the last batch's search again, without
   eq(again?.status, "none", again?.reply);
   assert(/already on your apply list, so there are no more/.test(again!.reply), again!.reply);
 });
+
+Deno.test("'20 more like those' with the exact search used up: widened to the role family's related titles, said by name (eval MA11)", async () => {
+  const rows = [posting("Acme", "Frontend Engineering Intern", "Chicago, IL"), posting("Northwind", "Software Engineering Intern", "Chicago, IL"), posting("Juno", "Product Design Intern", "Chicago, IL")];
+  const db = memoryPostingsDb();
+  await db.putMany(rows);
+  const wants = memoryWantStore();
+  let kept: any = null;
+  const turn = (message: string) => applyTurn({ message, userId: "u1", now: T, wants, apps: async () => [], facts: [], shortlist: null, postings: { search: (w: string[], l: number) => db.search(w, l) }, resumeOnFile: async () => true, lastSearch: async () => kept });
+  kept = (await turn("apply to all the frontend internships in Chicago"))!.search;
+  const more = await turn("apply to 20 more like those");
+  eq((await wants.list("u1")).map((w) => w.company).sort(), ["Acme", "Northwind"], more?.reply);
+  assert(/widened to related titles: software internships in Chicago/.test(more!.reply), more!.reply);
+});

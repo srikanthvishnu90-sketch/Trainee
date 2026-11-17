@@ -231,6 +231,16 @@ export function allSearchOf(raw: string): { search: ManyWhat; qualify?: true; ex
   const search: ManyWhat = { ...what, role: what.role.replace(/\s+(?:roles?|jobs?|positions?|postings?|openings?)$/i, ""), place: places[0] ?? null, ...(places.length > 1 ? { places } : {}) };
   return { search, ...(qualify ? { qualify: true as const } : {}), ...(exclude?.length ? { exclude } : {}) };
 }
+// The related titles one step wider than a search, within its role family: the specialty word dropped for the family's own
+// word ("frontend internships" -> "software internships"). Null when the search names no specialty this knows.
+const RELATED: [RegExp, string][] = [[/^(?:frontend|fe|backend|be|fullstack|ui|web|mobile|ios|android|platform|infrastructure|devops)$/, "software"], [/^(?:analyst|analytics|bi)$/, "data"], [/^(?:ml|mle|ai)$/, "machine learning"]];
+export function widerSearch(what: ManyWhat): ManyWhat | null {
+  const i = what.words.findIndex((w) => RELATED.some(([re]) => re.test(w)));
+  if (i < 0) return null;
+  const to = RELATED.find(([re]) => re.test(what.words[i]))![1];
+  const words = what.words.map((w, k) => (k === i ? to : w)).filter((w, k, a) => a.indexOf(w) === k);
+  return { ...what, words, role: words.join(" ") };
+}
 // One message queues at most this many (owner review of #366): a bigger ask is told plainly how many went and why.
 export const MANY_MAX = 50;
 // Not a command (review of #366): a hedge, a negation, a condition or a question about applying ("I wouldn't apply to the
@@ -505,6 +515,8 @@ const NOTHING_SENT = (company: string, prepares = true) => prepares
   : `Nothing is sent and nothing is filled yet: it's in your queue to be prepared. The exact application goes to ${company} only when you approve it on the card that shows it exactly.`;
 
 const BARE_NUMBER = /^(?:please\s+)?apply\s+(?:me\s+)?(?:to|for)\s+(\d{1,2})(?:\s+please)?[.!]?$/i;
+// An imperative ask to apply ("apply me to ...", "please apply to ...", "can you apply me to ..."), never a question about applying.
+const APPLY_COMMAND = /^(?:(?:ok(?:ay)?|so|hey|please|pls)[,\s]+)*(?:(?:can|could|would) you\s+(?:please\s+)?)?apply\s+(?:me\s+)?(?:to|for)\s+\S/i;
 export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | null> {
   // FEATURE E2E: a pasted posting link, or a role named by the company's possessive, read from the ATS on demand
   // (career_apply_link.ts); only with the link deps wired (agent-chat), otherwise as before.
@@ -525,7 +537,15 @@ export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | nul
   const bare = BARE_NUMBER.exec(String(o.message ?? "").trim());
   if (bare && (o.shortlist ?? []).some((e) => e && (e.url || e.id))) return applyManyTurn({ ...o, message: `apply to #${bare[1]}` });
   const ask = applyAsk(o.message);
-  if (!ask) return null;
+  if (!ask) {
+    // MASS APPLY CONVERSATIONS (eval MA13; CLAUDE.md: never submit without a real confirmed resume): any other ask to apply
+    // ("apply me to 50 data analyst jobs in chicago", the router's batch shape) from someone with no confirmed resume on file
+    // asks for the resume first, before any search is shown. With a resume on file, or unknown, the turn is not this one's.
+    if (APPLY_COMMAND.test(String(o.message ?? "").trim()) && !NOT_A_COMMAND.test(String(o.message ?? "")) && await noResume(o) === "missing") {
+      return { reply: `I need your resume before I apply anywhere: I have no confirmed resume on file, so nothing was searched, queued or sent. ${NO_RESUME_NEXT} Then say "${String(o.message).trim().slice(0, 120)}" again and I'll take it from there.`, status: "no_resume", intent: APPLY_QUEUE_INTENT, queued: [], refused: [] };
+    }
+    return null;
+  }
   const intent = APPLY_QUEUE_INTENT;
   // Only an open posting on file (career_postings) is this turn's: when none matches, or the read fails, the turn is
   // not claimed, and the router answers the ask as it always has (its own served list, its honest named stop).
@@ -688,8 +708,22 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
     if (onList) {
       const before = list.length;
       list = list.filter((e) => !onList!.has(String(e.id ?? "")));
+      // The exact search is used up: one step wider, to the related titles of the same role family in the same places, said by
+      // name ("widened to software internships in Chicago"); still none: said plainly below.
+      const wider = !list.length ? widerSearch(what) : null;
+      if (wider) {
+        try {
+          const w = await postingsFor(o, wider);
+          const fresh = w.list.filter((e) => !onList!.has(String(e.id ?? "")));
+          if (fresh.length) {
+            list = fresh; rankedBy = w.rankedBy;
+            const where = (wider.places?.length ? wider.places : wider.place ? [wider.place] : []).map((p) => p.replace(/\b\w/g, (c) => c.toUpperCase()));
+            moreNote = `All ${before} open ${what.role || "matching"} posting${before === 1 ? " is" : "s are"} already on your apply list, so I widened to related titles: ${wider.role}${where.length ? ` in ${where.join(" or ")}` : ""}. `;
+          }
+        } catch { /* the wider search failed: said as none below */ }
+      }
       if (!list.length) return { reply: `All ${before} open ${what.role || "matching"} posting${before === 1 ? "" : "s"} I can find for that search ${before === 1 ? "is" : "are"} already on your apply list, so there are no more and nothing new was queued. Say "apply to every <role> in <place>" to search wider.`, status: "none", intent, queued: [], refused: [] };
-      if (list.length < before) moreNote = `${before - list.length} already on your apply list left out. `;
+      else if (list.length < before && !moreNote) moreNote = `${before - list.length} already on your apply list left out. `;
     }
     // The employers they said to skip, and (for "that I qualify for") what their confirmed facts rule out: left out by name, with why.
     if (ask.kind === "all" && (ask.exclude?.length || ask.qualify)) {

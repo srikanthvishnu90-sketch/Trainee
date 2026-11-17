@@ -322,6 +322,9 @@ if [[ -f "$BRIDGE_PATH" ]]; then
     # 20261108100000 (paged cards) and 20261108110000 (a tailored resume per posting) redefine the card answer and the kept
     # resume read as the latest migrations leave them: applied last, below, twice, with their tests and rollbacks.
     [[ "$(basename "$file")" == 20261108100000_* || "$(basename "$file")" == 20261108110000_* ]] && continue
+    # 20261116140000 (D-094, a batch's File) redefines that card answer again, on 20261108100000's columns: applied last, below,
+    # twice per round, with its test and rollback.
+    [[ "$(basename "$file")" == 20261116140000_* ]] && continue
     cp "$file" "$PENDING_ROOT/supabase/migrations/"
   done
 fi

@@ -442,6 +442,54 @@ async function fillText(page, d, value) {
 const digitsOf = (v) => String(v || "").replace(/\D/g, "");
 const isPhone = (d, value) => (d.inputType === "tel" || /^(phone|mobile|telephone|cell|telefon|telefoon|handy|mobil)/.test(norm(d.label).replace(ASKED_AS, "")))
   && /^\+?[\d\s().\-\/]{6,}$/.test(String(value).trim());
+// Dial codes of the countries a phone widget or a phone-country field names, by ISO code and by English name (the boards' own words).
+const DIAL = { us: "1", ca: "1", gb: "44", uk: "44", ie: "353", nl: "31", be: "32", lu: "352", de: "49", at: "43", ch: "41", fr: "33", es: "34", pt: "351",
+  it: "39", se: "46", no: "47", dk: "45", fi: "358", is: "354", pl: "48", cz: "420", sk: "421", hu: "36", ro: "40", bg: "359", gr: "30", hr: "385", si: "386",
+  ee: "372", lv: "371", lt: "370", ua: "380", tr: "90", il: "972", ae: "971", sa: "966", in: "91", pk: "92", sg: "65", my: "60", ph: "63", id: "62", th: "66",
+  vn: "84", cn: "86", hk: "852", tw: "886", jp: "81", kr: "82", au: "61", nz: "64", za: "27", ng: "234", ke: "254", eg: "20", ma: "212", br: "55", mx: "52",
+  ar: "54", cl: "56", co: "57", pe: "51" };
+const DIAL_NAME = { "united states": "1", "usa": "1", "canada": "1", "united kingdom": "44", "ireland": "353", "netherlands": "31", "nederland": "31", "belgium": "32",
+  "germany": "49", "deutschland": "49", "austria": "43", "switzerland": "41", "france": "33", "spain": "34", "portugal": "351", "italy": "39", "sweden": "46",
+  "norway": "47", "denmark": "45", "finland": "358", "poland": "48", "india": "91", "australia": "61", "new zealand": "64", "singapore": "65", "israel": "972",
+  "united arab emirates": "971", "brazil": "55", "mexico": "52", "japan": "81", "china": "86" };
+// Does anything beside this phone box say it is a country other than the approved code's? Read only. A phone-country field of the
+// form (a hidden or select value), or, in the phone's own shell, a shown dial code, a flag's title or label, or the selected country's
+// name. Any one that names another code, or names a country this list cannot place, is a conflict. Nothing named: no conflict.
+async function phoneCountryConflict(page, d, cc) {
+  const seen = await page.evaluate(([q]) => {
+    const el = document.querySelector(`[data-upmore-q="${q}"]`);
+    if (!el) return { codes: [], names: [] };
+    const form = el.closest("form") || document;
+    const codes = [], names = [];
+    for (const f of form.querySelectorAll("input, select")) {
+      if (f === el) continue;
+      const n = `${f.name || ""} ${f.id || ""}`;
+      if (/(phone|tel|mobile)[^a-z]*(country|iso|region)|(country|dial)[^a-z]*(phone|tel|mobile)|phone_?country|dial_?code|calling_?code/i.test(n)) {
+        const v = f.tagName === "SELECT" ? ((f.options[f.selectedIndex] || {}).textContent || f.value) : f.value;
+        if (String(v || "").trim()) names.push(String(v).trim());
+      }
+    }
+    let box = el.closest(".iti, [class*='phone' i]");
+    if (!box || box.querySelectorAll("[data-upmore-q]").length > 1) box = el.parentElement;
+    for (const n of box ? box.querySelectorAll("*") : []) {
+      if (n === el || n.closest("ul, [role=listbox], .iti__country-list, .iti__dropdown-content")) continue;
+      for (const t of [n.getAttribute("title"), n.getAttribute("aria-label"), n.children.length ? "" : n.textContent]) {
+        const s = String(t || "").trim(); if (!s) continue;
+        const m = /\+\s?(\d{1,4})(?!\d)/.exec(s); if (m) codes.push(m[1]);
+        if (/flag|country/i.test(String(n.className || "")) || /^(selected country|country)\b/i.test(String(n.getAttribute("aria-label") || ""))) names.push(s.replace(/^selected country:?\s*/i, "").replace(/\+\s?\d+.*$/, "").trim());
+      }
+    }
+    return { codes, names };
+  }, [d.q]).catch(() => ({ codes: [], names: [] }));
+  if (seen.codes.some((c) => c !== cc)) return true;
+  for (const raw of seen.names) {
+    const n = String(raw).toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim();
+    if (!n) continue;
+    const code = /^\+?\d{1,4}$/.test(String(raw).trim()) ? String(raw).replace(/\D/g, "") : DIAL[n] || DIAL_NAME[n];
+    if (!code || code !== cc) return true;
+  }
+  return false;
+}
 async function phoneSame(page, d, value, text) {
   const want = digitsOf(value), got = digitsOf(text);
   if (!got) return false;
@@ -1005,7 +1053,12 @@ async function driftedFills(page, filled, facts = {}) {
     if (isPhone(f.d, f.value) && await phoneSame(page, f.d, f.value, now)) continue;
     // Round 3: a phone box that reformats on blur ("+1 415 555 0100" shown as "(415) 555-0100") holds the same number when its
     // digits are the approved ones, less only the approved number's own country code. Any other digit refuses.
-    if (isPhone(f.d, f.value)) { const cc = /^\s*\+(\d{1,3})[\s\-.(]/.exec(String(f.value)), want = digitsOf(f.value), got = digitsOf(now); if (got && (got === want || (cc && want === cc[1] + got))) continue; }
+    // Review of the rs-11 split (probes p11, p11b, 2026-11-17): the national digits alone are that number only when nothing beside the
+    // box says the box is another country's: a phone country field of the form ("candidate.phone_country" = NL), or the widget's own
+    // flag, name or dial code there (Netherlands, +31). The employer joins that country with the digits: +31 312 555 0100, never the
+    // approved +1 number. A country named there that is not the approved code's, or one this rule cannot place, refuses.
+    if (isPhone(f.d, f.value)) { const cc = /^\s*\+(\d{1,3})[\s\-.(]/.exec(String(f.value)), want = digitsOf(f.value), got = digitsOf(now);
+      if (got && (got === want || (cc && want === cc[1] + got && !(await phoneCountryConflict(page, f.d, cc[1]))))) continue; }
     out.push(f.label);
   }
   return out;

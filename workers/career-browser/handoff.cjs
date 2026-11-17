@@ -109,22 +109,28 @@ const same = (a, b) => { const x = String(a).trim().toLowerCase().replace(/\s+/g
 // approved file's own name.
 const RESUME_BOX = /resume|\bcv\b|curriculum|lebenslauf/i;
 const fileKey = (x) => String(x || "").toLowerCase().replace(/\.[a-z0-9]{1,5}$/, "").replace(/[^a-z0-9]/g, "");
-// Review of the rs-05 split (probe p05-resume-url-stale, 2026-11-17): an address the PAGE put in that box at load (a stale file, another
-// person's, an attacker's, that merely shares the approved file's name) is never the approved resume. Only a box that was there and
-// EMPTY before anything was filled (emptyAtLoad, read by the runner), and that this run filled with the resume, counts.
-function carriesResume(c, resumeName, emptyAtLoad) {
+// Review of the rs-05 split (p05-resume-url-stale) and its delta review (p05-resume-url-variants, 2026-11-17): default-deny. The box
+// carries the approved resume only on positive evidence that THIS run's file set caused what it holds (ev, read by the runner, never
+// by the page): it was there and empty immediately before this run set the resume file (ev.sets), and after that set the page sent
+// the approved file itself (a multipart part with the file's own name, ev.uploads) to the very host the address names: the board's
+// storage. An address put there at load, by a page timer, on a keystroke, into a box created later, after emptying, or on a host
+// the file never went to, is asked.
+function carriesResume(c, resumeName, ev) {
   if (!resumeName || !RESUME_BOX.test(c.name || "") || c.type === "checkbox" || c.type === "radio") return false;
-  if (!emptyAtLoad || !emptyAtLoad.has(String(c.name || ""))) return false;
   let u; try { u = new URL(String(c.value || "").trim()); } catch { return false; }
   if (u.protocol !== "https:") return false;
   let last = ""; try { last = decodeURIComponent(u.pathname.split("/").pop() || ""); } catch { return false; }
   const ext = (x) => (/\.([a-z0-9]{1,5})$/i.exec(x) || [])[1];
-  return !!fileKey(resumeName) && fileKey(last) === fileKey(resumeName) && String(ext(last) || "").toLowerCase() === String(ext(resumeName) || "").toLowerCase();
+  if (!fileKey(resumeName) || fileKey(last) !== fileKey(resumeName) || String(ext(last) || "").toLowerCase() !== String(ext(resumeName) || "").toLowerCase()) return false;
+  const name = String(c.name || ""), host = u.hostname.toLowerCase();
+  const sets = (ev && ev.sets) || [], uploads = (ev && ev.uploads) || [];
+  return sets.some((s) => s && s.before && Object.prototype.hasOwnProperty.call(s.before, name) && s.before[name] === ""
+    && uploads.some((x) => x && x.at >= s.at && String(x.host || "").toLowerCase() === host));
 }
 function unconfirmedDefaults(controls, person = {}) {
   const out = [], seen = new Set();
   for (const c of controls || []) {
-    if (carriesResume(c, person.resumeName, person.resumeBoxesEmptyAtLoad)) continue;
+    if (carriesResume(c, person.resumeName, person.resumeEvidence)) continue;
     // Round 2 (review of #818): every control the page set and the engine did not, text boxes, hidden answers and contenteditable
     // regions included; a disabled control is never sent, so it is shown on the card and never asked.
     if ((c.hidden && !c.answer) || c.pageData || c.touched || c.disabled || !set(c) || c.type === "file") continue;

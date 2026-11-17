@@ -659,6 +659,30 @@ async function menuSelected(page, d, ctl0) {
   await input.press("Escape").catch(() => {});
   return held;
 }
+// The listboxes shown before a box is opened are marked; after, the one new listbox (exactly one) is marked as this box's list.
+function LB_BEFORE() { for (const e of document.querySelectorAll("[data-upmore-lb-before], [data-upmore-lb-new]")) { e.removeAttribute("data-upmore-lb-before"); e.removeAttribute("data-upmore-lb-new"); }
+  for (const e of document.querySelectorAll('[role="listbox"]')) if (e.offsetWidth || e.offsetHeight) e.setAttribute("data-upmore-lb-before", "1"); }
+async function floatingList(page) {
+  return page.evaluate(() => { const fresh = [...document.querySelectorAll('[role="listbox"]:not([data-upmore-lb-before])')].filter((e) => (e.offsetWidth || e.offsetHeight) && e.querySelector('[role="option"]'));
+    if (fresh.length !== 1) return false; fresh[0].setAttribute("data-upmore-lb-new", "1"); return true; }).catch(() => false);
+}
+// A dropdown's own options, read by opening it and closing it again with nothing chosen: what a question handed back to the person
+// offers, in the page's words (a box whose options only show once opened). Read only; [] when none can be read.
+async function comboOptions(page, d) {
+  const input = page.locator(sel(d.q)).first();
+  const ctl = (await input.getAttribute("aria-controls").catch(() => null)) || (await input.getAttribute("aria-owns").catch(() => null));
+  const shell = input.locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select__container") or @data-combobox or contains(@class,"ashby-application-form-field-entry")][1]');
+  if (await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => true)) return [];
+  const read = async (loc) => (await loc.allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
+  await page.evaluate(LB_BEFORE).catch(() => {});
+  try {
+    await input.click({ timeout: 3000 });
+    await page.waitForTimeout(200);
+    let list = ctl ? await read(page.locator(`[id="${ctl.replace(/"/g, "")}"] [role="option"]:visible`)) : await read(shell.locator('[role="option"]:visible'));
+    if (!list.length && !ctl && (await floatingList(page))) list = await read(page.locator('[role="listbox"][data-upmore-lb-new] [role="option"]:visible'));
+    return list.slice(0, 60);
+  } catch { return []; } finally { await input.press("Escape").catch(() => {}); }
+}
 async function fillCombo(page, d, value, pick, phone, country) {
   const input = page.locator(sel(d.q)).first();
   // Only this dropdown's own options: its aria-controls list, else the options inside its own shell. A phone widget's country
@@ -668,10 +692,16 @@ async function fillCombo(page, d, value, pick, phone, country) {
   // Ashby's place box draws its list in a floating layer outside the field (strict benchmark run 42739040932): only that
   // box's own result rows (Ashby's autocomplete class, under a listbox) are read, never any other list on the page.
   const ashPlaces = !ctl && (await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => false));
+  // A list the board draws in a floating layer outside the field once this box is opened (Ashby's own dropdowns; strict answered
+  // run of 2026-11-16: "How did you hear about iwoca": options_not_readable): only a listbox that was not shown before the click and
+  // is the only such one, never any other list on the page (floatingList).
+  let float = false;
   const opts = () => (ctl ? page.locator(`[id="${ctl.replace(/"/g, "")}"] [role="option"]:visible`)
     : ashPlaces ? page.locator('[role="listbox"] [role="option"][class*="ashby-application-form-input-autocomplete-"]:visible')
+    : float ? page.locator('[role="listbox"][data-upmore-lb-new] [role="option"]:visible')
     : shell.locator('[role="option"]:visible'));
-  const optionsNow = async () => (await opts().allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const optionsNow = async () => { let l = (await opts().allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); if (!l.length && !ctl && !ashPlaces && !float && (float = await floatingList(page))) l = (await opts().allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); return l; };
+  await page.evaluate(LB_BEFORE).catch(() => {});
   await input.click();
   let list = await optionsNow();
   if (!list.length) { await page.waitForTimeout(120); list = await optionsNow(); }
@@ -878,6 +908,8 @@ async function fillForm(page, ctx0) {
       entry.source = dec.source;
       if (before.filled && d.kind !== "file" && dec.status !== "fill") { entry.status = "prefilled"; continue; }
       if (dec.status === "skip") { entry.status = "skipped"; entry.reason = dec.reason; continue; }
+      // A dropdown whose options only show once opened is read for them (comboOptions), so the question goes back with what it offers.
+      if (dec.status === "ask" && d.kind === "combobox" && !d.options && !d.phoneCountry && !d.place) { const o = await comboOptions(page, d); if (o.length) d.options = o.map((label, i) => ({ i, label })); }
       if (dec.status === "ask") { entry.status = "needs_user"; entry.reason = dec.reason; needsUser.push({ label: d.label, reason: dec.reason, kind: d.kind, ...(d.options ? { options: d.options.map((o) => o.label).slice(0, 40) } : {}) }); continue; }
       let r;
       // Once the board has re-rendered (below), a question read before it is looked up again first, not waited on.

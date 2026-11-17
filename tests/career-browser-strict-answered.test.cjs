@@ -29,6 +29,8 @@ test("synthetic answers: the page's first real option, a decline for a demograph
   assert.match(answers["Why do you want to work here?"], /synthetic/);
   assert.deepEqual(unanswerable.map((u) => u.reason), ["upload_needs_you", "no_matching_option"]);
   assert.equal(textAnswer("Years of experience with Python", "text"), "3");
+  assert.equal(textAnswer("Date of Birth", "text"), "1990-01-01");
+  assert.equal(textAnswer("Earliest start date", "text"), "2026-12-01");
   // An answer already given and asked again is an execution failure, never answered twice.
   assert.deepEqual(synthesize([{ label: "A", reason: "no_confirmed_answer", kind: "text" }], { A: "x" }).unanswerable, [{ label: "A", reason: "answered_still_asked" }]);
 });

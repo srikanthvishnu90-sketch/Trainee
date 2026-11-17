@@ -29,7 +29,10 @@ function textAnswer(label, kind) {
   if (/salary|compensation|pay\b|ote|rate/.test(l)) return "100000";
   if (/\byears?\b|how many|number of/.test(l)) return "3";
   if (/zip|postal|post code|postcode/.test(l)) return "94105";
-  if (/\bdate\b|start|available|notice|availability/.test(l)) return kind === "textarea" ? "Available two weeks after an offer." : "2 weeks";
+  // A date box (often type=date, which takes only yyyy-mm-dd): an ISO date.
+  if (/birth|\bdob\b/.test(l)) return "1990-01-01";
+  if (/\bdate\b/.test(l)) return "2026-12-01";
+  if (/start|available|notice|availability/.test(l)) return kind === "textarea" ? "Available two weeks after an offer." : "2 weeks";
   if (/\bcity\b/.test(l)) return "San Francisco";
   if (/address/.test(l)) return "1 Test Street, San Francisco, CA 94105";
   if (/\bname\b/.test(l)) return "Test Synthetic";

@@ -140,7 +140,12 @@ answered. The headline is unchanged and never counts it.
 **Dry-run guard, proved with its first wall removed.** `tests/career-browser-strict-guard.test.cjs` takes away the stop before the
 click and lets the production runner press Submit on local pages (a native submit; a board script that fetches, beacons, opens a
 WebSocket and calls `form.submit()`): the local employer receives nothing. Without the bench's gate and page script the same test
-receives `POST /submit`. `STRICT_INIT` now also replaces `WebSocket` (a socket is not a request the gate sees).
+receives `POST /submit`. `STRICT_INIT` now also replaces `WebSocket` (a socket is not a request the gate sees) in the page and,
+since the review of 2026-11-17 (probe p01-worker-ws-bench), in every Worker and SharedWorker the page starts (a bootstrap that installs
+the same refusal before the page's worker script runs, for nested workers too); WebTransport and peer connections are refused. Before
+that review fix, a socket opened from the page's own worker did reach the employer: the earlier claim that sockets never open held
+for the page only. Stated limit: a GET that carries typed values in its address to another host is still a GET and passes the gate
+(images are not fetched); the bench does not prove that no answer can leave through a GET's address.
 
 | run | trunk / head | headline pass | ready if answered | answered: reached Submit (+ upload simulated) |
 |---|---|---|---|---|
@@ -197,7 +202,8 @@ upload simulated in brackets.
 
 Closed: 24 of the sample (9 at the start of the run) and 29 of the held-out (13 at the start). The headline (no custom answers) stays
 where it was by construction; the answered column is where execution shows: 42 → 64 of 220 (sample) and 38 → 64 (held-out) reach the
-instant before Submit once answered. Left after r3, by count: Recruitee phone reformats with other digits (`value_changed_by_page`,
+instant before Submit once answered. Those totals include the rows whose resume upload was simulated in the browser (31 and 39 of the
+64), which are never a pass: reached Submit with nothing simulated is 34 → 33 (sample) and 26 → 25 (held-out). Left after r3, by count: Recruitee phone reformats with other digits (`value_changed_by_page`,
 11 to 16), Workable steps with no Submit word (`no_submit_control`, 3 to 4), Breezy unnamed page flags (fixed after r3, aea3d3a7) and
 `salaryCurrency`, Ashby's own dropdown in the live page (still `options_not_readable`).
 
@@ -219,6 +225,10 @@ value as shown. Answered = reached Submit (+ upload simulated).
 | **all 220** | **7 → 7** | **33 (+31) → 37 (+40)** | **7 → 12** | **25 (+39) → 38 (+46)** |
 
 Open only: sample 7 / 196 headline, 37 (+40) answered; held-out 12 / 191 headline, 38 (+46) answered. D-072: 173 and 172 of 220.
+The bracketed rows had their resume upload simulated and are never a pass. The Recruitee gains (held-out headline 0 → 5, answered
+0 → 13) depend on rs-11's fix (a phone box reset to a bare dial code is set again); that fix was tightened after this run by the review
+of 2026-11-17 (the re-set must read back as exactly the approved number, and national digits beside another named country refuse,
+rs-00), so the Recruitee rows were measured before that tightening and may fall where a widget strips the approved country code.
 Left: Workable `no_submit_control` (3 and 4; not reproduced locally: the same postings reach Submit in a local dry run), Ashby's own
 dropdowns (an `ashby-application-form-input-autocomplete` list that drew no options after typing in a local dry run; no request was
 made), Recruitee 8 sample `field_not_filled`, Greenhouse 1 to 2. Throughput not re-measured: the machine's load average stayed 14 to 106.

@@ -316,6 +316,7 @@ MIGRATIONS=(
   20261113140000_career_apply_stop_stale_facts.sql
   20261113150000_career_outreach_adopt_skip_mail_reply.sql
   20261116140000_career_apply_batch_file.sql
+  20261117120000_career_apply_card_file_any_path.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -496,6 +497,7 @@ MIGRATION_MARK=(
   "to_regprocedure('public.career_apply_stop_stale_facts(uuid,jsonb,text)') is not null and exists (select 1 from pg_trigger where tgname = 'career_apply_facts_claim_guard') and exists (select 1 from pg_trigger where tgname = 'career_apply_facts_write_record')"
   "exists (select 1 from pg_proc where proname = 'career_outreach_threads_adopt' and prosrc like '%mail_reply%')"
   "to_regprocedure('public.career_apply_card_push_batch_for(uuid,uuid,uuid[],text,text,timestamptz)') is not null and exists (select 1 from pg_proc where proname = 'career_apply_card_answer_for' and prosrc like '%FILE_CHANGED%')"
+  "to_regprocedure('public.career_apply_card_open_batch_as(uuid,uuid[],text)') is not null and exists (select 1 from pg_proc where proname = 'career_apply_card_confirm_for' and prosrc like '%FILE_CHANGED%')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

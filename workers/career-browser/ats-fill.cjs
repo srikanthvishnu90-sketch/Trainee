@@ -566,8 +566,9 @@ async function fillFile(page, d, path) {
   // this run sets the resume file, kept in the runner (never in the page). Only a box empty here can later carry the stored resume's
   // address (handoff.cjs carriesResume; the upload itself is seen by parallel-apply).
   if (d.role === "resume") {
-    const before = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("input:not([type=file]):not([type=checkbox]):not([type=radio]), textarea")]
-      .filter((e) => e.name && /resume|\bcv\b|curriculum|lebenslauf/i.test(e.name)).map((e) => [e.name, String(e.value || "")]))).catch(() => ({}));
+    // One entry per element, never keyed by name (second delta review of rs-05: two boxes of one name, one pre-filled, read as one).
+    const before = await page.evaluate(() => [...document.querySelectorAll("input:not([type=file]):not([type=checkbox]):not([type=radio]), textarea")]
+      .filter((e) => e.name && /resume|\bcv\b|curriculum|lebenslauf/i.test(e.name)).map((e) => [e.name, String(e.value || "")])).catch(() => null);
     if (!RESUME_SETS.has(page)) RESUME_SETS.set(page, []);
     RESUME_SETS.get(page).push({ at: Date.now(), before });
   }

@@ -30,7 +30,7 @@
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
-const { fillForm, heldNow, recheckFilled, driftedFills, MARK_SIGNIN, EXTRACT, answerFor, factValue, factsFrom } = require("./ats-fill.cjs");
+const { resumeSetsOf, fillForm, heldNow, recheckFilled, driftedFills, MARK_SIGNIN, EXTRACT, answerFor, factValue, factsFrom } = require("./ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, OVERLAY_APPLY, CLOSED_MARK, CLOSED_TEXT, applyUrlFor } = require("./apply-entry.cjs");
 const { buildHandoff, PERSON_REASONS, pageDigest, unconfirmedDefaults } = require("./handoff.cjs");
 const NOT_OFFERED = new Set(["no_matching_option", "ambiguous_option"]);
@@ -946,10 +946,14 @@ async function attempt(browser, p, opts, timing) {
   await ctx.route("**/*", (route) => guardRoute(route).catch(() => route.abort("blockedbyclient").catch(() => {})));
   // Round 4: the submit window's network guard (submitWindowVerdict), set just before the click and cleared once the outcome is read.
   let submitWindow = null, hiddenAtLoad = [];
+  const resumeUploads = []; // { at, host } of each request that sent the approved resume file (guardRoute)
   const loadedBefore = new Set(); // every GET address the page loaded before the submit window (no parameters, no fragment)
   async function guardRoute(route) {
     const req = route.request();
     if (!submitWindow && req.method() === "GET") { try { const x = new URL(req.url()); if (!x.search) loadedBefore.add(x.origin + x.pathname); } catch { /* none */ } }
+    // Delta review of rs-05: every request before the submit window that carries the approved resume file itself (a multipart part
+    // with its own file name): where the board stored it (handoff.cjs carriesResume). Recorded only; the request is judged below as always.
+    if (!submitWindow && (req.method() === "POST" || req.method() === "PUT")) { try { const b = req.postDataBuffer(); if (b && b.toString("latin1").includes(`filename="${require("node:path").basename(p.resume.path)}"`)) resumeUploads.push({ at: Date.now(), host: new URL(req.url()).hostname }); } catch { /* none */ } }
     if (submitWindow) {
       let nav = false; try { nav = req.isNavigationRequest(); } catch { /* none */ }
       const buf = req.postDataBuffer();
@@ -1141,10 +1145,6 @@ async function attempt(browser, p, opts, timing) {
     await declineCookies(page);
     // Round 5: the page as it was before anything was filled: its own constants (a job id, a shortcode, a source) are known here.
     hiddenAtLoad = await page.evaluate(() => [...document.querySelectorAll("input[type=hidden]")].filter((e) => e.name).map((e) => [e.name, String(e.value)])).catch(() => []);
-    // Review of the rs-05 split: the boxes named for the resume that are there and empty before anything is filled; only such a box,
-    // filled by the board once this run set the resume file, may carry the stored resume's address (handoff.cjs carriesResume).
-    const resumeBoxesEmptyAtLoad = new Set(await page.evaluate(() => [...document.querySelectorAll("input:not([type=file]):not([type=checkbox]):not([type=radio]), textarea")]
-      .filter((e) => e.name && /resume|\bcv\b|curriculum|lebenslauf/i.test(e.name) && !String(e.value || "").trim()).map((e) => e.name)).catch(() => []));
     const fr = { map: [], filled: [], needsUser: [], failed: [], invalid: [] };
     for (let step = 0; ; step++) {
       const r = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
@@ -1271,7 +1271,7 @@ async function attempt(browser, p, opts, timing) {
     if (formSnap) { const fs = JSON.parse(formSnap), why = sentDiffers(fs.dom, fs.rows); if (why) { const e = new NeedsUser("page_changed_at_submit", why); throw e; } }
     // The person's own confirmed answer to a question, as ats-fill reads it (an approved answer, else a confirmed fact).
     const known = factsFrom(p.facts || {}, p.answers || {});
-    const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country, resumeName: fr.filled.some((f) => f.source === "resume") ? require("node:path").basename(p.resume.path) : undefined, resumeBoxesEmptyAtLoad });
+    const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country, resumeName: fr.filled.some((f) => f.source === "resume") ? require("node:path").basename(p.resume.path) : undefined, resumeEvidence: { sets: resumeSetsOf(page), uploads: resumeUploads } });
     if (unconfirmed.length) { const e = new NeedsUser("missing_required_answer", unconfirmed[0].label); e.needs = unconfirmed; throw e; }
     if (!hasApproval(p)) throw new NeedsUser("not_approved", "payload changed after approval");
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });

@@ -286,6 +286,9 @@ if [[ -f "$BRIDGE_PATH" ]]; then
     # 20261110120000 (the VM's boards) redefines career_apply_vm_family / career_apply_vm_claimable (20261028180000, deferred above):
     # applied last, below, with its test.
     [[ "$(basename "$file")" == 20261110120000_* ]] && continue
+    # 20261116150000 (architect ruling 2026-11-16: the VM drives Ashby) redefines the same two functions after 20261110120000:
+    # applied after it, below, with the same test.
+    [[ "$(basename "$file")" == 20261116150000_* ]] && continue
     # 20261102120000 (the per-person candidates) reads career_apply_job_history, which 20261101130000 defines: applied after it, below.
     [[ "$(basename "$file")" == 20261102120000_* ]] && continue
     # 20261102000000 (a corrected entry stops what was made from its old words): applied last, below, twice, with its test.
@@ -1219,13 +1222,19 @@ echo "  ok   rollback restores the old index and history; up again"
 # Release item 2 (20261110120000): the VM drives Personio and Breezy too, by exact host pattern. Deferred by the main loop: applied
 # here, after the VM (20261028180000), its test, the rollback (Greenhouse and Lever only), up again and the test again.
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261110120000_career_apply_vm_boards.sql"
-echo "== career_apply_vm_boards.test.sql (the four boards by exact host; look-alikes unsupported; the denylist first)"
+# Architect amendment (architect ruling 2026-11-16: the VM drives Ashby, 20261116150000): applied after 20261110120000, before the test.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261116150000_career_apply_vm_ashby.sql"
+echo "== career_apply_vm_boards.test.sql (the boards by exact host, Ashby by the 2026-11-16 amendment; look-alikes unsupported; the denylist first)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_vm_boards.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+# The Ashby rollback: back to the four boards of 20261110120000; up again.
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261116150000_career_apply_vm_ashby.down.sql"
+[[ "$("${PSQL[@]}" -tAc "select public.career_apply_vm_family('https://jobs.ashbyhq.com/a/1') = 'unsupported' and not public.career_apply_vm_claimable('https://jobs.ashbyhq.com/a/1') and public.career_apply_vm_claimable('https://acme.breezy.hr/p/1')")" == "t" ]] || { echo "FAIL career_apply_vm_ashby rollback"; exit 1; }
 "${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261110120000_career_apply_vm_boards.down.sql"
 [[ "$("${PSQL[@]}" -tAc "select public.career_apply_vm_family('https://acme.breezy.hr/p/1') = 'unsupported' and not public.career_apply_vm_claimable('https://x.jobs.personio.de/j/1') and public.career_apply_vm_claimable('https://jobs.lever.co/a/1')")" == "t" ]] || { echo "FAIL career_apply_vm_boards rollback"; exit 1; }
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261110120000_career_apply_vm_boards.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261116150000_career_apply_vm_ashby.sql"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_vm_boards.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
-echo "  ok   rollback drives Greenhouse and Lever only; up again"
+echo "  ok   rollbacks drive the four boards, then Greenhouse and Lever only; up again"
 # RELEASE 10 rollbacks (s-release, 2026-11-10): the two release-10 migrations whose owner's rollback no step above ran.
 # 20261109120000 (a pause stops the email batch and the replies lane): the main loop applied it; up again (idempotent),
 # the rollback (career_send_go and career_outreach_action_claim as before, neither reading the pause), and up again.

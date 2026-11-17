@@ -176,7 +176,7 @@ portal's own refusals.
 
 ### Round 2 (architect rulings of 2026-11-16), measured in CI (`browser-bench`, branches `bench/browser-strict-r2` / `-r3`, never a PR)
 
-Rulings applied: the apply VM drives Ashby (migration `20261116120000`, not applied live); the dry run stays strict (Personio's
+Rulings applied: the apply VM drives Ashby (migration `20261116150000`, not applied live); the dry run stays strict (Personio's
 Turnstile is a handed-off wall); open postings only (each row re-checked at the start of its run, closed rows reported apart);
 `checkSettleMs` unchanged. CI 44021741347 measured head dd0672e8, CI 44026400136 head 951df0b3 (Teamtailor job_id and slider, Workable
 drawn radio, Greenhouse react-select chips, the simulated upload's progress events). "Answered" counts reached Submit, with the

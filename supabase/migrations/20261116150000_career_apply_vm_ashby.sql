@@ -3,7 +3,7 @@
 -- answered column). SmartRecruiters (DataDome) and Workday (sign-in) stay on the hand-off path. Real submission still needs the
 -- person's yes to the exact payload, as for every board. workers/career-browser/apply-vm.cjs atsOf holds the same pattern
 -- (tests/career-apply-vm-boards.test.cjs). Additive and idempotent (create or replace).
--- Rollback: supabase/rollbacks/20261116120000_career_apply_vm_ashby.down.sql (the 20261110120000 bodies).
+-- Rollback: supabase/rollbacks/20261116150000_career_apply_vm_ashby.down.sql (the 20261110120000 bodies).
 create or replace function public.career_apply_vm_family(p_url text) returns text
 language sql immutable set search_path = pg_catalog, public as $$
  with h as (select regexp_replace(coalesce(public.career_apply_host(p_url), ''), ':[0-9]+$', '') as bare, public.career_apply_host(p_url) as full)

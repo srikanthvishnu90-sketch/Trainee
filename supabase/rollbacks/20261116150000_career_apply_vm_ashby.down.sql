@@ -1,4 +1,4 @@
--- Rollback of 20261116120000_career_apply_vm_ashby.sql: the VM drives Greenhouse, Lever, Personio and Breezy again (the 20261110120000 bodies).
+-- Rollback of 20261116150000_career_apply_vm_ashby.sql: the VM drives Greenhouse, Lever, Personio and Breezy again (the 20261110120000 bodies).
 create or replace function public.career_apply_vm_family(p_url text) returns text
 language sql immutable set search_path = pg_catalog, public as $$
  with h as (select regexp_replace(coalesce(public.career_apply_host(p_url), ''), ':[0-9]+$', '') as bare, public.career_apply_host(p_url) as full)

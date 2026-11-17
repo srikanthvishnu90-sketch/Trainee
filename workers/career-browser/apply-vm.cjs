@@ -55,7 +55,7 @@ const BOARDS = [
   ["breezy", new RegExp(`^${LABEL}\\.breezy\\.hr$`)],
   // Architect ruling (2026-11-16, round 2 of ag/runner-strict): Ashby, which reaches the instant before Submit on 10 of 20 sampled
   // postings once the person's answers are in (the strict bench's answered column). SmartRecruiters (DataDome) and Workday (sign-in)
-  // stay on the hand-off path. Same pattern as career_apply_vm_family (20261116120000).
+  // stay on the hand-off path. Same pattern as career_apply_vm_family (20261116150000).
   ["ashby", /^jobs\.ashbyhq\.com$/],
 ];
 function atsOf(url) {

@@ -742,7 +742,15 @@ function CONTROLS(arg) {
     }
     return null;
   };
-  const postingOwnId = (v) => /^\d{5,}$/.test(v) && location.pathname.split("/").some((seg) => seg.replace(/^(\d{5,})-.*$/, "$1") === v);
+  // Round 3 of the rs-07 review (2026-11-17): both a posting-id field name (job_id, posting_id, requisition_id, jobId, Teamtailor's
+  // ...[job_id]) AND a value equal to the leading digits of the job segment of this page's address (/jobs/<id>-slug), never any
+  // other path segment (an office, a ZIP, a requisition path).
+  const POSTING_ID_NAME = /(?:^|[^a-z0-9])(?:job_id|posting_id|requisition_id)\]?$|(?:^|[^a-zA-Z0-9])jobId\]?$/;
+  const postingOwnId = (name, v) => {
+    if (!/^\d{5,}$/.test(v) || !POSTING_ID_NAME.test(String(name || ""))) return false;
+    const m = [...location.pathname.matchAll(/\/jobs\/(\d{5,})(?=-|\/|$)/g)].pop();
+    return !!m && m[1] === v;
+  };
   const named = (w, value) => {
     const by = (w.getAttribute("aria-labelledby") || "").split(/\s+/).map((id) => (document.getElementById(id) || {}).innerText || "").join(" ");
     let t = squash(w.getAttribute("aria-label") || by || w.innerText).replace(/^[^\p{L}\p{N}]+/u, "");
@@ -762,9 +770,9 @@ function CONTROLS(arg) {
         const v = String(e.value || "").trim();
         // The posting's own id, as its address carries it (Teamtailor's candidate[job_applications_attributes][0][job_id] = 8544693 on
         // /jobs/8544693-...): page structure, never a neighbouring widget's answer, whatever widget the form's container holds (second
-        // delta review of rs-07: the widget rule itself no longer drops a crowded container's real widget for it). Only that exact
-        // value: a 5+ digit path segment of this page's own address.
-        const w = postingOwnId(v) ? null : widgetOf(e);
+        // delta review of rs-07: the widget rule itself no longer drops a crowded container's real widget for it). Only a posting-id
+        // field name with exactly the job segment's id of this page's address (postingOwnId).
+        const w = postingOwnId(e.name, v) ? null : widgetOf(e);
         // The "off" value a form keeps beside its own tick box of the same name (Lever: consent[marketing]=0 beside the box, sent
         // when it is not ticked) is that box's unticked state, not an answer of its own: the box is the question.
         const offOfBox = /^(?:0|no|false|off|)$/i.test(v) && !!e.name && [...(e.form ? e.form.elements : document.querySelectorAll("input"))].some((x) => x !== e && x.name === e.name && (x.type === "checkbox" || x.type === "radio"));

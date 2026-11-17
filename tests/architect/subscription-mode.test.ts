@@ -250,4 +250,10 @@ Deno.test({ name: "end to end: run-conversation.ts --subscription preflights, th
     const all = (await file(dir, "args", k)) + (await file(dir, "stdin", k)) + (await file(dir, "env", k));
     ok(!all.includes(KEY) && !all.includes(SUBSCRIPTION_PLACEHOLDER_KEY), `call ${k}: no key reaches the CLI`);
   }
+  // The runner preflights before it opens the world: a CLI that would bill the API stops the run before any turn.
+  const billing = await fakeClaude(["ANTHROPIC_API_KEY"]);
+  const b = await run(["--import-map=tests/flow/supabase-npm.json", "evals/mirror/run-conversation.ts", "--subscription", "--conv", `${tmp}/conv.json`, "--out", `${tmp}/out2.jsonl`],
+    { ...PASS_ENV(), PATH: `${billing}:${Deno.env.get("PATH")}`, PGBIN: pgBinDir() ?? "", TMPDIR: Deno.env.get("TMPDIR") ?? "/tmp", USER: Deno.env.get("USER") ?? "trainee", LANG: Deno.env.get("LANG") ?? "en_US.UTF-8" });
+  ok(b.code !== 0 && /apiKeySource is "ANTHROPIC_API_KEY"/.test(b.out) && !/MIRROR-CONVERSATION/.test(b.out), b.out.slice(-1500));
+  eq(await calls(billing), 1, "only the preflight ran");
 } });

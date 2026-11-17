@@ -77,6 +77,8 @@ const model = async (req: Request): Promise<Response> => {
   if (dry) return await anthropicWire(req, scripted);
   // D-065 (item 6): at the cap the runner refuses the call the way the provider refuses at an account's spending limit (HTTP 400,
   // its own words), so the product says it stopped at a spending limit, never "an error on its side, not a limit" (limit_stop.ts).
+  // Subscription mode: the product holds only the placeholder key; a request carrying any other key is refused, never answered.
+  if (sub && req.headers.get("x-api-key") !== SUBSCRIPTION_PLACEHOLDER_KEY) return Response.json({ type: "error", error: { type: "authentication_error", message: "subscription mode: the request carries a key other than the placeholder (D-089)" } }, { status: 401 });
   if (sub) { modelCalls++; return await (await import("../subscription/claude_cli.ts")).cliFetch(req); }
   if (spent >= budget) return Response.json({ type: "error", error: { type: "invalid_request_error", message: `You have reached your specified API usage limits (mirror runner cap $${budget}, $${spent.toFixed(3)} spent).` } }, { status: 400 });
   modelCalls++;

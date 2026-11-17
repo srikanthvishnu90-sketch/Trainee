@@ -167,13 +167,15 @@ board says closed 11, sent to job list 3); upload simulated but not taken (Green
 Execution failures the answered column found and this branch fixed (each with a fixture test that fails on its parent):
 Personio's disabled-until-valid Submit and `(erforderlich)` required marks (19); a box and a choice under one label (Ashby's
 Phone over the texting consent: 5); a dropdown's floating list (Ashby); a Submit held by an unissued invisible Turnstile is that
-check, handed off (Personio); Teamtailor's `candidate[resume_remote_url]` box carrying the stored resume (9; since the delta review of 2026-11-17 only on positive evidence that this run's file set put it there: the box was empty just before the resume was set, the file was then sent, as a multipart part with its own name, to the very host the https address names, and the address ends in the file's name; any other value there is asked); a styled radio /
+check, handed off (Personio); Teamtailor's `candidate[resume_remote_url]` box carrying the stored resume (9; since the delta review of 2026-11-17 only on positive evidence that this run's file set put it there: the box, read per element, was empty just before the resume was set, the file was then sent, as a multipart part with its own name, to the very host the https address names, and the address ends in the file's name; two boxes of that name are never told apart and are asked, as is any other value there); a styled radio /
 tick box whose input takes no click at its point (8). Two of these move the answered column less than their count on the live run:
 Ashby's iwoca dropdown still reads no options (its list is not a `role=listbox`; the fixture's is), and Teamtailor's next stop
-after the resume box is a page-set "Search" / "Sök" value (the job id) and its `range-custom_number` box. The job id fix (round 2 below) drops a
-neighbouring container's widget for a hidden value only when that container holds several questions and the widget is a phone
-box's own country picker (inside the intl-tel-input shell of a tel box, Teamtailor's "Search"); since the delta review of
-2026-11-17 it never keys on how the hidden value looks, so an id-valued page-set value beside any other widget is asked.
+after the resume box is a page-set "Search" / "Sök" value (the job id) and its `range-custom_number` box. The job id fix (round 2 below), as the
+delta reviews of 2026-11-17 left it: a hidden value's neighbouring container that holds several questions is dropped only when
+every widget in it is a phone box's own country picker (inside the intl-tel-input shell of a tel box, Teamtailor's "Search");
+otherwise its first widget that is not one is the hidden value's, so a phone picker placed first never hides a real listbox. The
+job id itself is page structure only because its value is exactly the posting's own id in the page's address (a 5+ digit path
+segment); any other value, id-looking or not, keeps the widget and is asked.
 
 Left, named: Workable's drawn Yes/No radios read back unheld after a full form (11); Greenhouse react-select boxes in other
 languages whose options do not open or match (9); Breezy page-set hidden controls with no label (2) and its `salaryCurrency` (3);
@@ -236,9 +238,12 @@ Open only: sample 7 / 196 headline, 37 (+40) answered; held-out 12 / 191 headlin
 The bracketed rows had their resume upload simulated and are never a pass. The Recruitee gains (held-out headline 0 → 5, answered
 0 → 13) depend on rs-11's fix (a phone box reset to a bare dial code is set again); that fix was tightened after this run by the review and delta
 review of 2026-11-17: the re-set must read back as exactly the approved number, and a box holding only the approved number's
-national digits (its country code gone) holds that number only when the phone's own shell shows the approved dial code, or the form
-has no country notion at all (rs-00, default-deny: a shell naming another country by flag class, image alt, data attribute, hidden
-country field or prefix select, or naming the person's own country without showing its code, is refused). So the Recruitee rows were
+national digits (its country code gone) holds that number only when the phone widget's own selected dial-code display shows the
+approved code (intl-tel-input's selected dial code, its selected-country title or label, or the selected option of a select inside
+the widget; hint or help text is never evidence), or the form posts no field the runner did not fill itself and shows no country
+notion at all (rs-00, default-deny: any page-set field such as a hidden phone_iso, cc or phone[region], a country select posted
+with the form, a flag, image alt or data attribute naming a country, or the person's own country named without its code, is
+handed off). So the Recruitee rows were
 measured before that tightening and may fall where a widget strips the approved country code.
 Left: Workable `no_submit_control` (3 and 4; not reproduced locally: the same postings reach Submit in a local dry run), Ashby's own
 dropdowns (an `ashby-application-form-input-autocomplete` list that drew no options after typing in a local dry run; no request was

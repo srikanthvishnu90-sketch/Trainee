@@ -17,7 +17,7 @@ import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/ind
 import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
 import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research/advice.ts";
 import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed, type ResearchCheck } from "../_shared/agent/research/market.ts";
-import { bare, keepSupported, personQuestion, splitSentences } from "../_shared/agent/research/support.ts";
+import { bare, keepSupported, personQuestion, recordCheck, splitSentences } from "../_shared/agent/research/support.ts";
 import { confirmedRow, factRows } from "../_shared/agent/memory.ts";
 import { contractBlock, contractsFor, evidenceTurn, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
 import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
@@ -291,15 +291,10 @@ export async function agentTurn(o: {
   // sentence names is there, false when one is.
   const recordWords = hypo ? "" : [...(((o.stores as any)?.profile?.facts ?? []) as any[]).map((f) => `${String(f?.kind ?? "")} ${String(f?.name ?? "")} ${String(f?.text ?? "")}`),
     ...Object.entries({ ...((o.stores as any)?.profile?.basics ?? {}), ...((o.stores as any)?.profile?.resume_header ?? {}) }).filter(([, v]) => typeof v === "string" && v.trim()).map(([k2, v]) => `${k2} ${v}`)].join("\n").toLowerCase();
-  const NOT_ON_FILE = /^(?:but\s+)?(?:(?:i\s+(?:don't|do not)\s+have\s+)(.{2,60}?)\s+on\s+(?:file|record)|(.{2,60}?)\s+(?:isn't|is not|aren't|are not)\s+on\s+(?:file|record|your record))$/iu;
   // (CodeRabbit on #849: built before the reply pipeline, which takes it too, so a tagged claim about the record is code's check)
-  const onRecord = (x: string): boolean | null => {
-    const m = NOT_ON_FILE.exec(bare(x).replace(/[’]/g, "'").replace(/[.!?]+$/, "").trim());
-    if (!m || hypo) return null;
-    const items = String(m[1] ?? m[2]).toLowerCase().replace(/\b(?:your|the|my|a|an|line|lines|details?|exact)\b/g, " ").split(/,|\band\b|\bor\b|\//).map((w) => w.trim()).filter(Boolean);
-    if (!items.length) return null;
-    return items.every((w) => !w.split(/\s+/).every((t) => new RegExp(`(?<![\\p{L}\\p{N}])${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u").test(recordWords)));
-  };
+  // (round 9 of #849: support.ts recordCheck; it answers only for the template alone, and its free part carries no figure, date or
+  // name the record does not hold)
+  const onRecord = hypo ? ((_x: string): boolean | null => null) : recordCheck(recordWords);
   let piped: Awaited<ReturnType<typeof runReplyPipeline>> | null = null;
   // The path, by the draft: tagged -> the reply pipeline; untagged -> the support check as before (a stray tag never reaches anyone).
   // Review of #849 (round 2): the pipeline runs only on a turn that rests on evidence a tool read this turn; a plain advice or chat
@@ -583,7 +578,7 @@ export async function agentTurn(o: {
     : researchDraft ? { draft: researchDraft, refused: researchDraft.split(/\n+/).flatMap((l) => l.split(/(?<=[.!?])\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x) && !String(result.reply ?? "").includes(x.replace(/\s*\[\d+\]/g, "").replace(/[.!?]$/, ""))).map((sentence) => ({ sentence, why: "research check: not kept" })) } : null;
   const supportAll = supportTrace && supportTrace.refused.length ? supportTrace : researchTrace;
   const withSupport0 = supportAll ? { ...result, support: supportAll } : result;
-  const withSupport = pipeline ? { ...withSupport0, pipeline, ...(piped ? { piped: { repaired: piped.repaired, calls: piped.calls, fallback: piped.fallback, dropped: piped.dropped } } : {}) } : withSupport0;
+  const withSupport = pipeline ? { ...withSupport0, pipeline, ...(piped ? { piped: { repaired: piped.repaired, calls: piped.calls, judgeCalls: piped.judgeCalls, judgeClaims: piped.judgeClaims, judgeCapped: piped.judgeCapped, fallback: piped.fallback, dropped: piped.dropped } } : {}) } : withSupport0;
   return know ? { ...withSupport, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : withSupport;
 }
 

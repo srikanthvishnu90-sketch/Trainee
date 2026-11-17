@@ -134,6 +134,59 @@ export function plainTalk(s: string, allowed = ""): boolean {
   const starter = (w: string) => PLAIN_FIRST.test(w) || /^(?:let|keep|lead|try|use|add|make|ask|start|focus|consider|remember|please|happy|sure|good|great|okay|ok|yes|thanks|here|say|send|tell|write|open|put|show|list|mention|drop|cut|avoid|skip|aim|pick|choose|be|do|don't|if|when|once|after|before|then|also|and|but|so|you|you're|your|we|we're|our|my|me|a|an|the|one|that's|there's|what|which|how|want|would|could|should|can)$/i.test(w);
   return !h.names.some((r) => r.length > (r[0] === h.first && starter(r[0]) ? 1 : 0));
 }
+// Round 9 of #849 (B2): code's record check ("X isn't on file", "I don't have X on file") is about the record only. Its free part, X,
+// is a short list of things the person may hold: no figure, no date, no clause of its own and no claim joined to it ("Citadel pays $150
+// an hour, but your phone isn't on file" is two clauses; the first is checked as any other). `recordShape` gives X, or null when the
+// sentence is not that template alone; a caller's record check is honoured only for such a sentence.
+const NOT_ON_FILE = /^(?:but\s+)?(?:(?:i\s+(?:don't|do not)\s+have\s+)(.{2,60}?)\s+on\s+(?:file|record)|(.{2,60}?)\s+(?:isn't|is not|aren't|are not)\s+on\s+(?:file|record|your record))$/iu;
+export function recordShape(x: string): string | null {
+  const b = bare(String(x ?? "")).replace(/[’]/g, "'").replace(/[.!?]+$/, "").trim();
+  const m = NOT_ON_FILE.exec(b);
+  if (!m || clausesOf(b).length !== 1) return null;
+  const g = String(m[1] ?? m[2]);
+  if (/\d/.test(g) || MONTH_OR_DAY.test(g) || /[;:()"]/.test(g) || PAST_EVENT.test(g) || ASSERTS_IN_Q.test(g)) return null;
+  // (a verb inside it makes it a claim, "proof Citadel's deadline was moved": a list of things holds none)
+  if (/(?<![\p{L}])(?:is|are|was|were|has|have|had|does|did|will|would|can|could|pays?|paid|offers?|sponsors?|requires?|closes?|closed|opens?|opened|moved|changed|hires?|hired|said|says)(?![\p{L}])/iu.test(g.replace(/^i\s+(?:don't|do not)\s+have\s+/i, ""))) return null;
+  return g;
+}
+// What the person's record (its words, lower case: facts and contact fields) holds: true when none of the things the sentence says
+// are not on file is there, false when one is, null when the sentence is not the template or names something the record does not
+// (an employer, "Citadel's offer isn't on file", is not the record's to answer). Moved here from career_brain.ts (round 9 of #849).
+export function recordCheck(recordWords: string): (x: string) => boolean | null {
+  return (x: string) => {
+    const g = recordShape(x);
+    if (g === null) return null;
+    const h = hardParts(g);
+    if (h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).some((r) => r.length && !r.every((w) => new RegExp(`(?<![\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u").test(recordWords)))) return null;
+    const items = g.toLowerCase().replace(/\b(?:your|the|my|a|an|line|lines|details?|exact)\b/g, " ").split(/,|\band\b|\bor\b|\//).map((w) => w.trim()).filter(Boolean);
+    if (!items.length) return null;
+    return items.every((w) => !w.split(/\s+/).every((t) => new RegExp(`(?<![\\p{L}\\p{N}])${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u").test(recordWords)));
+  };
+}
+// A caller's record check, honoured only where it may speak: a yes only for the template alone; a no (the record contradicts the
+// sentence) always.
+export const recordOnly = (check?: ((s: string) => boolean | null) | null) => (x: string): boolean | null => {
+  const v = check ? check(x) : null;
+  return v === true && recordShape(x) === null ? null : v;
+};
+// Round 9 of #849 (B4): Trainee's own offer or its own list of what it needs ("Want me to prepare the PayPal application for your
+// approval?", "I need your email, Harbor Global's dates, and Crestline's exact name.", "Before sending, settle your email and the
+// Crestline name.") states nothing about the world. It stands unchecked only in that shape, with no figure, no date, no period word,
+// no status word, no clause that asserts something (which, because, since, ...), and every name in it one the turn already knows
+// (`known`: the employers of this turn's tool results, the person's record, the ask). Anything else is checked as usual.
+const OWN_ACTION = /^(?:(?:do you want|would you like|want|shall|should|can|may)\s+(?:me|i)\s+(?:to\s+)?|(?:shall|should|can|may)\s+i\s+|i\s+(?:still\s+|also\s+|just\s+|first\s+)?(?:need|'ll need|will need|would need|can|could)\s+|(?:before|to)\s+(?:sending|send|applying|apply|submitting|submit)(?:\s+(?:it|this|that))?,\s*(?:settle|confirm|send|share|give|tell|check)\s+)/i;
+const OWN_ASSERTS = /(?<![\p{L}])(?:which|who|whose|that|because|since|given|now that|though|although|while|whereas|so|but|as|unless|if|when|after|before|until)(?![\p{L}])/iu;
+export function ownAction(s: string, known: string): boolean {
+  const b = bare(String(s ?? "")).replace(/[’‘]/g, "'").trim();
+  const m = OWN_ACTION.exec(b);
+  if (!m || /["\u201c\u201d;:]/.test(b)) return false;
+  const rest = b.slice(m[0].length);
+  if (/\d/.test(b) || MONTH_OR_DAY.test(b) || Q_PERIOD.test(rest) || ASSERTS_STATUS.test(rest) || PAST_EVENT.test(b) || ASSERTS_IN_Q.test(b) || OWN_ASSERTS.test(rest)) return false;
+  const h = hardParts(rest);
+  if (h.numbers.length || h.years.length || h.quant.length) return false;
+  const k = String(known ?? "");
+  return h.names.every((r) => r.every((w) => nameFoundIn(w, k)));
+}
 // Live-12 (item 5): a sentence of joined clauses ("…; …", "…, and …", "…, so …") is read clause by clause.
 export const clausesOf = (s: string) => bare(s).replace(/[.!?]+$/, "").split(/;\s+|,\s+(?:and|so|but)\s+/u).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
 // Round 8 of #849 (B3; trunk judged the whole sentence): a clause split off a sentence keeps the sentence's subject. A clause that
@@ -282,6 +335,9 @@ export const ABBREV: Record<string, string[]> = { swe: ["software engineer", "so
   "m&a": ["mergers and acquisitions"], mba: ["master of business administration"], gpa: ["grade point average"], cs: ["computer science"] };
 const ABBREV_OF = new Map(Object.entries(ABBREV).flatMap(([k, vs]) => vs.map((v) => [v, k] as [string, string])));
 export const nameFoundIn = (name: string, text: string) => nameRe(name).test(text) || (ABBREV[name.toLowerCase()] ?? []).some((v) => nameRe(v).test(text)) || (ABBREV_OF.has(name.toLowerCase()) && nameRe(ABBREV_OF.get(name.toLowerCase())!).test(text));
+// The words for a posting's own parts (its applications, its window, its deadline): what a sentence about a posting opens with when
+// it names no one. A closed class: the nouns of code's own posting units, never an employer.
+const POSTING_PART = /^(?:applications?|postings?|submissions?|registrations?|deadlines?|openings?|listings?|roles?|positions?|internships?|programs?|interviews?|it|they)$/i;
 function namesOk(claim: Hard, unit: { hard: Hard; lower: Set<string>; lent?: string | null }): boolean {
   // Round 3: on a page code knows is one asked employer's (indexPages `owner`), that employer's name is the page's, not the claim's.
   const lent = unit.lent ? unit.lent.toLowerCase().split(/\s+/).map((w) => w.replace(/[.'-]+$/, "").replace(/'s$/, "")) : null;
@@ -305,7 +361,9 @@ function namesOk(claim: Hard, unit: { hard: Hard; lower: Set<string>; lent?: str
     if (k === 0 && claim.first === r[0] && r.length === 1 && unit.lower.has(r[0])) { loose.push(r); continue; }
     // (live-12 C11: "Applications are open through December 6, 2026": a capitalised first word beside a full date the unit holds is
     // that sentence's subject word, not a name; the date ties it to the unit)
-    if (k === 0 && claim.first === r[0] && r.length === 1 && claim.names.some((x) => x.length === 1 && /^date\d{8}$/.test(x[0]) && has(x))) { loose.push(r); continue; }
+    // (round 9 of #849: only a word for the posting's own parts, the words code's posting units are written in, "Applications",
+    // "The posting", "Submissions"; any other opening word may be an employer, "Citadel closes December 7, 2026", and is a name)
+    if (k === 0 && claim.first === r[0] && r.length === 1 && POSTING_PART.test(r[0]) && claim.names.some((x) => x.length === 1 && /^date\d{8}$/.test(x[0]) && has(x))) { loose.push(r); continue; }
     return false;
   }
   return !loose.length || proper > 0;
@@ -347,7 +405,7 @@ const clipStart = (t: string, n: number) => t.length > n ? `…${t.slice(t.lengt
 // text before it is put in a passage.
 const plainText = (t: string) => squash(String(t ?? "").replace(/>{2,}|<{2,}|[¶›‹»«]/g, " ").replace(/(?:^|(?<=\s))(?:page title|title|page host|page of|top of page|page notes?|headings?|its whole sentence|list introduced by|table header|before|after|footnote|whole page[^:\n]{0,30})\s*:/gi, (m) => m.replace(":", " -")));
 // `lent`: the page owner's name, when the unit does not name an asked employer itself. `passage`: what the judge reads.
-export interface Unit { text: string; hard: Hard; lower: Set<string>; content: Set<string>; quotable: boolean; lent: string | null; label: string; passage: string; pageTitle: string; ownSite: boolean; url: string; places?: string[] }
+export interface Unit { text: string; hard: Hard; lower: Set<string>; content: Set<string>; quotable: boolean; lent: string | null; label: string; passage: string; pageTitle: string; ownSite: boolean; url: string; places?: string[]; named?: string[] }
 export interface PageIndex { pages: { sentences: Unit[] }[]; read: (s: string) => string; subjects: string[]; ask: string }
 export const PASSAGE_MAX = 2500;
 // A unit that qualifies the whole page, wherever it is: when it was written, that it was corrected or archived, that what it lists
@@ -369,6 +427,20 @@ export function atsSlug(host: string, url?: string): string[] {
   const wd = /^([a-z0-9-]+)\.wd\d+\.myworkdayjobs\.com$/.exec(h);
   return wd ? [wd[1]] : [];
 }
+// Round 9 of #849 (B4): the employer a posting's own URL names, for a posting whose record gives no company (a Workday apply flow):
+// its ATS board ("paypal" in paypal.wd1.myworkdayjobs.com, the board of boards.greenhouse.io/<board>), else its own host's name; a
+// shared host (a job board, a blog platform) names no one.
+export function urlEmployer(url: unknown): string | null {
+  let h = "";
+  try { h = new URL(String(url)).hostname.toLowerCase().replace(/^www\./, ""); } catch { return null; }
+  const ats = atsSlug(h, String(url))[0];
+  if (ats) return ats;
+  if (SHARED.some((d) => h === d || h.endsWith(`.${d}`))) return null;
+  const ls = h.split(".");
+  if (ls.length < 2) return null;
+  const sl = ls.length > 2 && /^(?:co|com|org|net|ac|gov|edu)$/.test(ls[ls.length - 2]) ? ls[ls.length - 3] : ls[ls.length - 2];
+  return /^[a-z][a-z0-9-]{1,40}$/.test(sl) ? sl : null;
+}
 const PUBLIC_LABELS = /^(?:community|forum|forums|blog|blogs|discuss|discussion|talk|answers|users|people|members|sites|pages|groups|wiki|support|help)$/;
 // A title that is about more than the one employer, or about someone who is not it. Round 10: or about leaving or passing it over
 // ("Why I chose DRW over Citadel", "Citadel rejected me, so I joined Jump").
@@ -380,7 +452,7 @@ const TITLE_CUE = /(?<![\p{L}])(?:vs\.?|versus|and|other|others|firms|companies|
 // no cue that it is about more than it or about someone else (TITLE_CUE). The owner's name is lent to a unit that names no asked
 // employer itself; whether the unit states the claim about that employer specifically is the judge's question. A lent quote is
 // labelled with the host alone, never with the title (round 9).
-export function indexPages(pages: { text: string; title?: string; url?: string; fetchedAt?: number; one?: boolean; places?: string[] }[], read: (s: string) => string = (s) => s, subjects: string[] = [], o: { sites?: string[]; ask?: string } = {}): PageIndex {
+export function indexPages(pages: { text: string; title?: string; url?: string; fetchedAt?: number; one?: boolean; places?: string[]; named?: string[]; lend?: string | null }[], read: (s: string) => string = (s) => s, subjects: string[] = [], o: { sites?: string[]; ask?: string } = {}): PageIndex {
   const subs = subjects.map(squash).filter(Boolean);
   const hostOf = (u?: string) => { try { return new URL(String(u)).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } };
   const sites = (o.sites ?? []).map((d) => String(d).toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "")).filter((d) => d.split(".").length === 2 && !SHARED.includes(d));
@@ -518,11 +590,16 @@ export function indexPages(pages: { text: string; title?: string; url?: string; 
         // that is that employer's (its own registrable domain on record, or a title that names it alone); whether the unit states the
         // claim about that employer specifically, and not another firm, is the judge's question, with the passage around it.
         const lend = !names && !!owner;
+        // (round 9 of #849: a unit code wrote for one employer's posting, "PayPal, SWE Intern: the posting is open; it closes …", is
+        // that employer's in every sentence of it: the reply pipeline lends the unit's owner, `lend`, to the sentences that do not
+        // name it)
+        const given = typeof (p as { lend?: string | null }).lend === "string" ? (p as { lend?: string }).lend! : null;
         // A table row is read with its header's period ("Hourly pay" over "$120" is "$120 per hour"): the header is the row's own.
         const PERIOD_HEAD = /(?<![\p{L}])(hourly|weekly|monthly|annual|yearly|daily)(?![\p{L}])|per (hour|day|week|month|year)/iu;
         const rowText = hd ? text.split(" | ").map((c, j) => { const m = PERIOD_HEAD.exec(hd.split(" | ")[j] ?? ""); const w = m ? ({ hourly: "hour", weekly: "week", monthly: "month", annual: "year", yearly: "year", daily: "day" } as Record<string, string>)[(m[1] ?? "").toLowerCase()] ?? m[2] : ""; return w && /\d/.test(c) && !/(?<![\p{L}])(?:per|an?|\/)\s*(?:hour|day|week|month|year)|hourly|weekly|monthly|yearly|annual/iu.test(c) ? `${c} per ${w}` : c; }).join(" | ") : text;
-        return { text, hard: hardParts(rowText, read), lower: lowerWords(r), content: contentWords(r), quotable: quotable(text) && !raw[k].note && !unsafe[k - 1] && !unsafe[k + 1] && !cutFromLimit[k] && (names || lend), lent: lend ? owner : null, label: lend ? pageLabel : "", passage: passage(k), pageTitle: title,
-          ownSite: !!ownSite, url: String(p.url ?? ""), places: Array.isArray((p as { places?: string[] }).places) ? (p as { places?: string[] }).places! : [] };
+        return { text, hard: hardParts(rowText, read), lower: lowerWords(r), content: contentWords(r), quotable: quotable(text) && !raw[k].note && !unsafe[k - 1] && !unsafe[k + 1] && !cutFromLimit[k] && (names || lend), lent: lend ? owner : given && !nameRe(given).test(text) ? given : null, label: lend ? pageLabel : "", passage: passage(k), pageTitle: title,
+          ownSite: !!ownSite, url: String(p.url ?? ""), places: Array.isArray((p as { places?: string[] }).places) ? (p as { places?: string[] }).places! : [],
+          named: Array.isArray((p as { named?: string[] }).named) ? (p as { named?: string[] }).named! : [] };
       }) };
   }) };
 }
@@ -553,7 +630,9 @@ export function findSupport(claim: string, idx: PageIndex, only?: number[], unit
     if (!h.numbers.every((a) => s.hard.numbers.includes(a)) || !h.quant.every((q) => s.hard.quant.includes(q)) || !namesOk(h, s)) continue;
     // Round 5: a year the unit puts on its figures is the claim's too ("earned $5,000 a week in 2019" is not "earn $5,000 a week"),
     // and each of the claim's figures is not, on the unit, another name's (the name written nearest before it).
-    if (!s.hard.years.every((y) => h.years.includes(y))) continue;
+    // (round 9 of #849: a year inside the name of what the unit is about, a posting's title "Software Engineer Intern - Summer 2027"
+    // (`named`, given by code's own posting units), names the role; it dates no figure)
+    if (!s.hard.years.every((y) => h.years.includes(y) || (s.named ?? []).some((n) => n.includes(y)))) continue;
     // Round 12 (run 3: "Citadel intern pay 2019: $5,000 a week" for "Citadel intern pay is $5,000 a week."): a bare 4-digit number
     // that reads as a past year (1990 to last year) on the unit is a year the claim must carry too; this year or a later one dates
     // nothing the present tense does not ("Citadel's hourly rate for interns is $125 (2026).").
@@ -736,6 +815,8 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
 export async function keepSupported(reply: string, sources: (string | { text: string; title?: string; one?: boolean })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; instructions?: boolean; joint?: { guide: { text: string; title?: string }[]; record: string; drafts?: string }; also?: { when: (s: string) => boolean; sources: { text: string; title?: string; one?: boolean }[] }; subjects?: string[]; ask?: string; onRecord?: (s: string) => boolean | null } = {}): Promise<{ text: string; removed: string[]; why?: { sentence: string; why: string }[] }> {
+  // (round 9 of #849: the caller's record check speaks only for the template alone, never for a sentence that joins a claim to it)
+  o = { ...o, onRecord: o.onRecord ? recordOnly(o.onRecord) : o.onRecord };
   const idx = indexPages(sources.map((x) => typeof x === "string" ? { text: x } : x), o.read, o.subjects ?? [], { ask: o.ask });
   const norm = (x: string) => bare(readAlike(x)).toLowerCase().replace(/[.!?]+$/, "");
   const own = new Map((o.own ?? []).map((x) => [norm(x), x]));

@@ -24,3 +24,13 @@ Both replays play live-12's 26 turns again through the real handler with PIPELIN
 
 - C4, C9 and C22 need pages live-12 did not record (research and apply-flow), and the dry run has no web. The trace now records
   checked units.
+
+## Round 9 of #849 (regenerated)
+
+Both files were regenerated at round 9 with the base command above (`--judge recorded-no`). The synthetic script tags 2 of the 26
+turns (C1, C11). The tagged path now falls back on 1 turn (C1), where it fell back on 2 (C1, C11) before round 9. Against the legacy
+replay, one draft sentence that legacy kept is dropped on the tagged path: C1's "The other result, NVIDIA's OpenShell, is full-time."
+The recorded verdicts never judged it, so it counts as "no" (the judge's drop, not code's). With a yes judge, so that only code drops
+anything, 2 sentences legacy kept are still dropped (C1, before round 9: 3):
+- "Changes: Pixelforge and Rallyup lead the resume, ...". The File is a plan that recommends this; no unit says it was done.
+- "... the 3.9 stays off everything this chat". Layer A reads "3.9 stays" as a count of stays.

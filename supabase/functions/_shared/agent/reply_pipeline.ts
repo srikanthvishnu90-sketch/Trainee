@@ -13,7 +13,7 @@
 //             code's words; the answer is verified again; what still fails is dropped. It replaces the shortener and the quote fallback.
 //   fallback  after the drop, when nothing left answers, code says what it could not verify and what the ledger holds (a posting's
 //             pay with its link).
-import { clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, noClaim, personQuestion, splitSentences, type SupportJudge } from "./research/support.ts";
+import { clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, noClaim, ownAction, personQuestion, plainTalk, recordOnly, splitSentences, type SupportJudge, urlEmployer } from "./research/support.ts";
 
 // ON (ruling 2026-11-14): the drafting prompt asks for tags and every tool result carries its units. The path is chosen by the draft:
 // a TAGGED draft goes through this pipeline (no page quote is ever put in place of a sentence); an UNTAGGED one (a model that ignored
@@ -21,14 +21,14 @@ import { clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, n
 export const PIPELINE = { on: true };
 export const isTagged = (t: string) => /\[E\d+(?:\s*,\s*E\d+)*\]/.test(String(t ?? ""));
 export type EvidenceKind = "page" | "chat" | "record" | "absent";
-export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null }
+export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[] }
 
 // Units a tool added this turn (pages, posting records, counts): the turn rests on evidence only when it has one. Lines carried from
 // earlier replies, the person's record and what it lacks do not make a turn an evidence turn.
 export const evidenceTurn = (l: Ledger | null) => !!l && l.units.some((u) => (u.kind === "page" || u.kind === "chat") && u.source !== "an earlier reply in this chat");
 export class Ledger {
   units: EvidenceUnit[] = [];
-  add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null } = {}): string {
+  add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[] } = {}): string {
     const t = String(text ?? "").replace(/\s+/g, " ").trim();
     if (!t) return "";
     const had = this.units.find((u) => u.kind === kind && u.text === t && (u.url ?? null) === (meta.url ?? null));
@@ -52,18 +52,24 @@ export class Ledger {
     if (!o) return ids;
     const postings: any[] = [...(Array.isArray(o.postings) ? o.postings : []), ...(Array.isArray(o.results) ? o.results : []), ...(o.posting && typeof o.posting === "object" ? [o.posting] : [])];
     for (const p of postings) {
-      const who = [p?.company, p?.title].filter((x) => typeof x === "string" && x.trim()).join(", ");
       const url = typeof p?.url === "string" ? p.url : typeof o.url === "string" ? o.url : null;
+      // Round 9 of #849 (B4): a posting whose record gives no company (a Workday apply flow) is the employer its own fields name: its
+      // URL's ATS board or host, else "… at <Employer>" in its title; spelled as the turn or the posting already spells it.
+      const company = typeof p?.company === "string" && p.company.trim() ? p.company.trim() : this.employerOf(p, url);
+      const who = [company, p?.title].filter((x) => typeof x === "string" && x.trim()).join(", ");
+      // (the posting's title names the role: a year in it, "Summer 2027", dates no figure of the unit)
+      const named = typeof p?.title === "string" && p.title.trim() ? [p.title.trim()] : [];
       // (the posting's own places, so layer A reads "Chicago, IL" there as a place, never as an owner)
       const places = [p?.location, ...String(p?.pay ?? "").split(/;\s*/).map((x: string) => /^([^:]+):/.exec(x)?.[1])].filter((x): x is string => typeof x === "string" && /,/.test(x)).map((x) => x.trim());
-      if (typeof p?.pay === "string" && p.pay.trim()) for (const part of p.pay.split(/;\s*/)) ids.push(this.add("chat", `${who}${p?.location ? ` (${p.location})` : ""}: pay ${part.trim()}`, { url, source: name, places, owner: typeof p?.company === "string" ? p.company : null }));
+      if (typeof p?.pay === "string" && p.pay.trim()) for (const part of p.pay.split(/;\s*/)) ids.push(this.add("chat", `${who}${p?.location ? ` (${p.location})` : ""}: pay ${part.trim()}`, { url, source: name, places, owner: company, named }));
       const dl = [p?.deadline, p?.closes, p?.close_date].find((x) => typeof x === "string" && x.trim());
       const st = typeof p?.state === "string" ? p.state : null;
-      if (st || dl) ids.push(this.add("chat", `${who}: the posting is ${st ?? "listed"}${dl ? `; it closes ${dl}` : ""}.`, { url, source: name, owner: typeof p?.company === "string" ? p.company : null }));
+      if (st || dl) ids.push(this.add("chat", `${who}: the posting is ${st ?? "listed"}${dl ? `; it closes ${dl}` : ""}.`, { url, source: name, owner: company, named }));
     }
     if (Array.isArray(o.postings)) ids.push(this.add("chat", `The search (${name}) returned ${o.postings.length} posting${o.postings.length === 1 ? "" : "s"}.`, { source: name }));
     // Round 3 of #849: a requirement or a sign-in note belongs to its posting's employer, and says so in its text.
-    const co: string | null = typeof o.company === "string" ? o.company : typeof o.posting?.company === "string" ? o.posting.company : postings.length === 1 && typeof postings[0]?.company === "string" ? postings[0].company : null;
+    const co: string | null = typeof o.company === "string" ? o.company : typeof o.posting?.company === "string" ? o.posting.company : postings.length === 1 && typeof postings[0]?.company === "string" ? postings[0].company :
+      postings.length === 1 ? this.employerOf(postings[0], typeof postings[0]?.url === "string" ? postings[0].url : typeof o.url === "string" ? o.url : null) : null;
     const req = o.requirements && typeof o.requirements === "object" ? o.requirements : null;
     if (req) for (const k of ["required", "preferred"]) for (const x of Array.isArray(req[k]) ? req[k] : []) if (typeof x === "string") ids.push(this.add("chat", `${co ? `${co}: ` : ""}The posting ${k === "required" ? "requires" : "prefers"}: ${x}`, { source: name, owner: co }));
     if (o.sign_in_required === true) ids.push(this.add("chat", `${co ? `${co}: ` : ""}To apply, the person signs in to the employer's careers site themselves; its own questions are behind that sign-in and were not read.`, { source: name, owner: co }));
@@ -81,6 +87,19 @@ export class Ledger {
       for (const t of (file.fileTexts ?? []).slice(0, 40)) ids.push(this.add("chat", `The File made this turn says: ${t}`, { url: fileUrl, source: name, owner: null }));
     }
     return ids.filter(Boolean);
+  }
+  // The employer a posting with no company field is, from its other fields (round 9 of #849, B4), or null.
+  employerOf(p: any, url: string | null): string | null {
+    const title = typeof p?.title === "string" ? p.title : "";
+    const slug = urlEmployer(url) ?? (/\bat\s+(\p{Lu}[\p{L}&.'-]*(?:\s+\p{Lu}[\p{L}&.'-]*){0,3})\s*$/u.exec(title)?.[1] ?? null);
+    if (!slug) return null;
+    const key = slug.toLowerCase().replace(/[^a-z0-9]/g, "");
+    // (spelled as an employer already in the ledger, or as the posting's own text writes it, else in a capital)
+    const had = this.units.map((u) => u.owner).find((w) => !!w && w.toLowerCase().replace(/[^a-z0-9]/g, "") === key);
+    if (had) return had;
+    const texts = Object.values(p ?? {}).filter((v): v is string => typeof v === "string").join(" \n ");
+    const seen = [...texts.matchAll(/\p{Lu}[\p{L}&.'-]*(?:\s+\p{Lu}[\p{L}&.'-]*){0,3}/gu)].map((m) => m[0]).find((w) => w.toLowerCase().replace(/[^a-z0-9]/g, "") === key);
+    return seen ?? slug.split(/[-\s]+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
   }
   // The person's confirmed record, a fact per unit, and what it lacks.
   addRecord(facts: string[], absent: string[] = []): void {
@@ -107,7 +126,8 @@ export const stripTags = (t: string) => String(t ?? "").replace(TAG, "").replace
 
 export interface Failure { sentence: string; reason: string; subject?: string | null }
 // `tagged`: what stood, with its tags, in place: what a later pass verifies again (round 8 of #849).
-export interface Verified { text: string; failures: Failure[]; kept: string[]; cites: string[]; tagged: string; subject: string | null }
+// `citeOf`: each kept sentence with the ids it stands on, so a sentence cut later takes its links with it (round 9 of #849).
+export interface Verified { text: string; failures: Failure[]; kept: string[]; cites: string[]; tagged: string; subject: string | null; citeOf: [string, string[]][] }
 
 // What layer A found missing, in code's words: each figure, name or date of the clause that no cited unit holds.
 // The organisations a unit names: its owner, or for an unowned unit the capitalised name runs in its text, without its places,
@@ -156,6 +176,9 @@ export function unitNames(u: EvidenceUnit, weak = false): string[] {
 // Round 4 of #849: with `strict`, a name that opens the sentence is checked too ("Google requires…" was never checked), unless it is a
 // common sentence opener; the judge path uses strict, so a one-word employer at the start is never left to the judge.
 const OPENER = /^(?:want|would|shall|should|can|could|do|did|does|is|are|was|were|will|worth|heads|before|after|if|when|while|since|because|let|happy|glad|sure|ok|okay|thanks|please|may|might|must|need|how|what|which|who|why|where|sadly|unfortunately|note|start|also|however|good|great|here|yes|no|both|all|each|most|some|apply|send|ask|check|look|focus|use|keep|try|first|next|then|finally|overall|today|currently|right|so|still|plus|again|instead|meanwhile|otherwise|honestly|luckily|happily|thankfully|importantly|remember)$/i;
+// (round 9: an imperative opener, never a quantifier, an auxiliary or a discourse word: "Apply early" is advice; "Most interns…",
+// "Also, interns…" are not)
+const DIRECTIVE = /^(?:apply|send|ask|check|look|focus|use|keep|try|start|let|let's|remember|please|aim|pick|choose|avoid|skip|write|mention|lead|tailor|follow|reach|prepare|practice|practise|review|read|bring|save|plan|consider|add|make|say|tell|put|show|list|drop|cut|open|be|do|don't|never|always)$/i;
 export function missingSpecifics(clause: string, units: EvidenceUnit[], strict = false): string[] {
   const all = units.map((u) => u.text).join(" \n ").toLowerCase(), h = hardParts(clause);
   const names = h.names.map((r, j) => j === 0 && r[0] === h.first && (!strict || OPENER.test(r[0] ?? "")) ? r.slice(1) : r).filter((r) => r.length).map((r) => r.join(" "));
@@ -209,14 +232,30 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   let carried: string | null = o.carry ?? null;
   // (a sentence code does not check, a question or a caveat, still names what the next one refers back to)
   const carryPast = (t: string) => { const m = mentioned(t); if (m.length) carried = m.length === 1 ? m[0] : null; };
+  // Round 9 of #849 (B2): code's record check speaks only for the "isn't on file" template alone, never for a clause joined to it,
+  // and never for one that names an employer of this turn; every other clause is checked as usual.
+  const recordOk = recordOnly(o.onRecord);
+  const rec = (t: string) => { const v = recordOk(t); return v === true && mentioned(t).length ? null : v; };
+  // Round 9 (B4): what states nothing about the world goes unchecked, by its shape (support.ts): plain talk with no figure, name or
+  // date (an imperative opener read as the plain word it is: "Apply early", "Lead with…"), and Trainee's own offer or list of what it
+  // needs, with no figure or date and only names the turn already knows.
+  const known = [allowed, ...postingOwners, ...ledger.units.filter((u) => u.kind === "absent").map((u) => u.text)].join("\n");
+  // (advice only: an imperative, "Keep it short", "Mention the team"; a statement in the third person with no figure or name, "Its
+  // analysts sit on the credit desk", is a claim about the world and is checked)
+  const plain = (t: string) => {
+    const b = t.trim(), w = /^[\p{L}']+/u.exec(b)?.[0] ?? "";
+    return DIRECTIVE.test(w) && plainTalk(`${w.toLowerCase()}${b.slice(w.length)}`, allowed);
+  };
+  const free = (t: string) => plain(t) || ownAction(t, known);
   lines.forEach((l, a) => l.forEach((x, b) => {
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
     const { ids, text } = tagsOf(x);
     lines[a][b] = text;
     if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || personQuestion(text, allowed)) return carryPast(text);
-    if (o.onRecord?.(text) === true) return carryPast(text);
+    if (rec(text) === true) return carryPast(text);
     // The record's verdict comes before the plain-sentence rule: a sentence about the record that the record contradicts fails.
-    if (o.onRecord?.(text) === false) { failures.push({ sentence: text, reason: "it is not what the person's record holds" }); bad.add(`${a}:${b}`); return; }
+    if (rec(text) === false) { failures.push({ sentence: text, reason: "it is not what the person's record holds" }); bad.add(`${a}:${b}`); return; }
+    if (free(text)) return carryPast(text);
     // Review of #849: a sentence with no figure, no date and no name needs no tag (LEDGER_RULE says so); only one that names or
     // counts something must cite a unit.
     // Review of #849 (round 2): an untagged sentence on an evidence turn is checked against EVERY unit (layer A, then the judge), as the
@@ -228,8 +267,8 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (!units.length) { failures.push({ sentence: text, reason: "it states a fact and no evidence unit holds it" }); bad.add(`${a}:${b}`); return; }
     citeAt.set(`${a}:${b}`, ids);
     for (const c of clausesOf(text)) {
-      if (noClaim(c) || personQuestion(c, allowed) || o.onRecord?.(c) === true) continue;
-      if (o.onRecord?.(c) === false) return fail(a, b, text, `"${c}" is not what the person's record holds`);
+      if (noClaim(c) || personQuestion(c, allowed) || rec(c) === true) continue;
+      if (rec(c) === false) return fail(a, b, text, `"${c}" is not what the person's record holds`);
       // Round 3 of #849: every clause, not only one with a figure ("The posting is open", "It requires a clearance").
       const names = owners.length ? mentioned(c) : [];
       if (names.length >= 2) {
@@ -256,7 +295,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   }));
   // Layer A: each clause against an index of the units it cites, a record unit read as one record (a fact per line).
   const asks: { k: number; claim: string; source: string }[] = [];
-  const indexOf = (us: EvidenceUnit[]) => indexPages(us.map((u) => ({ text: u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : "The person's confirmed record:", places: u.places ?? [], ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
+  const indexOf = (us: EvidenceUnit[]) => indexPages(us.map((u) => ({ text: u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : "The person's confirmed record:", places: u.places ?? [], named: u.named ?? [], lend: u.kind === "chat" && u.owner && u.source !== "an earlier reply in this chat" ? u.owner : null, ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
   // Round 8 of #849: the judge always reads a clause with its subject, named or carried ("PayPal: It requires a clearance").
   const withSubject = (c: { clause: string; subject?: string | null }) => `${c.subject && !nameFoundIn(c.subject, c.clause) ? `${c.subject}: ` : ""}${c.clause}`;
   checks.forEach((c, k) => {
@@ -265,15 +304,29 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
       // A comparison: each part's figures, names and dates in one unit of that part's own employer (layer A), the part's employer
       // name aside; a part that states nothing but the name is the comparison's frame. Then the judge reads the whole clause
       // against the units that held its parts.
+      // Round 9 of #849 (B1): when any employer's part carries no figure or date of its own ("Both PayPal and Citadel pay $80",
+      // "PayPal, like Citadel, pays $80", "Citadel pays $80, the same as PayPal", "… and so does PayPal", "PayPal matches Citadel at
+      // $80"), the clause's figures and dates are shared: EVERY employer it names must hold all of them in its own unit, whatever
+      // the order or the comparing words. Only a clause whose every employer has a figure of its own is read part by part.
+      const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const without = (t: string, ws: string[]) => ws.reduce((x, w) => x.replace(new RegExp(`(?<![\\p{L}\\p{N}])${esc(w)}(?:['’]s)?(?![\\p{L}\\p{N}])`, "giu"), " "), t).replace(/\s+/g, " ").replace(/\s+([,.;:])/g, "$1").trim();
+      const figOf = (t: string) => { const hr = hardParts(t); return /\d/.test(t) || hr.numbers.length > 0 || hr.years.length > 0 || hr.quant.length > 0 || UNREAD.test(t); };
+      const subjects = c.parts.map((p) => p.subject);
+      const shared = c.parts.some((p) => !figOf(without(p.text, [p.subject]))) && figOf(c.clause);
+      if (shared && UNREAD.test(c.clause) && !/\d/.test(c.clause) && !hardParts(c.clause).numbers.length) { failures.push({ sentence: c.claim, reason: `"${UNREAD.exec(c.clause)![0]}" is a figure code cannot check` }); bad.add(`${c.a}:${c.b}`); return; }
       const held: EvidenceUnit[] = [], passages: string[] = [];
       for (const p of c.parts) {
-        const rest = p.text.replace(new RegExp(p.subject.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), " ");
+        // (shared: the whole clause, the other employers' names aside, against this employer's units; the first word is read as the
+        // plain word it is when it opens the comparison, "Both …", "Each …")
+        const own = shared ? without(c.clause, subjects.filter((w) => w !== p.subject)).replace(/^(\p{Lu}[\p{L}']*)/u, (w) => OPENER.test(w) ? w.toLowerCase() : w) : p.text;
+        const rest = own.replace(new RegExp(esc(p.subject), "i"), " ");
         const hr = hardParts(rest), fig = /\d/.test(rest) || hr.numbers.length > 0 || hr.years.length > 0 || hr.quant.length > 0 || UNREAD.test(rest);
-        if (!fig && !missingSpecifics(rest, []).length) continue;
+        if (!shared && !fig && !missingSpecifics(rest, []).length) continue;
         if (UNREAD.test(rest) && !hr.numbers.length && !/\d/.test(rest)) { failures.push({ sentence: c.claim, reason: `"${UNREAD.exec(rest)![0]}" is a figure code cannot check`, subject: p.subject }); bad.add(`${c.a}:${c.b}`); return; }
-        const f = findSupport(p.text, indexOf(p.units));
+        if (shared && !fig) continue;
+        const f = findSupport(own, indexOf(p.units));
         const u = f ? p.units[f.page] : undefined;
-        if (!f || !u || (u.owner ? u.owner !== p.subject : !nameFoundIn(p.subject, f.unit.passage))) { failures.push({ sentence: c.claim, reason: `no cited unit about ${p.subject} holds "${p.text}"`, subject: p.subject }); bad.add(`${c.a}:${c.b}`); return; }
+        if (!f || !u || (u.owner ? u.owner !== p.subject : !nameFoundIn(p.subject, f.unit.passage))) { failures.push({ sentence: c.claim, reason: shared ? `"${c.clause}" gives ${p.subject} its figures too, and no cited unit about ${p.subject} holds them` : `no cited unit about ${p.subject} holds "${p.text}"`, subject: p.subject }); bad.add(`${c.a}:${c.b}`); return; }
         held.push(u); passages.push(`${p.subject}: ${f.unit.passage}`);
       }
       if (!held.length) { failures.push({ sentence: c.claim, reason: `no cited unit holds "${c.clause}"` }); bad.add(`${c.a}:${c.b}`); return; }
@@ -311,10 +364,10 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const yesAt = new Set(asks.flatMap((x, j) => got[j] ? [x.k] : []));
   asks.forEach((x, j) => { const c = checks[x.k]; if (!yesAt.has(x.k) && asks.findIndex((y) => y.k === x.k) === j && !bad.has(`${c.a}:${c.b}`)) { failures.push({ sentence: c.claim, reason: c.untagged ? "it states a fact and cites no evidence unit, and no unit states it" : `the cited unit does not state "${x.claim}"`, subject: c.subject ?? null }); bad.add(`${c.a}:${c.b}`); } });
   const text = lines.map((l, a) => l.filter((x, b) => x && !bad.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  const cites: string[] = [];
-  lines.forEach((l, a) => l.forEach((x, b) => { if (x && !bad.has(`${a}:${b}`)) { kept.push(x); for (const id of citeAt.get(`${a}:${b}`) ?? []) if (!cites.includes(id)) cites.push(id); } }));
+  const cites: string[] = [], citeOf: [string, string[]][] = [];
+  lines.forEach((l, a) => l.forEach((x, b) => { if (x && !bad.has(`${a}:${b}`)) { kept.push(x); citeOf.push([x, citeAt.get(`${a}:${b}`) ?? []]); for (const id of citeAt.get(`${a}:${b}`) ?? []) if (!cites.includes(id)) cites.push(id); } }));
   const tagged = raw.map((l, a) => l.filter((x, b) => lines[a][b] && !bad.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  return { text, failures, kept, cites, tagged, subject: carried };
+  return { text, failures, kept, cites, tagged, subject: carried, citeOf };
 }
 
 // ------------------------------------------------------------------------------------------------ task contract
@@ -341,7 +394,13 @@ export type RepairModel = (o: { system: string; user: string }) => Promise<strin
 export const REPAIR_SYSTEM = "You fix a text message from a career assistant. You get only the sentences that failed code's checks, each with code's reason, " +
   "and the evidence units they may cite. Return the fixed sentences only, one per line, each tagged with the ids it rests on ([E3]); leave out a sentence you cannot " +
   "support from these units. If a length limit is given, the whole reply must fit it. If something the reply must contain is missing, add one sentence for it. No other text.";
-export interface PipelineOut { text: string; repaired: boolean; dropped: Failure[]; calls: number; fallback: boolean }
+// `calls`: repair calls (at most one). `judgeCalls`/`judgeClaims`: every support-judge call this reply made and the claims they
+// carried; `judgeCapped`: a claim went unasked because the cap was reached, and so failed closed (round 9 of #849, B5).
+export interface PipelineOut { text: string; repaired: boolean; dropped: Failure[]; calls: number; fallback: boolean; judgeCalls: number; judgeClaims: number; judgeCapped: boolean }
+// Round 9 of #849 (B5): a hard cap on the judge per reply. Each verification pass puts all its new claims in ONE call (verifyTagged);
+// across the passes of a reply (the draft settled, the repair settled, a length rewrite) at most this many calls and claims are made
+// (trunk's decide: 2 calls of 8 claims for one reply). Past the cap a claim is not asked and counts as "no": it fails closed.
+export const REPLY_JUDGE_MAX_CALLS = 4, REPLY_JUDGE_MAX_CLAIMS = 32;
 export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge?: SupportJudge | null; repair?: RepairModel | null; own?: string[]; onRecord?: (s: string) => boolean | null;
   ask: string; contracts?: Contract[]; maxChars?: number; answers?: (text: string) => boolean; names?: string[] }): Promise<PipelineOut> {
   // Round 8 of #849: what is sent is verified as it is sent. A dropped sentence changes what the next one refers back to, so the
@@ -349,11 +408,22 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
   // are verified in the place they will be sent, after what stood, with its subject carried into them. The judge is asked each
   // (claim, passage) pair once per reply.
   const memo = new Map<string, "yes" | "no">();
+  let judgeCalls = 0, judgeClaims = 0, judgeCapped = false;
   const judge: SupportJudge | null = o.judge ? async (cs) => {
     const key = (c: { claim: string; source: string }) => `${c.claim}\u0000${c.source}`;
     const need = cs.filter((c, j) => !memo.has(key(c)) && cs.findIndex((d) => key(d) === key(c)) === j);
-    if (need.length) { const got = await o.judge!(need); if (!Array.isArray(got) || got.length !== need.length) return got; need.forEach((c, j) => memo.set(key(c), got[j])); }
-    return cs.map((c) => memo.get(key(c))!);
+    if (need.length) {
+      const room = judgeCalls < REPLY_JUDGE_MAX_CALLS ? Math.max(0, REPLY_JUDGE_MAX_CLAIMS - judgeClaims) : 0;
+      const asked = need.slice(0, room), over = need.slice(asked.length);
+      if (over.length) { judgeCapped = true; for (const c of over) memo.set(key(c), "no"); }
+      if (asked.length) {
+        judgeCalls++; judgeClaims += asked.length;
+        const got = await o.judge!(asked);
+        if (!Array.isArray(got) || got.length !== asked.length) return got;
+        asked.forEach((c, j) => memo.set(key(c), got[j]));
+      }
+    }
+    return cs.map((c) => memo.get(key(c)) ?? "no");
   } : null;
   const vo = { ...o, judge };
   const settle = async (t: string, carry: string | null = null): Promise<Verified> => {
@@ -371,7 +441,7 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
   const contractMiss = (t: string) => (o.contracts ?? []).map((c) => c.missing(t, o.ask)).filter(Boolean) as string[];
   const tooLong = o.maxChars && len(v1.text) > o.maxChars ? `the reply is ${len(v1.text)} characters; the limit is ${o.maxChars}` : null;
   const miss = contractMiss(v1.text);
-  let text = v1.text, calls = 0, repaired = false, dropped = v1.failures, cites = [...v1.cites];
+  let text = v1.text, calls = 0, repaired = false, dropped = v1.failures, cites = [...v1.cites], citeOf = v1.citeOf;
   if ((v1.failures.length || tooLong || miss.length) && o.repair) {
     const user = [v1.failures.length ? `FAILED SENTENCES:\n${v1.failures.map((f) => `- ${f.sentence} (code: ${f.reason}${f.subject && !f.reason.includes(f.subject) ? `; the sentence is about ${f.subject}` : ""})`).join("\n")}` : "",
       tooLong ? `LENGTH: ${tooLong}. The sentences that stood:\n${v1.text}` : "", miss.length ? `MISSING: ${miss.join("; ")}.` : "",
@@ -389,16 +459,16 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
         // the whole is settled again, since what follows the new sentences now refers back to them.
         const v2 = await settle(firstFailed ? `${fresh}\n${v1.tagged}` : `${v1.tagged}\n${fresh}`);
         const joined = v2.text.replace(/\n+/g, " ").trim();
-        if (!o.maxChars || len(joined) <= o.maxChars || len(joined) <= len(text)) { text = joined; repaired = true; cites = [...v2.cites]; dropped = v2.failures; }
+        if (!o.maxChars || len(joined) <= o.maxChars || len(joined) <= len(text)) { text = joined; repaired = true; cites = [...v2.cites]; citeOf = v2.citeOf; dropped = v2.failures; }
         else if (tooLong) {
           // (CodeRabbit on #849: a length repair is a rewrite of what stood: verified on its own, it replaces the overlong text when it
           // fits the limit and still answers; otherwise what stood is cut below as before)
           const v3 = await settle(fresh);
           const t3 = v3.text.replace(/\n+/g, " ").trim();
-          if (t3 && len(t3) <= o.maxChars && len(t3) < len(text) && answersOf(t3)) { text = t3; repaired = true; cites = [...v3.cites]; dropped = [...v1.failures, ...v3.failures]; }
+          if (t3 && len(t3) <= o.maxChars && len(t3) < len(text) && answersOf(t3)) { text = t3; repaired = true; cites = [...v3.cites]; citeOf = v3.citeOf; dropped = [...v1.failures, ...v3.failures]; }
           else dropped = v2.failures;
         } else dropped = v2.failures;
-      } else dropped = [];
+      } else dropped = v1.failures; // (round 9: nothing new came back; what the first pass dropped stays dropped, and in the trace)
     }
   }
   if (o.maxChars && len(text) > o.maxChars) {
@@ -406,6 +476,9 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
     const ss = splitSentences(text.replace(/\n+/g, " "));
     while (ss.length > 1 && len(ss.join(" ")) > o.maxChars) ss.pop();
     text = ss.join(" ");
+    // (round 9 of #849: a sentence cut here takes its source links with it; a kept one keeps its own)
+    const left = new Set(ss.map((x) => x.trim()));
+    cites = cites.filter((id) => citeOf.some(([x, ids]) => left.has(x.trim()) && ids.includes(id)));
   }
   // (a page's own source numbers, "[1]", mean nothing on this path: the units carry their links)
   text = text.replace(/\s*\[\d+\](?:\s*\[\d+\])*/g, "").split("\n").filter((l) => !/^\s*[.,;:]?\s*$/.test(l) || !l.trim()).join("\n").trim();
@@ -414,7 +487,7 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
   // Live-12 review (item 3; D-024, D-060): the tags go, the sources stay: each kept sentence's cited unit's link, on its own line, once.
   const links = [...new Set(cites.map((id) => ledger.get(id)?.url).filter((u): u is string => !!u))].filter((u) => !text.includes(u));
   if (links.length && !fallback) text = `${text}\n${links.join("\n")}`;
-  return { text: stripTags(text).trim(), repaired, dropped, calls, fallback };
+  return { text: stripTags(text).trim(), repaired, dropped, calls, fallback, judgeCalls, judgeClaims, judgeCapped };
 }
 // The employers a tool named this turn (posting owners; never a line carried from an earlier reply).
 const postingOwnersOf = (l: Ledger) => [...new Set(l.units.filter((u) => u.source !== "an earlier reply in this chat").map((u) => u.owner).filter((w): w is string => !!w && w.trim().length > 1))];
@@ -435,6 +508,9 @@ export function fallbackLine(ledger: Ledger, ask: string, names: string[] = [], 
   const asked = [...new Set((String(ask ?? "").toLowerCase().match(/\p{L}[\p{L}&'-]{1,}/gu) ?? []).map((w) => w.replace(/'s$/, "")))].filter((w) => known.has(w) && !/^(?:i|the|and|pay|what|how|for|with|is|are|my|your)$/.test(w));
   const ws = postingOwnersOf(ledger);
   const whose = (u: EvidenceUnit) => subject ? u.owner === subject && u.source !== "an earlier reply in this chat" : !ws.length && !u.owner && u.source !== "an earlier reply in this chat";
-  const held = !asked.length ? [] : ledger.units.filter((u) => u.kind === "chat" && /\d/.test(u.text) && whose(u) && asked.every((w) => nameFoundIn(w, u.text)));
+  // (round 9 of #849: on a turn with one employer, an ask that names none but refers back to it, "what's the pay?", "when does it
+  // close?", asks about that employer's posting; a general ask, "what do interns earn", still gets nothing listed)
+  const refers = !asked.length && ws.length === 1 && !!subject && /(?<![\p{L}])(?:the|this|that|it|its|it's|they|their|there)(?![\p{L}])/iu.test(String(ask ?? ""));
+  const held = ledger.units.filter((u) => u.kind === "chat" && /\d/.test(u.text) && whose(u) && (asked.length ? asked.every((w) => nameFoundIn(w, u.text)) : refers));
   return [`I couldn't verify an answer to that from what I read.${held.length ? " This chat's tool results do hold:" : ""}`, ...held.slice(0, 3).map((u) => `${u.text}${u.url ? `\n${u.url}` : ""}`)].join("\n");
 }

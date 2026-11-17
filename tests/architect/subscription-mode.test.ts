@@ -10,6 +10,8 @@
 import assertNode from "node:assert/strict";
 import { BRAIN_ENV_NAMES, brainEnvCheck, brainEnvOverrides, enterSubscriptionEnv, SUBSCRIPTION_CLEARED, SUBSCRIPTION_PLACEHOLDER_KEY, subscriptionFetch } from "../../evals/career/run.ts";
 import { RELEASE_FLAGS } from "../../supabase/functions/agent-chat/release_config.ts";
+import { canRun } from "./helpers/response_world.ts";
+import { pgBinDir } from "../flow/pg.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -28,7 +30,8 @@ Deno.test("B3: every variable that changes the brain, the gateway or the judges 
 
 const PASS_ENV = () => ({ PATH: Deno.env.get("PATH") ?? "/usr/bin:/bin", HOME: Deno.env.get("HOME") ?? "/tmp" });
 // sources: each call's apiKeySource in turn ("none" when the list runs out); "SLOW:<src>" prints the init, then waits 3 s and
-// marks that it went on (what a real CLI would do next: send the model request).
+// marks that it went on (what a real CLI would do next: send the model request); "NONL:<src>" does the same with the init
+// line's newline missing; "NOINIT" prints a result with no init event at all.
 async function fakeClaude(sources: string[] = []): Promise<string> {
   const dir = await Deno.makeTempDir({ prefix: "fake-claude-" });
   await Deno.writeTextFile(`${dir}/sources`, sources.join("\n") + "\n");
@@ -39,8 +42,10 @@ cat > "$d/stdin.$$"
 env > "$d/env.$$"; pwd > "$d/cwd.$$"; ls -A > "$d/ls.$$"
 for a in "$@"; do printf '%s\\n' "$a"; done > "$d/args.$$"
 src=$(sed -n "\${n}p" "$d/sources"); [ -z "$src" ] && src=none
-case "$src" in SLOW:*) echo '{"type":"system","subtype":"init","apiKeySource":"'\${src#SLOW:}'"}'; sleep 3; touch "$d/went-on"; esac
-echo '{"type":"system","subtype":"init","apiKeySource":"'$src'"}'
+case "$src" in SLOW:*) echo '{"type":"system","subtype":"init","apiKeySource":"'\${src#SLOW:}'"}'; sleep 3; touch "$d/went-on";;
+  NONL:*) printf '%s' '{"type":"system","subtype":"init","apiKeySource":"'\${src#NONL:}'"}'; sleep 3; touch "$d/went-on";;
+esac
+[ "$src" = NOINIT ] || echo '{"type":"system","subtype":"init","apiKeySource":"'$src'"}'
 echo '{"type":"result","subtype":"success","is_error":false,"structured_output":{"content":[{"type":"text","text":"ok"}]},"usage":{"input_tokens":1,"output_tokens":1}}'
 `);
   await Deno.chmod(`${dir}/claude`, 0o755);
@@ -191,3 +196,58 @@ Deno.test("end to end: run.ts --subscription with a real-looking key sends nothi
     try { await Deno.remove(`${ROOT}/evals/career/results/${label}.json`); } catch { /* not written */ }
   }
 });
+
+Deno.test("bridge: a CLI that prints no init event is refused; an init without its newline is acted on as soon as it is whole", async () => {
+  const cli = await import("../../evals/subscription/claude_cli.ts");
+  const dir = await fakeClaude(["NOINIT", "NONL:ANTHROPIC_API_KEY"]);
+  await withEnv({ CI: null, GITHUB_ACTIONS: null, PATH: `${dir}:${Deno.env.get("PATH")}` }, async () => {
+    await assertNode.rejects(() => cli.runCli(["-p"], "x"), /the claude CLI did not start/);
+    const t0 = performance.now();
+    await assertNode.rejects(() => cli.runCli(["-p"], "x"), /apiKeySource is "ANTHROPIC_API_KEY".*stopped before any model request/);
+    ok(performance.now() - t0 < 2500, "refused at the init line, not when the newline or the end came");
+    await new Promise((r) => setTimeout(r, 3500));
+    let went = true; try { await Deno.stat(`${dir}/went-on`); } catch { went = false; }
+    eq(went, false, "the child never went on past the init");
+  });
+});
+
+Deno.test("bridge: a web_search request goes to the CLI with the same isolation (flags, empty folder, allowlisted env), WebSearch its only tool", async () => {
+  const cli = await import("../../evals/subscription/claude_cli.ts");
+  const dir = await fakeClaude();
+  await withEnv({ CI: null, GITHUB_ACTIONS: null, PATH: `${dir}:${Deno.env.get("PATH")}`, ANTHROPIC_API_KEY: "sk-ant-real-looking", CLAUDE_CODE_USE_BEDROCK: "1" }, async () => {
+    const res = await cli.messages({ model: "claude-sonnet-5-5", max_tokens: 10, tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }], messages: [{ role: "user", content: "who makes Deno?" }] });
+    ok(res.content.some((b: any) => b.type === "server_tool_use"), JSON.stringify(res));
+    const n = await calls(dir); // the preflight may have run in an earlier test: the search is the last call
+    const args = (await file(dir, "args", n)).split("\n");
+    eq(args[args.indexOf("--tools") + 1], "WebSearch");
+    eq(args[args.indexOf("--allowedTools") + 1], "WebSearch");
+    eq(args[args.indexOf("--setting-sources") + 1], "project");
+    for (const flag of ["-p", "--strict-mcp-config", "--no-session-persistence", "--verbose"]) ok(args.includes(flag), flag);
+    const cwd = (await file(dir, "cwd", n)).trim();
+    ok(/claude-cli-empty-/.test(cwd) && cwd !== Deno.cwd(), cwd);
+    eq((await file(dir, "ls", n)).trim(), "");
+    eq((await envKeys(dir, n)).filter((k) => !ALLOWED(k)), []);
+    ok(!(await file(dir, "env", n)).includes("sk-ant-real-looking"));
+  });
+});
+
+// The mirror runner opens the response world (Postgres 16): as the other world tests, not run locally without it, a FAIL in CI.
+Deno.test({ name: "end to end: run-conversation.ts --subscription preflights, then sends the product's model calls to the CLI, no key, nothing out", sanitizeOps: false, sanitizeResources: false, ignore: canRun() !== null && canRun() !== "FAIL", fn: async () => {
+  if (canRun() === "FAIL") throw new Error("the mirror end-to-end test needs Postgres 16 in CI");
+  const dir = await fakeClaude();
+  const tmp = await Deno.makeTempDir();
+  await Deno.writeTextFile(`${tmp}/conv.json`, JSON.stringify([{ id: "C1", prompt: "what should I ask in a product manager interview?" }]));
+  const KEY = "sk-ant-api03-" + "M".repeat(80) + "-AA";
+  const r = await run(["--import-map=tests/flow/supabase-npm.json", "evals/mirror/run-conversation.ts", "--subscription", "--conv", `${tmp}/conv.json`, "--out", `${tmp}/out.jsonl`],
+    { ...PASS_ENV(), PATH: `${dir}:${Deno.env.get("PATH")}`, ANTHROPIC_API_KEY: KEY, PGBIN: pgBinDir() ?? "", TMPDIR: Deno.env.get("TMPDIR") ?? "/tmp", USER: Deno.env.get("USER") ?? "trainee", LANG: Deno.env.get("LANG") ?? "en_US.UTF-8" });
+  ok(/MIRROR-CONVERSATION subscription/.test(r.out), r.out.slice(-2000));
+  ok(/external_requests=0/.test(r.out), r.out.slice(-800));
+  const n = await calls(dir);
+  ok(n >= 2, `the preflight and the product's model calls reached the CLI (${n})\n${r.out.slice(-1500)}`);
+  ok((await file(dir, "args", 1)).includes("Reply with the word ok."), "the first CLI call is the preflight");
+  const m = /model_calls=(\d+)/.exec(r.out); ok(m && Number(m[1]) >= 1 && Number(m[1]) === n - 1, `every model call went to the CLI: ${m?.[0]}, CLI calls ${n}`);
+  for (let k = 1; k <= n; k++) {
+    const all = (await file(dir, "args", k)) + (await file(dir, "stdin", k)) + (await file(dir, "env", k));
+    ok(!all.includes(KEY) && !all.includes(SUBSCRIPTION_PLACEHOLDER_KEY), `call ${k}: no key reaches the CLI`);
+  }
+} });

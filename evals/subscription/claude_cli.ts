@@ -99,7 +99,10 @@ function emptyDir(): string {
   globalThis.addEventListener("unload", () => { try { if (empty) Deno.removeSync(empty, { recursive: true }); } catch { /* already gone */ } });
   return empty;
 }
-export const BASE: readonly string[] = ["-p", "--tools", "", "--strict-mcp-config", "--setting-sources", "project", "--no-session-persistence"];
+// The isolation every call has: print mode, only the named CLI tools ("" = none), no MCP servers, only project settings (the
+// empty folder has none), no saved session. BASE is a model call with no tools; the web search call allows only WebSearch.
+export const isolated = (tools: string): string[] => ["-p", "--tools", tools, "--strict-mcp-config", "--setting-sources", "project", "--no-session-persistence"];
+export const BASE: readonly string[] = isolated("");
 // One CLI call. stdout is read line by line as it streams: the init event names the call's apiKeySource; one other than
 // "none" kills the child at once (before the CLI sends a model request) and refuses the call, whatever preflight saw.
 export async function runCli(args: string[], stdin: string): Promise<{ code: number; out: string; err: string; result: any }> {
@@ -125,6 +128,8 @@ export async function runCli(args: string[], stdin: string): Promise<{ code: num
     buf += dec.decode(value, { stream: true });
     let k: number;
     while (!refused && (k = buf.indexOf("\n")) >= 0) { take(buf.slice(0, k)); buf = buf.slice(k + 1); }
+    // An init line still waiting for its newline is checked as soon as it is whole JSON (a partial line never parses).
+    if (!refused && !init && buf.trim()) { try { JSON.parse(buf); take(buf); buf = ""; } catch { /* not whole yet */ } }
   }
   if (!refused && buf) take(buf);
   try { reader.releaseLock(); await p.stdout.cancel(); } catch { /* closed */ }
@@ -168,7 +173,7 @@ async function searchCall(body: any, tool: any): Promise<any> {
   ].join(" ");
   const t0 = performance.now();
   stats.calls++;
-  const r = await runCli(["-p", "--tools", "WebSearch", "--allowedTools", "WebSearch", "--strict-mcp-config", "--setting-sources", "project", "--no-session-persistence", "--model", String(body.model || "claude-sonnet-5-5"), "--system-prompt", `${sys}\n\n${protocol}`, "--json-schema", JSON.stringify(SEARCH_SCHEMA)], q);
+  const r = await runCli([...isolated("WebSearch"), "--allowedTools", "WebSearch", "--model", String(body.model || "claude-sonnet-5-5"), "--system-prompt", `${sys}\n\n${protocol}`, "--json-schema", JSON.stringify(SEARCH_SCHEMA)], q);
   stats.ms += performance.now() - t0;
   const out: any = r.result;
   if (!out) { stats.failed++; throw new Error(`claude CLI web search gave no result (exit ${r.code}): ${(r.err || r.out).slice(0, 300)}`); }

@@ -73,7 +73,9 @@ export type ListFilter = { remote: boolean; words: string[]; said: string };
 // MASS APPLY (owner, 2026-11-01): "apply to the top 10 frontend internships in Chicago" names what to search for in the same
 // message (`what`): the role words, read against the title, and the place, read against the location. Without `what`,
 // "the top N" is the thread's last list, as before.
-export interface ManyWhat { role: string; words: string[]; place: string | null; company?: string | null; places?: string[] }
+// A searched batch keeps its search on the reply (meta.apply_search) for "N more like those", with the employers they said to
+// skip (`exclude`) and "that I qualify for" (`qualify`), so a later "more" never re-adds what they ruled out.
+export interface ManyWhat { role: string; words: string[]; place: string | null; company?: string | null; places?: string[]; exclude?: string[]; qualify?: true }
 // MASS APPLY END TO END (2026-11-04): `good` is "apply to the good ones": the listed postings their confirmed facts fit
 // (fit bucket Match or Safety, not knocked out), never a guess when their facts can't rank them.
 // MASS APPLY CONVERSATIONS (2026-11-16): "apply to every SWE internship in Chicago or remote that I qualify for" names the
@@ -82,7 +84,9 @@ export interface ManyWhat { role: string; words: string[]; place: string | null;
 // thread has no list or a place other than remote is named; otherwise "all the remote internships" stays the list's filter.
 // `notPlaces` is a place they ruled out ("not remote", "except the ones in Ohio"): a location exclusion, never an employer to
 // skip and never a search word.
-export type ManyAsk = { kind: "all"; filter?: ListFilter; good?: true; what?: ManyWhat; search?: ManyWhat; qualify?: true; exclude?: string[]; notPlaces?: string[] } | { kind: "first"; n: number; what?: ManyWhat } | { kind: "nth"; i: number } | { kind: "pick"; is: number[] };
+// "apply to 20 more like those": `more` is the search the thread's last batch came from (ApplyChatDeps.lastSearch), again,
+// with every posting already on their apply list left out; `n` the count (null: every new match).
+export type ManyAsk = { kind: "more"; n: number | null } | { kind: "all"; filter?: ListFilter; good?: true; what?: ManyWhat; search?: ManyWhat; qualify?: true; exclude?: string[]; notPlaces?: string[] } | { kind: "first"; n: number; what?: ManyWhat } | { kind: "nth"; i: number } | { kind: "pick"; is: number[] };
 // Short forms a person types for a role family, read against the listed titles.
 const ROLE_ALIASES: Record<string, string[]> = {
   swe: ["software engineer", "software engineering", "software developer", "swe"],
@@ -240,6 +244,16 @@ export function allSearchOf(raw: string): { search: ManyWhat; qualify?: true; ex
   const search: ManyWhat = { ...what, role: what.role.replace(/\s+(?:roles?|jobs?|positions?|postings?|openings?)$/i, ""), place: places[0] ?? null, ...(places.length > 1 ? { places } : {}) };
   return { search, ...(qualify ? { qualify: true as const } : {}), ...(exclude?.length ? { exclude } : {}), ...(notPlaces.length ? { notPlaces: [...new Set(notPlaces)] } : {}) };
 }
+// The related titles one step wider than a search, within its role family: the specialty word dropped for the family's own
+// word ("frontend internships" -> "software internships"). Null when the search names no specialty this knows.
+const RELATED: [RegExp, string][] = [[/^(?:frontend|fe|backend|be|fullstack|ui|web|mobile|ios|android|platform|infrastructure|devops)$/, "software"], [/^(?:analyst|analytics|bi)$/, "data"], [/^(?:ml|mle|ai)$/, "machine learning"]];
+export function widerSearch(what: ManyWhat): ManyWhat | null {
+  const i = what.words.findIndex((w) => RELATED.some(([re]) => re.test(w)));
+  if (i < 0) return null;
+  const to = RELATED.find(([re]) => re.test(what.words[i]))![1];
+  const words = what.words.map((w, k) => (k === i ? to : w)).filter((w, k, a) => a.indexOf(w) === k);
+  return { ...what, words, role: words.join(" ") };
+}
 // One message queues at most this many (owner review of #366): a bigger ask is told plainly how many went and why.
 export const MANY_MAX = 50;
 // Not a command (review of #366): a hedge, a negation, a condition or a question about applying ("I wouldn't apply to the
@@ -347,6 +361,8 @@ export function applyManyAsk(message: string): ManyAsk | null {
   const t = raw.toLowerCase().replace(/[.!]+$/, "").replace(/\s+/g, " ");
   const after = t.match(/\bapply\b(?:\s+me)?(?:\s+(?:to|for))?\s+(.*)$/)?.[1];
   if (after === undefined) return null;
+  const more = /^(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)?\s*more(?:\s+(?:like\s+(?:those|these|that|them|the\s+last\s+ones)|of\s+(?:those|these|them)|similar(?:\s+ones)?|ones?|roles?|jobs?|internships?|postings?|of\s+the\s+same))*(?:\s+please)?$/.exec(after);
+  if (more) return { kind: "more", n: more[1] ? numOf(more[1]) : null };
   let m = after.match(/^(?:the\s+)?(first|second|third|fourth|fifth)\s+one\b/);
   if (m) return { kind: "nth", i: ORD[m[1]] };
   m = after.match(/^(?:the\s+)?(?:top|first|best)\s+(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)\b\s*(.*)$/);
@@ -415,6 +431,9 @@ export interface ApplyChatDeps {
   // place's metro area), re-checked open on each posting's own page: up to `want` verified open roles not on the list, named
   // beside it and never queued. Absent or failing, none.
   nearby?: (want: number, listed: ShortlistEntry[]) => Promise<ShortlistEntry[]>;
+  // MASS APPLY CONVERSATIONS: the search this thread's last searched batch came from (the reply's meta.apply_search), for
+  // "apply to 20 more like those"; absent or none, the ask is answered with what to say instead.
+  lastSearch?: () => Promise<ManyWhat | null>;
 }
 // A posting held back by the possible-match question (SERIAL-1490): queued only when the person answers no.
 export interface EmployerQuestion { job_id: string | null; url: string; company: string; title: string }
@@ -423,6 +442,9 @@ export type ApplyChatResult = {
   reply: string; status: "queued" | "already" | "none" | "which" | "refused" | "unreadable" | "pace_unknown" | "pace_unreadable" | "no_list" | "asking_employer" | "no_resume" | "resume_unreadable"; intent: typeof APPLY_QUEUE_INTENT;
   // FEATURE 1: how many of the postings asked for went into the queue, and whether the server prepare was asked to run.
   coverage?: { queued: number; total: number }; prepare?: PrepareKick;
+  // MASS APPLY CONVERSATIONS: the search a searched batch came from, with its exclude list and qualify filter, kept on the
+  // reply (meta.apply_search) for "N more like those".
+  search?: ManyWhat;
   posting?: { job_id: string; company: string; title: string };
   // The batch ask: what went into the queue and what did not, each with its reason.
   queued?: { job_id: string; company: string; title: string }[]; refused?: { job_id: string | null; company: string; title: string; reason: string; said?: string }[];
@@ -664,12 +686,20 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   let ask: ManyAsk | null = given ? { kind: "all" } : applyManyAsk(o.message);
   if (!ask) return null;
   const intent = APPLY_QUEUE_INTENT;
+  let onList: Set<string> | null = null, moreNote = "";
+  if (ask.kind === "more") {
+    const prev = o.lastSearch ? await o.lastSearch().catch(() => null) : null;
+    if (!prev) return { reply: `I don't have the search your last batch came from on this thread, so I can't tell what "more like those" means and nothing was queued. Say "apply to ${ask.n ?? 10} more <role> in <place>" or "apply to every <role> in <place>".`, status: "none", intent, queued: [], refused: [] };
+    try { onList = new Set((await o.wants.list(o.userId)).map((w) => String(w.posting_key))); }
+    catch { return { reply: "I couldn't read your apply list just now, so I couldn't leave out the ones already on it; nothing was queued. Ask again in a minute.", status: "unreadable", intent, queued: [], refused: [] }; }
+    ask = ask.n === null ? { kind: "all", what: prev } : { kind: "first", n: ask.n, what: prev };
+  }
   // MASS APPLY CONVERSATIONS: an "all" ask that names a search is searched when the thread has no list, or when it names a
   // place other than remote (the thread's list is not where they asked for); otherwise it is the list's filter, as before.
   const hasList = (o.shortlist ?? []).some((e) => e && (e.url || e.id));
   let skipped: string[] = [];
   if (ask.kind === "all" && ask.search && !ask.what && (!hasList || ask.notPlaces?.length || (ask.search.places ?? [ask.search.place]).some((p) => p && p !== "remote"))) {
-    ask = { kind: "all", what: ask.search, ...(ask.qualify ? { qualify: true as const } : {}), ...(ask.exclude ? { exclude: ask.exclude } : {}), ...(ask.notPlaces ? { notPlaces: ask.notPlaces } : {}) };
+    ask = { kind: "all", what: { ...ask.search, ...(ask.exclude ? { exclude: ask.exclude } : {}), ...(ask.qualify ? { qualify: true as const } : {}) }, ...(ask.qualify ? { qualify: true as const } : {}), ...(ask.exclude ? { exclude: ask.exclude } : {}), ...(ask.notPlaces ? { notPlaces: ask.notPlaces } : {}) };
   }
   // MASS APPLY: "the top N <role> in <place>" is searched for here, not read from the thread's last list.
   const what = ask.kind === "first" || ask.kind === "all" ? ask.what : undefined;
@@ -690,6 +720,30 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
         if (why !== undefined) { skipped.push(`${nameOf(e)} (${why || "your confirmed facts rule it out"})`); return false; }
         return true;
       });
+    }
+    // A saved search's employers to skip and "that I qualify for" hold on every "more" of it: never re-added.
+    const keep = (e: ShortlistEntry, out: { has(k: string): boolean }) => !(what.exclude ?? []).some((c) => employerKey(c) === employerKey(e.company)) && !(what.qualify && out.has(String(e.id ?? "")));
+    if (what.exclude?.length || what.qualify) list = list.filter((e) => keep(e, ruledOut));
+    // "more like those": only postings not already on their apply list; none left is said plainly.
+    if (onList) {
+      const before = list.length;
+      list = list.filter((e) => !onList!.has(String(e.id ?? "")));
+      // The exact search is used up: one step wider, to the related titles of the same role family in the same places, said by
+      // name ("widened to software internships in Chicago"); still none: said plainly below.
+      const wider = !list.length ? widerSearch(what) : null;
+      if (wider) {
+        try {
+          const w = await postingsFor(o, wider);
+          const fresh = w.list.filter((e) => !onList!.has(String(e.id ?? "")) && keep(e, w.ruledOut));
+          if (fresh.length) {
+            list = fresh; rankedBy = w.rankedBy;
+            const where = (wider.places?.length ? wider.places : wider.place ? [wider.place] : []).map((p) => p.replace(/\b\w/g, (c) => c.toUpperCase()));
+            moreNote = `All ${before} open ${what.role || "matching"} posting${before === 1 ? " is" : "s are"} already on your apply list, so I widened to related titles: ${wider.role}${where.length ? ` in ${where.join(" or ")}` : ""}. `;
+          }
+        } catch { /* the wider search failed: said as none below */ }
+      }
+      if (!list.length) return { reply: `All ${before} open ${what.role || "matching"} posting${before === 1 ? "" : "s"} I can find for that search ${before === 1 ? "is" : "are"} already on your apply list, so there are no more and nothing new was queued. Say "apply to every <role> in <place>" to search wider.`, status: "none", intent, queued: [], refused: [] };
+      else if (list.length < before && !moreNote) moreNote = `${before - list.length} already on your apply list left out. `;
     }
     if (!list.length) return { reply: `I have no open ${what.role || "matching"} postings${what.company ? ` at ${what.company.replace(/\b\w/g, (c) => c.toUpperCase())}` : ""}${what.place ? ` in ${what.place.replace(/\b\w/g, (c) => c.toUpperCase())}` : ""} on file, so nothing was queued. Say "find <role> jobs in <place>" to look wider.`, status: "none", intent, queued: [], refused: [] };
   } else list = given ? given.list : (o.shortlist ?? []).filter((e) => e && (e.url || e.id));
@@ -823,7 +877,7 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   if (beyond) parts.push(beyond);
   const status = queued.length ? "queued" : already ? "already" : asking.length ? "asking_employer" : "refused";
   const tail = queued.length || already ? ` ${NOTHING_SENT_MANY(prepareRunsNow(o))}` : "";
-  return { reply: `${note}${parts.join(" ")}${tail}`.trim(), status, intent, queued, refused, coverage: { queued: queued.length, total }, screen: screened.gate, ...(kick ? { prepare: kick } : {}),
+  return { reply: `${moreNote}${note}${parts.join(" ")}${tail}`.trim(), status, intent, queued, refused, coverage: { queued: queued.length, total }, screen: screened.gate, ...(what && queued.length ? { search: what } : {}), ...(kick ? { prepare: kick } : {}),
     ...(asking.length ? { ask: asking.map((r) => ({ job_id: r.posting.job_id, url: r.posting.url, company: r.posting.company, title: r.posting.title })) } : {}) };
 }
 

@@ -1,0 +1,13 @@
+{"id": "C1", "prompt": "i need to lock in for recruiting, what should i actually be doing rn to land a swe internship for next summer"}
+{"id": "C2", "prompt": "draft a cold message to a google swe asking for a referral, don't send anything"}
+{"id": "C3", "prompt": "find me 5 swe internships i could actually apply to right now, chicago or remote"}
+{"id": "C4", "prompt": "what should i put at the very top of my resume for swe roles, be specific"}
+{"id": "C5", "prompt": "quiz me on a python question like it's a real interview, one at a time"}
+{"id": "C6", "prompt": "have i applied to anything yet? trying to keep track"}
+{"id": "C5f1", "prompt": "i'd count each number with a dict, then go through the list again and return the first one whose count is 1. o\ud83d\udc4e time, o\ud83d\udc4e space"}
+{"id": "C5f2", "prompt": "def first_unique(nums): counts = {}; [counts.update({n: counts.get(n,0)+1}) for n in nums]; return next(n for n in nums if counts[n]==1)"}
+{"id": "C7", "prompt": "hypothetically if i had two offers, 120k in chicago vs 140k in nyc, same kind of role, how would you think about it"}
+{"id": "C8", "prompt": "what do you actually know about my work experience so far? like everything you remember"}
+{"id": "C9", "prompt": "what's citadel like for new grad swe, culture pay interview process, give me real sources"}
+{"id": "C10", "prompt": "can you make me a tailored resume for that paypal internship, like an actual file i can download. don't apply anywhere"}
+{"id": "C11", "prompt": "what would you need from me to actually submit that paypal application? don't apply yet just wanna know"}

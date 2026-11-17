@@ -23,6 +23,7 @@ import { type EventStore, recordEvents } from "./agent/timeline.ts";
 import { sameCompany } from "./career_mail.ts";
 import { approvalWords, NEGATIONS } from "./approval_words.ts";
 import { guardedAnswer, narrowQuestion, unresolvedOf } from "./application_review.ts";
+import { type ItemRoute, routeLine } from "./career_apply_send_route.ts";
 
 export interface Prepared {
   id: string;
@@ -423,15 +424,17 @@ const RESULT: Record<string, string> = {
   refused: "not sent: the queue refused it",
 };
 // The answer in the person's words, from the database's own per-item results (never from what was asked). `declined`
-// says why an item the person did not approve was not sent.
-export function answerText(results: CardResult[], o: { declined?: "left_out" | "said_no" } = {}): string {
+// says why an item the person did not approve was not sent. `routes` (MASS APPLY CONVERSATIONS, 2026-11-17): what will
+// actually happen to EACH approved application, by item number (career_apply_send_route.ts); an item it does not name is
+// said as unconfirmed. Absent, every approved item is said as before.
+export function answerText(results: CardResult[], o: { declined?: "left_out" | "said_no"; routes?: Map<number, ItemRoute> | null } = {}): string {
   const queued = results.filter((r) => r.result === "queued").length;
   const notSent = results.length - queued;
   // WHOLE JOURNEYS R2: an item whose prepared application is gone (a newer resume or a corrected entry discarded it after the
   // card was shown) has no company in the database's result; it read "1. null: not sent: ...". Said plainly instead.
   const lines = results.map((r) =>
     `${r.n}. ${(r.company === null || r.company === undefined ? "" : String(r.company)).replace(/\s+/g, " ").trim().slice(0, 80) || "An application no longer on file"}: ${
-      r.said ?? (r.result === "declined" && o.declined ? RESULT[o.declined] : RESULT[r.result] ?? RESULT.refused)
+      r.said ?? (r.result === "declined" && o.declined ? RESULT[o.declined] : r.result === "queued" && o.routes ? routeLine(o.routes.get(r.n)) : RESULT[r.result] ?? RESULT.refused)
     }`
   );
   const changed = results.filter((r) => r.result === "changed").length;
@@ -522,6 +525,9 @@ export async function cardTurn(
     // WO-G (fix 12): the review File of each application on the card (application_review.ts, built by code from the prepared
     // payloads): a line per application with its link, or null. A review that cannot be made never changes the card.
     review?: (shown: Prepared[]) => Promise<string | null>;
+    // The route each approved application takes, by prepared id (career_apply_send_route.ts supabaseSendRoutes); absent:
+    // said as before; failing: each approved item is said as unconfirmed.
+    routes?: (preparedIds: string[]) => Promise<Map<string, ItemRoute>>;
   },
 ): Promise<{ reply: string; status: string; card_id?: string; parts?: string[] } | null> {
   const withReview = async (c: Batch, out: { reply: string; status: string; card_id?: string; parts?: string[] }) => {
@@ -714,7 +720,14 @@ export async function cardTurn(
       detail: { card: card.id, n: x.n, result: x.result },
       source: "card",
     })));
-    const reply = answerText(results, { declined: r.kind === "no" ? "said_no" : "left_out" });
+    // Each approved application's own route, read only when something was approved (never one line for the person).
+    const queuedN = new Set(results.filter((x) => x.result === "queued").map((x) => x.n));
+    const routes = queuedN.size && o.routes ? await (async () => {
+      const ids = new Map(card.items.filter((i) => queuedN.has(i.n)).map((i) => [i.n, i.prepared_id] as const));
+      const got = await o.routes!([...ids.values()]).catch(() => null);
+      return new Map([...ids].flatMap(([n, id]) => { const g = got?.get(id); return g ? [[n, g] as const] : []; }));
+    })() : null;
+    const reply = answerText(results, { declined: r.kind === "no" ? "said_no" : "left_out", routes });
     const parts = pagesOf(reply);
     return { reply, status: "answered", ...(parts.length ? { parts } : {}) };
   } catch (e: any) {

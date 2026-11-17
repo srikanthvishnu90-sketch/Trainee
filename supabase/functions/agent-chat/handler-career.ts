@@ -81,6 +81,7 @@ import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
 import { CODE_IN_CHAT_INTENT, CODE_IN_CHAT_REPLY, codeInChat, noteForCodeTurn } from "../_shared/career_code_in_chat.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { CARD_ANSWER_INTENT, CARD_NEEDS_REPLY_STATUS, cardIntent, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
+import { supabaseSendRoutes } from "../_shared/career_apply_send_route.ts";
 import { billingTurn, PAY_BY_CHECKOUT, stripeFromEnv, supabaseBillingStore } from "../_shared/career_billing.ts";
 import { mockPassNote, mockTurn, supabaseMockStore as supabaseMockStoreUncapped } from "../_shared/career_mock.ts";
 import { hiredSourceFromEnv } from "../_shared/career_hired.ts";
@@ -733,7 +734,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const card0 = handoffAns ? ({ reply: handoffAns.reply, status: "handoff", handoff: handoffAns } as any) : !cardHold && !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
         ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id),
-          review: (shown) => supabaseReviewLinks(admin, Deno.env)(user.id, shown.map((p) => p.id)), store: supabaseCardStore(admin), events })
+          review: (shown) => supabaseReviewLinks(admin, Deno.env)(user.id, shown.map((p) => p.id)),
+          // The yes says what happens to EACH approved application (career_apply_send_route.ts): the cloud's switches are the
+          // release flags and the database's rows, read as the submission claim reads them (chat_switches.ts liveSwitches).
+          routes: (ids) => supabaseSendRoutes(admin, user.id, ids, { now: Date.now(),
+            cloudOn: async () => liveSwitches(Deno.env, { settings: await readSubmitSettings(admin), cloudOptIn: "on", gmailSend: null }).employerSubmit }),
+          store: supabaseCardStore(admin), events })
         : null;
       const card = card0 && offerLastWord && card0.status === CARD_NEEDS_REPLY_STATUS ? null : card0;
       // WO-025: the text mock interview, code's like the card: "mock me for <role> at <company>", "end mock", and the answers

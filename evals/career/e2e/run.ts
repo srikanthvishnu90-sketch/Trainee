@@ -53,7 +53,11 @@ export type { E2EItem, E2ERun };
 
 export interface E2ETask { id: string; area: Area; kind: "task" | "multi" | "guard"; setup: string[]; turns: string[]; oracle: Record<string, OracleStep[]>; expect: Expect; note?: string;
   // A generated task's own world (generate.ts): its person and resume, contacts, opted-out addresses, stub pages, family tags.
-  family?: string; style?: string; ats?: string; heldout?: boolean; person?: Person; contacts?: Contact[]; dnc?: string[]; pages?: Record<string, StubPage>; secret?: string }
+  family?: string; style?: string; ats?: string; heldout?: boolean; person?: Person; contacts?: Contact[]; dnc?: string[]; pages?: Record<string, StubPage>; secret?: string;
+  // Architect ruling (2026-11-17, D-094 follow-up): after the last turn, keep running the scheduler's minute ticks until none of
+  // this person's approved applications is waiting or being sent, at most this many ticks (the minutes after a batch's yes).
+  // The per-tick numbers (CLOUD_MAX_PER_PORTAL and the rest) are the product's, unchanged.
+  drainTicks?: number }
 export type SetName = "core40" | "full" | "adversarial" | "heldout";
 export const SETS: SetName[] = ["core40", "full", "adversarial", "heldout"];
 
@@ -418,6 +422,11 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
         // employer and how many applications were approved, and how long the whole turn took in this world.
         postsAt.push(ats.posts.length - postsBefore); wallMs.push(performance.now() - t0);
         if (o.onTask) jobsAt.push(Number(await json(pg, `select count(*) from public.career_apply_jobs where user_id = '${u}'`)));
+      }
+      for (let i = 0; i < (t.drainTicks ?? 0); i++) {
+        const waiting = Number(await json(pg, `select count(*) from public.career_apply_jobs where user_id = '${u}' and state in ('queued', 'driving')`));
+        if (!waiting) break;
+        await tick();
       }
       const state = await worldState(pg, u, { ats: ats.posts.slice(postsBefore), mail: gmail.sent.slice(sentBefore), replies, bodies, metasBefore, mailHash, hashApplyPayload,
         resume: P.resume, name: t.person ? P.name : RESUME_NAME, contacts: t.contacts ? t.contacts.map((c) => c.email.toLowerCase()) : CONTACT_EMAILS, readStored: !!t.expect.secret });

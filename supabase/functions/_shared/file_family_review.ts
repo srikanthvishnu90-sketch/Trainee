@@ -118,6 +118,8 @@ export async function approveReviewed(userId: string, rec: FamilyRec, fields: UR
   try { results = (await d.cards.confirm(userId, [prep.id], [hash])).results ?? []; } catch (e) {
     const m = String((e as Error)?.message ?? e), need = /needs_answer: (.+)$/.exec(m);
     if (need) return no("Not approved: a required answer is still missing", need[1]);
+    // D-094: it is on a batch File that changed after it was shown: nothing goes, on any path.
+    if (/FILE_CHANGED/.test(m)) return no("Not approved: the File listing your applications changed after it was shown", "Nothing was approved. Ask Trainee in the chat to show your applications for the current list.");
     if (/card_changed|invalid card/.test(m)) return no("Not approved: the application changed after this page was shown", `Approval ${approvalId(hash)} no longer matches the application on file. Reload the page to review what it would send now.`);
     return no("Not approved", "I couldn't open the approval just now. Try again in a minute.");
   }

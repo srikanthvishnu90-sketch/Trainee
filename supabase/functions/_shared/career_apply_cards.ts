@@ -83,6 +83,8 @@ export interface CardStore {
   // card closes the person's other open cards, so an open and an answer in two calls let two approvals at once close each
   // other's card and both approve nothing. Throws card_changed (a hash differs) or invalid card (no longer open to approve).
   confirm?(userId: string, ids: string[], hashes: string[]): Promise<{ card: Card; results: CardResult[] }>;
+  // D-094: open a card bound to a batch File (career_apply_card_open_batch_as): the File must list exactly these, in order.
+  openBatch?(userId: string, ids: string[], fileId: string): Promise<Card>;
   // Architect ruling on #674 (c): the questions still open for this person (career_apply_questions), named on the card.
   openQuestions?(userId: string): Promise<{ label: string; company: string | null }[]>;
   latestOpen(userId: string): Promise<Card | null>;
@@ -558,7 +560,9 @@ export const IT_UNCLEAR_TEXT = (count: number) =>
   `"It" is one application and this card has ${count}, so nothing was approved. Send all ${count}, or which ones? ${HOW(count)}`;
 // The statuses after which the card is still waiting for its answer: the handler keeps it the thread's last word, with
 // its id on the reply, so the next "yes" answers it. "card_outdated" waits only when it carries the current card's id.
-export const CARD_WAITING = ["shown", "not_on_card", "change", "hold", "wording", "unclear", "not_named", "count_mismatch", "nothing_left", "confirm_except"];
+// D-094: "file_changed" too: the card is still open and still the thread's last word, so a second yes reaches the database again
+// and is told again that the File changed (never "That card was already answered").
+export const CARD_WAITING = ["shown", "not_on_card", "change", "hold", "wording", "unclear", "not_named", "count_mismatch", "nothing_left", "confirm_except", "file_changed"];
 // WHOLE JOURNEYS R2 (2026-11-02): "show my applications" that showed no card (nothing ready, no resume on file, one too long
 // to show, the resume check not made) is not a card's answer. It was recorded as CARD_ANSWER_INTENT, so the person's next
 // "yes" was told "That card was already answered. Nothing more was sent." about a card that never existed. Its own intent.
@@ -582,6 +586,9 @@ export async function cardTurn(
     review?: (shown: Prepared[]) => Promise<string | null>;
     // The route an approved application takes (the person's cloud setting); absent or unreadable: said as before.
     route?: () => Promise<SendRoute | null>;
+    // D-094: the File of a batch (application_review_links.ts supabaseBatchFile). Present, "show my applications" of a batch
+    // that would page is a short summary plus this File, the card bound to it (store.openBatch); absent or failing, paged.
+    batchFile?: (shown: Prepared[]) => Promise<{ id: string; url: string } | null>;
   },
 ): Promise<{ reply: string; status: string; card_id?: string; parts?: string[] } | null> {
   const withReview = async (c: Batch, out: { reply: string; status: string; card_id?: string; parts?: string[] }) => {
@@ -626,6 +633,16 @@ export async function cardTurn(
           `The application to ${c.tooLong.company} is too long to show in a text. Open it in the app to approve it.`,
         status: "too_long",
       };
+    }
+    // D-094: a batch that would page is shown as a summary plus the File of every application, the card bound to the File's
+    // hash; the File is the batch shown, and the yes approves exactly what it lists. Without a File, paged as before.
+    if (c.parts.length >= 2 && !lead && o.batchFile && o.store.openBatch) {
+      const take = c.take, file = await o.batchFile(take).catch(() => null);
+      const opened = file ? await o.store.openBatch(o.userId, take.map((p) => p.id), file.id).catch((e) => { console.error("batch card:", (e as Error)?.message ?? e); return null; }) : null;
+      if (file && opened) {
+        const notes = [...(c.skipped.length ? [`Too long to list, so not on this card: ${c.skipped.map((p) => p.company).join("; ")}. Open ${c.skipped.length === 1 ? "it" : "them"} in the app.`] : []), ...(needs ? [needs] : [])];
+        return { reply: [batchSummaryText(take, file.url), ...notes].join("\n\n"), status: "shown", card_id: opened.id };
+      }
     }
     // R9-G2 (D-MS-1, one card per batch): a PAGED card the preparation pushed for exactly this batch in the last 5 minutes
     // is shown again as that same card, never replaced by a second card of the same applications; its yes still needs every
@@ -806,7 +823,7 @@ export async function cardTurn(
     }
     // D-094: the File a summary card was shown with changed after it was shown: the File is the batch shown, so nothing goes.
     if (/FILE_CHANGED/.test(msg)) {
-      return { reply: `The File listing these applications changed after it was shown, so nothing was approved and nothing was sent. Say "show my applications" for the current list.`, status: "file_changed" };
+      return { reply: `The File listing these applications changed after it was shown, so nothing was approved and nothing was sent. Say "show my applications" for the current list.`, status: "file_changed", card_id: card.id };
     }
     if (/APPROVAL_SET_CHANGED/.test(msg)) {
       return { reply: `The applications on that card changed after it was shown (APPROVAL_SET_CHANGED), so nothing was approved and nothing was sent. Say "show my applications" for the current card.`, status: "set_changed" };
@@ -863,6 +880,9 @@ export function supabaseCardStore(admin: any): CardStore {
     },
     async open(userId, ids) {
       return must(await admin.rpc("career_apply_card_open_as", { p_user: userId, p_ids: ids }), "open a card");
+    },
+    async openBatch(userId, ids, fileId) {
+      return must(await admin.rpc("career_apply_card_open_batch_as", { p_user: userId, p_ids: ids, p_file: fileId }), "open a batch card");
     },
     async confirm(userId, ids, hashes) {
       // WO-G: an application whose posting still has an open required question is never confirmed (application_review.ts).

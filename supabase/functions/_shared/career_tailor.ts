@@ -292,6 +292,51 @@ export function applyPersonaOrder(resume0: any, lead: string[]): any {
   return { ...resume, sections: ordered, lines: ordered.flatMap((s: any) => s.lines.filter((l: any) => l.type !== "note" && l.type !== "gap").map((l: any) => ({ ...l, section: s.heading }))) };
 }
 
+// Gap #8 (benchmark C10: a go-to-market role led a software resume because it was the newest). Architect ruling (2026-11-16):
+// entries are never reordered inside a section (RESUME-TEMPLATES E5, reverse chronological, is a sourced rule). For one target
+// posting, the Experience section is split in two: "Relevant Experience" (the entries that show the posting's skills, a framework
+// counting for its language (React for JavaScript), any programming stack when the posting asks for one, or a whole word of the
+// posting's title) and then "Additional Experience" (the
+// rest), each newest first as they came. If every entry is relevant, or none is, or the section has fewer than SPLIT_MIN entries,
+// the single section stays. Entries and lines move whole, never changed; the other sections keep their places.
+const FAMILY: Record<string, string[]> = {
+  javascript: ["react", "node.js", "nodejs", "vue", "angular", "next.js", "typescript", "express"], python: ["django", "flask", "pandas", "numpy", "fastapi", "pytorch"],
+  java: ["spring", "kotlin"], sql: ["postgresql", "postgres", "mysql", "sqlite"],
+};
+const TITLE_STOP = new Set(["intern", "internship", "interns", "summer", "team", "senior", "junior", "role", "with", "and", "the", "for", "new", "grad", "graduate", "program", "2025", "2026", "2027", "2028"]);
+// Whole words, lowercased, a plural "s" dropped ("engineers" is "engineer"; "management" is never "manager").
+const word = (w: string) => w.toLowerCase().replace(/[^a-z0-9+#.]/g, "").replace(/(?<=[a-z]{3})s$/, "");
+// Programming and engineering stack: for a posting that asks for any of it, an entry that shows any of it is technical work.
+const STACK = new Set(["python", "java", "javascript", "typescript", "go", "rust", "c", "c++", "c#", "ruby", "kotlin", "swift", "scala", "php", "sql", "react", "node.js", "nodejs", "vue", "angular", "next.js", "django", "flask", "spring", "docker", "kubernetes", "aws", "gcp", "azure", "pytorch", "tensorflow", "machine learning", "git", "linux", "html", "css", "graphql", "postgresql", "postgres", "mysql", "data structures", "algorithms"]);
+export const RELEVANT_HEADING = "Relevant Experience", ADDITIONAL_HEADING = "Additional Experience", SPLIT_MIN = 4;
+export function relevanceSplit(resume: any, jd: any, profile: any): any {
+  const wanted = new Set(wantedOf(jd).map((x: string) => String(x).toLowerCase()));
+  for (const [lang, kin] of Object.entries(FAMILY)) if (wanted.has(lang)) for (const k of kin) wanted.add(k);
+  const title = String(jd?.title || String(jd?.rawText || "").split("\n")[0] || "").split(/\s+at\s+/i)[0];
+  const titleWords = new Set(title.split(/[^A-Za-z0-9]+/).filter((w) => w.length >= 5 && !TITLE_STOP.has(w.toLowerCase())).map(word));
+  const technical = [...wanted].some((x) => STACK.has(x));
+  if ((!wanted.size && !titleWords.size) || !Array.isArray(resume?.sections)) return resume;
+  const score = (entry: any) => {
+    const f = CareerProfile.getFact(profile, (entry?.factIds || [])[0]);
+    if (!f) return 0;
+    const skills = CareerTailor.skillsInText(corpusOf(f)).map((x: string) => x.toLowerCase());
+    const shown = new Set(skills.filter((x: string) => wanted.has(x))).size;
+    const stack = technical ? new Set(skills.filter((x: string) => STACK.has(x))).size : 0;
+    const shared = new Set(corpusOf(f).split(/[^A-Za-z0-9]+/).filter((w: string) => w.length >= 5).map(word).filter((w: string) => titleWords.has(w))).size;
+    return shown * 10 + stack * 5 + Math.min(shared, 4);
+  };
+  const at = resume.sections.findIndex((sec: any) => sec?.heading === "Experience");
+  if (at < 0) return resume;
+  const blocks: any[][] = [];
+  for (const l of resume.sections[at].lines || []) { if (l?.type === "entry" || !blocks.length) blocks.push([l]); else blocks[blocks.length - 1].push(l); }
+  // A short history (fewer than SPLIT_MIN entries) reads at a glance in one section; two headings would add noise, not order.
+  if (blocks.length < SPLIT_MIN || blocks.some((b) => b[0]?.type !== "entry")) return resume;
+  const relevant = blocks.filter((b) => score(b[0]) > 0), rest = blocks.filter((b) => score(b[0]) === 0);
+  if (!relevant.length || !rest.length) return resume;
+  const sections = [...resume.sections.slice(0, at), { ...resume.sections[at], heading: RELEVANT_HEADING, lines: relevant.flat() }, { ...resume.sections[at], heading: ADDITIONAL_HEADING, lines: rest.flat() }, ...resume.sections.slice(at + 1)];
+  return { ...resume, sections, lines: sections.flatMap((x: any) => (x.lines || []).filter((l: any) => l.type !== "note" && l.type !== "gap").map((l: any) => ({ ...l, section: x.heading }))) };
+}
+
 // The document that goes to an employer: the cited lines only. The tailor's eligibility verdict and gap notes are for
 // the person, not the employer, and are not facts; they never print on a submitted resume.
 export function submissionResume(resume: any): any {
@@ -805,6 +850,9 @@ export async function tailorForPosting(o: {
   // stored (no link: it rides the reply). Never set on a path that applies or sends.
   reviewDraft?: boolean;
   edits?: ResumeEdit[];
+  // Gap #8 (architect ruling 2026-11-16): "relevance" splits Experience into Relevant and Additional Experience for this posting
+  // (relevanceSplit), each newest first; without it the single section stays (D-071). tailor_resume (the brain's tool) asks for it.
+  split?: "relevance";
 }): Promise<TailorOut> {
   const t0 = performance.now();
   const ms = () => Math.round(performance.now() - t0);
@@ -869,6 +917,9 @@ export async function tailorForPosting(o: {
   // D-070: an entry kept back on a first version takes its place by date (RESUME-TEMPLATES E5, newest first); a lead the person
   // chose still goes first. An edited version keeps the order its edits set.
   if (!edits && keptBack.length) ordered = applyPersonaOrder(ordered, lead);
+  // Gap #8: the split goes last, on the order every rule above set. A persona's chosen lead is never split, and an edited version
+  // keeps the order its edits set (D-071).
+  if (o.split === "relevance" && !lead.length && !edits) ordered = relevanceSplit(ordered, jd, picked);
   if (placeholder) {
     // The placeholder prints where the email would: after a contact line the person confirmed (which has no email), or alone.
     const h = ordered.header = { ...(ordered.header || {}), email: EMAIL_PLACEHOLDER };
@@ -938,11 +989,17 @@ export async function tailorForPosting(o: {
   const aboutEdited = (x: any) => [...editedHeads, ...backHeads].some((h) => [x?.line, x?.name].some((v) => typeof v === "string" && v.toLowerCase().startsWith(h)));
   const backLine = keptBack.length ? ` Every other entry on your record still prints (${keptBack.length === 1 ? "1 entry" : `${keptBack.length} entries`} this posting doesn't ask for kept: ${keptBack.join("; ")}).` : "";
   const firstBack = keptBack.length ? ` Every entry on your record prints: the ${keptBack.length === 1 ? "1" : keptBack.length} this posting doesn't ask for ${keptBack.length === 1 ? "is" : "are"} one line each.` : "";
-  const log = edits ? { ...log0, line: editLine(edits) + backLine, items: [...edits.map((e): ChangeItem => ({ kind: "edit", text: editLine([e]).replace(/[.]$/, ""), diff: "edited", line: e.entry })),
+  let log = edits ? { ...log0, line: editLine(edits) + backLine, items: [...edits.map((e): ChangeItem => ({ kind: "edit", text: editLine([e]).replace(/[.]$/, ""), diff: "edited", line: e.entry })),
     ...keptBack.map((h): ChangeItem => ({ kind: "kept", text: `kept ${h}`, diff: "added", line: h })), ...(log0.items ?? []).filter((x: any) => !aboutEdited(x))] }
     // Review of #790 (MINOR): with nothing else changed the line read "Same as your base resume; it already fits this posting."
     // while entries had lost their detail lines. A version that shortened entries is not the same: it says so, and which.
     : keptBack.length ? { ...log0, line: !(log0.items ?? []).length && shortened.length ? shortenedLine(shortened) : `${log0.line}${firstBack}`.trim(), items: (log0.items ?? []).filter((x: any) => !aboutEdited(x)) } : log0;
+  // Gap #8: the split is said, with how many entries went where (relevanceSplit), only when the file as printed shows both
+  // headings (their own layout prints its own headings, review of f7abd6c30).
+  const rel = doc.lines.filter((l: any) => l.type === "entry" && l.section === RELEVANT_HEADING).length, add = doc.lines.filter((l: any) => l.type === "entry" && l.section === ADDITIONAL_HEADING).length;
+  const printedText = r.lines?.length ? r.lines.join("\n") : ((CareerRender as any).sourceLines(doc) as { text: string }[]).map((l) => l.text).join("\n");
+  const shows = (h: string) => new RegExp(`^\\s*${h}\\s*$`, "im").test(printedText);
+  if (rel && add && shows(RELEVANT_HEADING) && shows(ADDITIONAL_HEADING)) log.line = `${log.line} Split your experience for this posting: ${rel} under ${RELEVANT_HEADING} (they show its skills or its kind of work), ${add} under ${ADDITIONAL_HEADING}, each newest first.`;
   const selected = new Set(doc.lines.flatMap((l: any) => l.factIds));
   // What the person reads, the same on every channel: plain words, and the link alone on its own line so any texting app
   // makes it tappable.

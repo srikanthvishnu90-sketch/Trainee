@@ -60,11 +60,17 @@ function choiceAnswer(n) {
 function synthesize(needs, prior = {}) {
   const answers = { ...prior }, unanswerable = [];
   for (const n of needs || []) {
-    if (!n || !n.label) continue;
+    if (!n) continue;
+    if (!String(n.label || "").trim()) { unanswerable.push({ label: "", reason: /^set by the page/.test(String(n.detail || "")) ? "page_value_without_label" : "no_label" }); continue; }
     if (!ANSWERABLE.has(n.reason)) { unanswerable.push({ label: n.label, reason: n.reason }); continue; }
     if (Object.prototype.hasOwnProperty.call(answers, n.label)) { unanswerable.push({ label: n.label, reason: "answered_still_asked" }); continue; }
     let v;
-    if (n.kind === "checkbox") v = "Yes";
+    // A value the page set and the person never confirmed (handoff.cjs unconfirmedDefaults: "set by the page, not confirmed by you:
+    // X"): the TEST person confirms what the page shows, X itself (Breezy's salaryCurrency "US Dollar ($)"; before, a currency box
+    // got a salary figure and ended no_matching_option, CI 44021741347). A control with no label cannot be answered by label.
+    const shown = /^set by the page, not confirmed by you: (.+)$/.exec(String(n.detail || ""));
+    if (shown) v = shown[1];
+    else if (n.kind === "checkbox") v = "Yes";
     // A slider or number box: a number within its own bounds (the lowest, else 1).
     else if (n.kind === "range" || n.input === "range" || n.input === "number" || n.kind === "number") v = String(n.min !== undefined && n.min !== "" ? n.min : 1);
     else if (["radio", "buttons", "select", "checkgroup"].includes(n.kind) || (n.options && n.options.length)) v = choiceAnswer(n);

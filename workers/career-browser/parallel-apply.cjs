@@ -745,12 +745,21 @@ function CONTROLS(arg) {
         : e.type === "file" ? [...(e.files || [])].map((f) => f.name).join(", ") || null : String(e.value) === "" ? null : String(e.value);
       const touched = (q !== null && filledQs.includes(q)) || (q === null && inQuestion(e));
       let label = squash((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder).slice(0, 200), hidden = e.type === "hidden", answer = false;
+      // A shown control with no label of its own (Breezy's salary-period select under "Desired Salary", preset to "Yearly"; CI
+      // 44021741347: asked with an empty name nobody could answer) is named by the heading just before it and its own kind, so the
+      // person can be asked about it in words.
+      if (!label && !hidden) { let head = ""; for (let a = e, i = 0; a && !head && i < 4 && a !== root; a = a.parentElement, i++) for (let c = a.previousElementSibling; c && !head; c = c.previousElementSibling) if (/^(H[1-4]|LEGEND|LABEL)$/.test(c.tagName) && squash(c.innerText)) head = squash(c.innerText);
+        if (head) label = `${head.slice(0, 160)} (${squash(e.name) || e.type || e.tagName.toLowerCase()})`; }
       if (hidden) {
         const w = widgetOf(e);
         const v = String(e.value || "").trim();
         // The "off" value a form keeps beside its own tick box of the same name (Lever: consent[marketing]=0 beside the box, sent
         // when it is not ticked) is that box's unticked state, not an answer of its own: the box is the question.
         const offOfBox = /^(?:0|no|false|off|)$/i.test(v) && !!e.name && [...(e.form ? e.form.elements : document.querySelectorAll("input"))].some((x) => x !== e && x.name === e.name && (x.type === "checkbox" || x.type === "radio"));
+        // A hidden input with no name is never in what a form sends; with no widget of its own it is the page's own flag (Breezy's
+        // <input id="eeoc" type="hidden" value="true"> before its EEO section; CI 44021741347: 4 Breezy rows stopped on an unnamed
+        // "set by the page: true"). Shown as page data, never asked.
+        if (!e.name && !w) return { name: "", label: squash(e.id || "unnamed page value").replace(/[_\-\[\]]+/g, " ").trim(), type: e.type, option: null, value: v || null, q, touched: false, hidden: false, answer: false, pageData: true, disabled: !!e.disabled };
         answer = !offOfBox && !opaqueRe.test(e.name || "") && (!!w || answerRe.test(e.name || "") || (!structural(e.name || "", v) && valueAnswer(e.name || "", v)));
         // A board's structure (a question's id, its priority; utm_*, source): shown on the card as page data and hashed, never asked.
         if (!answer && !w && !opaqueRe.test(e.name || "") && structural(e.name || "", v)) { hidden = false; label = squash(e.name).replace(/[_\-\[\]]+/g, " ").trim(); return { name: e.name || "", label, type: e.type, option: null, value: v || null, q, touched: false, hidden, answer: false, pageData: true, disabled: !!e.disabled }; }

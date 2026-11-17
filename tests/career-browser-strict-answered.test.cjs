@@ -30,6 +30,11 @@ test("synthetic answers: the page's first real option, a decline for a demograph
   assert.deepEqual(unanswerable.map((u) => u.reason), ["upload_needs_you", "no_matching_option"]);
   assert.equal(textAnswer("Years of experience with Python", "text"), "3");
   assert.equal(textAnswer("Date of Birth", "text"), "1990-01-01");
+  // A value the page set is confirmed as shown (Breezy's currency box), never answered with a salary figure; an unlabelled one cannot be.
+  const pd = synthesize([{ label: "salaryCurrency", reason: "no_confirmed_answer", kind: "select-one", detail: "set by the page, not confirmed by you: US Dollar ($)" },
+    { label: "", reason: "no_confirmed_answer", kind: "select-one", detail: "set by the page, not confirmed by you: Yearly" }]);
+  assert.equal(pd.answers.salaryCurrency, "US Dollar ($)");
+  assert.deepEqual(pd.unanswerable, [{ label: "", reason: "page_value_without_label" }]);
   assert.equal(textAnswer("Earliest start date", "text"), "2026-12-01");
   // An answer already given and asked again is an execution failure, never answered twice.
   assert.deepEqual(synthesize([{ label: "A", reason: "no_confirmed_answer", kind: "text" }], { A: "x" }).unanswerable, [{ label: "A", reason: "answered_still_asked" }]);

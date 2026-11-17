@@ -32,7 +32,11 @@ before(async () => {
     if (req.method !== "GET") { posts.push(`${req.method} ${req.url}`); return res.writeHead(200).end("ok"); }
     if (req.url === "/robots.txt") return res.writeHead(200, { "content-type": "text/plain" }).end("User-agent: *\nAllow: /\n");
     if (req.url === "/job/2840187") return res.writeHead(200, { "content-type": "text/html" }).end(captured.replace("</body>", `${ENABLE}</body>`));
-    if (req.url === "/job/2840187/never") return res.writeHead(200, { "content-type": "text/html" }).end(captured);
+    // The captured page also carries Cloudflare Turnstile's widget just after its form, its cf-turnstile-response empty (its
+    // challenge requests are POSTs the dry run aborts). "never": that widget taken out, a Submit the board never enables.
+    // "turnstile": the page as captured, the token never issued, so the Submit waits.
+    if (req.url === "/job/2840187/never") return res.writeHead(200, { "content-type": "text/html" }).end(captured.replace(/<div id="cf-turnstile">.*?<\/div><\/div><\/div>/, ""));
+    if (req.url === "/job/2840187/turnstile") return res.writeHead(200, { "content-type": "text/html" }).end(captured);
     res.writeHead(404).end();
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -68,5 +72,13 @@ test("Personio answered: the Submit the board enables once everything is filled 
   const never = { provider: "personio", url: `${base}/job/2840187/never` };
   const n = await answeredPosting(browser, never, o, await strictPosting(browser, never, o));
   assert.equal(n.result, "fail"); assert.equal(n.reason, "field_not_filled"); assert.equal(n.field, "submit_disabled");
+  assert.deepEqual(posts, []);
+});
+
+test("Personio with its invisible check's token never issued: the stop is the check, everything else filled; never pressed", { skip }, async () => {
+  const o = opts();
+  const item = { provider: "personio", url: `${base}/job/2840187/turnstile` };
+  const w = await answeredPosting(browser, item, o, await strictPosting(browser, item, o));
+  assert.equal(w.result, "fail"); assert.equal(w.reason, "bot_check", JSON.stringify(w));
   assert.deepEqual(posts, []);
 });

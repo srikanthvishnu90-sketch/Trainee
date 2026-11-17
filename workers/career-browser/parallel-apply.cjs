@@ -1203,7 +1203,17 @@ async function attempt(browser, p, opts, timing) {
     if (lastPick.disabled) {
       await page.waitForSelector("[data-upmore-submit]:not([disabled]):not([aria-disabled='true'])", { timeout: 3000 }).catch(() => null);
       if (!(await markSubmit())) throw new NeedsUser("no_submit_control", p.url);
-      if (lastPick.disabled) { const e = new NeedsUser("field_not_filled", "submit_disabled"); e.needs = [{ label: "submit_disabled: the page keeps its Submit disabled", reason: "form_rejects_value" }]; throw e; }
+      if (lastPick.disabled) {
+        // The page's own invisible check has not issued its token (an empty Turnstile / reCAPTCHA / hCaptcha response field in the
+        // form: Personio's cf-turnstile-response, 2026-11-16) and that is what holds the Submit: a check the person finishes, with
+        // everything else filled (check_in_form), never solved. Otherwise the page rejects something filled.
+        // (The token field may sit just outside the form: Personio draws its Turnstile widget after </form>.)
+        const pending = await page.evaluate(() => {
+          const t = [...document.querySelectorAll("input[name='cf-turnstile-response'], textarea[name='g-recaptcha-response'], input[name='g-recaptcha-response'], textarea[name='h-captcha-response'], input[name='h-captcha-response']")];
+          return t.length && t.every((x) => !String(x.value || "").trim()) ? t[0].name : null; }).catch(() => null);
+        if (pending) { const e = new NeedsUser("bot_check", p.url, "check_in_form"); e.detail = `invisible check not passed (${pending} empty); the Submit stays disabled`; throw e; }
+        const e = new NeedsUser("field_not_filled", "submit_disabled"); e.needs = [{ label: "submit_disabled: the page keeps its Submit disabled", reason: "form_rejects_value" }]; throw e;
+      }
     }
     // A form in which nothing was filled from the approved application is never the application (no name, no email, no resume).
     if (!fr.filled.length) throw new NeedsUser("no_application_form_found", p.url);

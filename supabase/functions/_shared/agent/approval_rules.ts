@@ -47,10 +47,19 @@ export function approvalRulesText(r: Readonly<ApprovalRules> = APPROVAL_RULES): 
     r.onePagedCard ? "- A long batch is shown as one card in pages, and one yes covers every page." : "",
     r.allPagesDelivered ? "- A paged card can be approved only once every page of it has reached them; until then a yes approves nothing." : "",
     r.messagesSameRule ? "- Emails and messages work the same way: one yes approves exactly the batch of messages shown." : "",
-    r.receiptIsProof ? "- Nothing is submitted or sent without a confirmed resume and that yes; each submission ends with its receipt, and only a receipt says it went." : "",
+    r.receiptIsProof ? "- No application is submitted without a confirmed resume and that yes, and no message is sent without that yes; each submission ends with its receipt, and only a receipt says it went." : "",
   ].filter(Boolean).join("\n");
 }
 
 // Wording of approval that contradicts the rules above (C12, and the review of f7abd6c30): an approval said to be per application
 // or per card, one at a time ("approve each card", "each application goes only on their approval", "one by one").
-export const PER_ITEM_APPROVAL = /\bapprov\w*\b[^.?!\n]{0,60}\b(?:one by one|one at a time|individually|each (?:one|application|card) (?:separately|on its own))\b|\b(?:one by one|one at a time|individually)\b[^.?!\n]{0,40}\bapprov\w*|\bapprov\w* (?:each|every) (?:card|application)\b|\b(?:each|every) (?:application|card) goes only (?:on|after) (?:their|your) approval\b|\b(?:each|every|it) goes only after (?:they|you) approve (?:its|that|the) card\b/i;
+export const PER_ITEM_APPROVAL = new RegExp([
+  String.raw`\bapprov\w*\b[^.?!\n]{0,60}\b(?:one[- ]by[- ]one|one at a time|individually|separately|card by card|each (?:one|application|card|email|message) (?:separately|on its own))\b`,
+  String.raw`\b(?:one[- ]by[- ]one|one at a time|individually|card by card)\b[^.?!\n]{0,40}\bapprov\w*`,
+  String.raw`\bapprov\w* (?:each|every) (?:card|application|email|message)\b`,
+  String.raw`\b(?:each|every) (?:application|card|email|message) goes only (?:on|after) (?:their|your) approval\b`,
+  String.raw`\b(?:each|every|it) goes only after (?:they|you) approve (?:its|that|the) card\b`,
+  String.raw`\beach (?:one )?approved on its own card\b`,
+  String.raw`\b(?:each|every) (?:application|email|message|one) needs its own (?:yes|approval|card)\b`,
+  String.raw`\b(?:needs?|on) (?:their|your) yes on its card\b[^.\n]*\bone at a time\b`,
+].join("|"), "i");

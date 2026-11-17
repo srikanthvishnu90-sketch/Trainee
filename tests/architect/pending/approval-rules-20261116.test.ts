@@ -63,6 +63,16 @@ Deno.test("CU-1b each approval rule holds in the card code; no prompt, tool desc
   ok(APPROVAL_RULES.allPagesDelivered && /only once every page of it has reached them/.test(approvalRulesText()));
   const cards = Deno.readTextFileSync(new URL("../../../supabase/functions/_shared/career_apply_cards.ts", import.meta.url));
   ok(/card_pages_undelivered[\s\S]{0,200}nothing was approved/.test(cards), "the card code refuses a yes to a card whose pages were not all delivered");
+  // Review rv3 (probes-rv3-cd/b3_probe.ts): the per-item variants are caught, and no fixed text the brain or the person reads
+  // carries them. The person-facing "yes on its card" in STANDING_REFUSED and the cloud terms stays: architect tests pin it
+  // (WO-091b/10, WO-039), and with one card per batch it is accurate; the prompt no longer says it.
+  for (const v of ["Each one still needs your yes on its card, one at a time or as a batch.", "Nothing is sent until you confirm each address and approve each email.", "approve them one-by-one", "they approve the cards card by card", "a smaller first batch, each approved on its own card", "each application needs its own yes", "you'll approve every application separately", "approve the first five individually"]) ok(PER_ITEM_APPROVAL.test(v), v);
+  ok(!/yes on its card/.test(careerSystemPrompt("2026-11-16")), "the prompt says the card that shows it, not its card");
+  const { termsText } = await import("../../../supabase/functions/_shared/career_cloud_optin.ts");
+  const { draftAll } = await import("../../../supabase/functions/_shared/career_network_pipeline.ts");
+  ok(!PER_ITEM_APPROVAL.test(termsText(25)), termsText(25));
+  ok(!PER_ITEM_APPROVAL.test((await draftAll({} as any, [], { senderName: "Sam" })).notice));
+  ok(/No application is submitted without a confirmed resume and that yes, and no message is sent without that yes/.test(approvalRulesText()), "a confirmed resume is for submissions only");
   for (const old of ["they review and approve each card in the Trainee extension", "each application goes only on their approval in the extension", "each goes only after they approve its card in the Trainee extension"]) ok(PER_ITEM_APPROVAL.test(old), old);
 });
 

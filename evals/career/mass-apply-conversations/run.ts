@@ -37,10 +37,12 @@ export async function snapshotOf(x: TaskTrace): Promise<Snapshot> {
   const jobsRaw: any[] = (await j(x.pg, `select json_agg(to_jsonb(r) order by r.created_at) from public.career_apply_jobs r where user_id = '${u}'`)) ?? [];
   const jobs = await Promise.all(jobsRaw.map(async (r) => ({ company: r.company, url: r.url, job_id: r.job_id, payload_hash: r.payload_hash, approval_hash: r.approval_hash,
     payload_hash_now: await hashApplyPayload(r.payload), state: r.state, confirmation_id: r.confirmation_id ?? null, resume_name: r.payload?.resume_filename ?? r.payload?.resume_name ?? null })));
+  const mine = new Set(jobs.map((r) => /\/([^/?#]+)\/jobs\/(\d+)/.exec(String(r.url ?? ""))).filter(Boolean).map((m) => `${m![1]}/${m![2]}`));
   return {
     said: x.said, replies: x.replies, intents: x.intents, turnMs: x.turnMs.map(Math.round), scripted: scriptedIndices(x.task.turns, x.said),
     thread: x.thread.map((m) => ({ content: String(m.content ?? ""), meta: m.meta ?? null })),
-    atsPosts: x.atsPosts.map((p) => ({ board: p.board, job: p.job, files: p.files, fields: p.fields, confirmation_id: p.confirmation_id })),
+    // Only this person's: a send the cloud worker finishes during a later scenario's turns belongs to the person it was approved for.
+    atsPosts: x.atsPosts.filter((p) => mine.has(`${p.board}/${p.job}`)).map((p) => ({ board: p.board, job: p.job, files: p.files, fields: p.fields, confirmation_id: p.confirmation_id })),
     postsAt: x.atsPostsAt, jobsAt: x.jobsAt, wallMs: x.wallMs.map(Math.round), requested: x.requested,
     wanted: (await j(x.pg, `select json_agg(json_build_object('company', company, 'title', title, 'url', url, 'posting_key', posting_key)) from public.career_apply_wanted where user_id = '${u}'`)) ?? [],
     jobs,

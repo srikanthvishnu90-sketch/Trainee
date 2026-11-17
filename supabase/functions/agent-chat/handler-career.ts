@@ -33,7 +33,7 @@ import { connectUrlsFor } from "../_shared/connect_link.ts"; // D-037: the send 
 import { looksLikePendingSecret, redactionNote, redactPending, secretLeadIn } from "../_shared/identity_redact.ts";
 import { corsFor } from "./_shared/chat_cors.ts";
 import { chatInput, OVER_CAP_REPLY, OverCapText } from "./_shared/chat_input.ts";
-import { linkListAsk } from "../_shared/career_apply_link.ts";
+import { linkListAsk, overCapRoute, supabaseLinkPending } from "../_shared/career_apply_link.ts";
 import { ownerThread, ChatThreadError } from "./_shared/chat_session.ts";
 import { CareerAccess, CareerOnboarding, CareerRouter, CareerDoorstep, CareerReply, CareerContainment, CareerBatchApply, CareerJobs, CareerProfile } from "../_shared/router_core.career.js";
 import { planCareerTaskIntent, normalizeCareerTaskRequest, createCareerBoardFor, createWorkerBoardProvider, planCareerBatchIntent, planCareerBatchPrepare, normalizeCareerBatchRequest } from "../_shared/career_task_bridge.js";
@@ -496,6 +496,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     try { careerBatch = normalizeCareerBatchRequest(body.career_batch); }
     catch (_) { return json(cors, { error: "invalid_career_batch", action: null, turn_key: turnKey }, 400); }
     const requestHash = await careerRequestHash(hashedMessage, imageBlocks, careerTask ?? (careerBatch ? { batch: careerBatch } : null));
+    // Architect ruling (2026-11-17, ag/ma-09): a text over the cap (only a pasted list of posting links gets here) goes
+    // straight to the link turn (overCapLinks, applyTurn below); every other code route reads OVER_CAP_ROUTE_TEXT, so none
+    // runs its patterns over up to 64,000 characters. Crisis words beside the links are the message instead (overCapRoute).
+    const overCapTurn = input.overCap === true ? overCapRoute(message, { crisis: crisisReply }) : null;
+    const overCapLinks = overCapTurn?.links ?? null;
+    if (overCapTurn) message = overCapTurn.route;
     // fix/r9-apply-completion (after the request hash, which digests what was typed): an apply or job-search ask as people text it (filler, emoji, a typo, Spanish, romanized Hindi,
     // "can you apply me to ...?") is routed by its plain English reading (career_ask_canon.ts), so the apply turn and the
     // router's search read it as they read the plain ask. Only the routing reads it: the stored message is what was typed,
@@ -1151,14 +1157,16 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           }
         }
       }
-      const queued: any = hereOut ? { reply: hereOut.reply, intent: APPLY_QUEUE_INTENT, status: hereOut.status } : !noApply && !hypotheticalOf(message) && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const queued: any = hereOut ? { reply: hereOut.reply, intent: APPLY_QUEUE_INTENT, status: hereOut.status } : (overCapLinks !== null && !siteNo && !planned) || (!noApply && !hypotheticalOf(message) && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx))
         ? await applyTurn({
           ...feature1.apply,
           // FEATURE E2E: a pasted posting link (or a role at a registered board) read from the ATS's public API on demand
           // and stored as the ingest stores it (career_apply_link.ts). CAREER_APPLY_LINK=off turns the read off.
           link: Deno.env.get("CAREER_APPLY_LINK") === "off" ? null
-            : { db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init).then(asAsked), { timeoutMs: 8000, personLink: true }) },
-          message: reach?.apply ?? tailorApply?.apply ?? message, userId: user.id, now: Date.now(), postings: supabasePostingsDb(admin), wants: supabaseWantStore(admin),
+            : { db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init).then(asAsked), { timeoutMs: 8000, personLink: true }),
+              // Links not read within the turn's budget are kept for "keep going" (career_apply_chat.ts LINK_READ_BUDGET_MS).
+              pending: supabaseLinkPending(admin) },
+          message: overCapLinks ?? reach?.apply ?? tailorApply?.apply ?? message, userId: user.id, now: Date.now(), postings: supabasePostingsDb(admin), wants: supabaseWantStore(admin),
           apps: () => supabaseApplications(admin)(user.id),
           facts: screenFacts,
           // The batch ask ("apply to these") reads the postings this thread last listed, as the router kept them.

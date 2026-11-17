@@ -75,6 +75,53 @@ export function linkListAsk(text: string): boolean {
   if (t.replace(URL_IN, " ").replace(/\s+/g, " ").trim().length > LINK_LIST_MAX_WORDS) return false;
   return linksAsk(t) !== null;
 }
+// The links of a pasted list not read within a turn's budget (career_apply_chat.ts linksApplyTurn), kept per person until
+// their "keep going" reads them. get: the kept links, in order ([] when none); set: replace them ([] removes the row).
+export interface LinkPendingStore { get(userId: string): Promise<string[]>; set(userId: string, urls: string[]): Promise<void> }
+export const LINK_PENDING_KEY = "career:apply-links-reading";
+// The per-person service-role key-value row (career_watch_kv, as career_apply_questions.ts keeps "career:questions-shown"),
+// bound to the account's privacy epoch (career:account): after an erase the kept links are gone, never read.
+// deno-lint-ignore no-explicit-any
+export function supabaseLinkPending(admin: any): LinkPendingStore {
+  const epochOf = async (userId: string) => {
+    const r = await admin.from("career_watch_kv").select("value").eq("user_id", userId).eq("key", "career:account").maybeSingle();
+    if (r?.error) throw Error(`account: ${r.error.message}`);
+    return Number(r?.data?.value?.epoch ?? 0);
+  };
+  const drop = (userId: string) => admin.from("career_watch_kv").delete().eq("user_id", userId).eq("key", LINK_PENDING_KEY);
+  return {
+    async get(userId) {
+      const r = await admin.from("career_watch_kv").select("value").eq("user_id", userId).eq("key", LINK_PENDING_KEY).maybeSingle();
+      if (r?.error) throw Error(`links still being read: ${r.error.message}`);
+      const v = r?.data?.value;
+      if (!v) return [];
+      if (Number(v.epoch ?? 0) !== await epochOf(userId)) { await drop(userId); return []; }
+      return Array.isArray(v.urls) ? v.urls.filter((u: unknown): u is string => typeof u === "string") : [];
+    },
+    async set(userId, urls) {
+      const now = new Date().toISOString();
+      const r = urls.length
+        ? await admin.from("career_watch_kv").upsert({ user_id: userId, key: LINK_PENDING_KEY, value: { urls, epoch: await epochOf(userId), at: now }, updated_at: now }, { onConflict: "user_id,key" })
+        : await drop(userId);
+      if (r?.error) throw Error(`keep the links still being read: ${r.error.message}`);
+    },
+  };
+}
+export function memoryLinkPending(): LinkPendingStore & { rows: Map<string, string[]> } {
+  const rows = new Map<string, string[]>();
+  return { rows, get: async (u) => [...(rows.get(u) ?? [])], set: async (u, urls) => { if (urls.length) rows.set(u, [...urls]); else rows.delete(u); } };
+}
+// Architect ruling (2026-11-17): an over-cap link list goes straight to the link turn; the handler's other code routes never
+// run their patterns over it. They are given OVER_CAP_ROUTE_TEXT (no letters, no digits: nothing matches it) and the link
+// turn the text itself. One exception, for safety: when the words beside the links (at most LINK_LIST_MAX_WORDS characters)
+// are crisis text (`crisis`), those words alone are the message, as any message under the cap is, and no link is read.
+export const OVER_CAP_ROUTE_TEXT = "\u2026";
+export const linkListWords = (text: string) => String(text ?? "").replace(URL_IN, " ").replace(/\s+/g, " ").trim();
+export function overCapRoute(text: string, o: { crisis?: (words: string) => unknown } = {}): { route: string; links: string | null } {
+  const words = linkListWords(text);
+  if (o.crisis && o.crisis(words.slice(0, LINK_LIST_MAX_WORDS))) return { route: words.slice(0, LINK_LIST_MAX_WORDS), links: null };
+  return { route: OVER_CAP_ROUTE_TEXT, links: text };
+}
 export function linkOf(url: string): LinkAsk | null {
   // Never LinkedIn, Indeed or Handshake (owner rule), on any suffix or subdomain: the chat declines those before this turn.
   let host = "";

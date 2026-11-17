@@ -16,7 +16,7 @@ import { type EmployerAnswer, employerQuestion, type Pick, queueWants, screenPic
 import type { AppRow } from "./career_apply_status.ts";
 import { type FetchFeed, type PostingsDb, searchWords } from "./career_ingest.ts";
 import { careerAskCanon } from "./career_ask_canon.ts";
-import { applyText, linkAsk, type LinkAsk, linksAsk, possessiveAsk, postingForLink, postingsForRole } from "./career_apply_link.ts";
+import { applyText, linkAsk, type LinkAsk, linkOf, type LinkPendingStore, linksAsk, possessiveAsk, postingForLink, postingsForRole } from "./career_apply_link.ts";
 import { sameCompany, type TrackedApp } from "./career_mail.ts";
 import { fitOf, scoringProfileFor } from "./career_search.ts";
 // FEATURE 1 (2026-10-25): positions in the list, the listed postings checked on file, no resume on file, the server
@@ -335,7 +335,10 @@ export interface ApplyChatDeps {
   prepare?: (jobIds: string[]) => Promise<PrepareKick>;
   // FEATURE E2E: the posting a link names, read on demand from the ATS's public API and stored as the ingest stores it
   // (career_apply_link.ts); absent, a link is not this turn's.
-  link?: { db: PostingsDb; fetchFeed: FetchFeed } | null;
+  // budgetMs: the wall-time budget of one turn's link reads (LINK_READ_BUDGET_MS); pending: where the links not read in time
+  // are kept for the person's "keep going" (career_apply_link.ts supabaseLinkPending). Absent: links not read in time are
+  // each named as not read, never dropped.
+  link?: { db: PostingsDb; fetchFeed: FetchFeed; budgetMs?: number; pending?: LinkPendingStore | null } | null;
   // FEATURE 1: whether a row queued here is prepared at once (the server prepare is configured: CAREER_PREPARE_AHEAD_URL
   // and its token). OWNER RULE (2026-10-26): no longer read for the resume check; "no resume on file" keeps every posting
   // out of the queue either way.
@@ -440,6 +443,16 @@ export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | nul
   // FEATURE E2E: a pasted posting link, or a role named by the company's possessive, read from the ATS on demand
   // (career_apply_link.ts); only with the link deps wired (agent-chat), otherwise as before.
   if (o.link) {
+    // "keep going": the links an earlier turn did not read in time (linksApplyTurn), read now; none kept, as before.
+    if (o.link.pending && continueLinksAsk(o.message)) {
+      const urls = await o.link.pending.get(o.userId).catch(() => null);
+      if (urls === null) return { reply: "I couldn't open the list of links I'm still reading just now, so none were read on this message; they are still kept. Say \"keep going\" again in a minute.", status: "unreadable", intent: APPLY_QUEUE_INTENT };
+      if (urls.length) {
+        const asks: LinkAsk[] = [], unread: string[] = [];
+        for (const u of urls) { const a = linkOf(u); if (a) asks.push(a); else unread.push(u); }
+        return await linksApplyTurn(o, { asks, unread }, true);
+      }
+    }
     const many = linksAsk(o.message);
     if (many) return await linksApplyTurn(o, many);
     const linked = await linkApplyTurn(o);
@@ -889,25 +902,38 @@ async function linkApplyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | null> 
 // one no board lists, or one no reader knows is named with its reason, never guessed at.
 // 2026-11-17 (ag/ma-09-link-list-input): a pasted list may now carry up to 1,000 links (career_apply_link.ts linkListAsk), so
 // the posting reads of one ask are bounded: at most LINK_READS_AT_ONCE in flight in all, and LINK_READS_PER_HOST on one ATS
-// API host (each family reads from its own host), the rest waiting their turn. Every link is still read (D-NO-LIMITS: this
-// bounds concurrency against the boards, never how many are read or applied to; D-SCALE: no unbounded fan-out).
-export const LINK_READS_AT_ONCE = 8, LINK_READS_PER_HOST = 4;
+// API host (each family reads from its own host), the rest waiting their turn (D-SCALE: no unbounded fan-out).
+// Architect ruling (2026-11-17, on the review's DoS finding): the reads of one turn also have a wall-time budget
+// (LINK_READ_BUDGET_MS). A link not read within it is neither dropped nor counted as read: it is kept for this person
+// (LinkPendingStore, career_apply_link.ts supabaseLinkPending), the reply says how many are still being read, and the
+// person's "keep going" reads the next of them (continueLinksAsk). D-092 / D-NO-LIMITS: this bounds the work of one turn,
+// never how many links are read or applied to; every link is eventually read.
+export const LINK_READS_AT_ONCE = 8, LINK_READS_PER_HOST = 4, LINK_READ_BUDGET_MS = 20_000;
 // Run `run` over every item, at most `all` at once and `perHost` at once per hostOf(item); results in the items' order. A run
-// that throws gives `failed(error)` in its place.
+// that throws gives `failed(error)` in its place. With a budget: when `budget.ms` has passed, nothing more is started and the
+// result is given at once, each item not finished by then as `budget.late()` (a read still in flight is not waited for).
 export function boundedAll<T, R>(items: T[], hostOf: (t: T) => string, run: (t: T) => Promise<R>, failed: (e: unknown) => R,
-  all = LINK_READS_AT_ONCE, perHost = LINK_READS_PER_HOST): Promise<R[]> {
-  const out: R[] = new Array(items.length), waiting = items.map((_, i) => i), busy = new Map<string, number>();
-  let running = 0;
+  all = LINK_READS_AT_ONCE, perHost = LINK_READS_PER_HOST, budget?: { ms: number; late: () => R }): Promise<R[]> {
+  const out: R[] = new Array(items.length), done = new Array<boolean>(items.length).fill(false), waiting = items.map((_, i) => i), busy = new Map<string, number>();
+  let running = 0, over = false;
   return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      if (budget) for (let i = 0; i < items.length; i++) if (!done[i]) out[i] = budget.late();
+      resolve(out);
+    };
+    if (budget) timer = setTimeout(() => { if (over) return; over = true; finish(); }, Math.max(0, budget.ms));
     const pump = () => {
-      if (!waiting.length && !running) return resolve(out);
+      if (over) return;
+      if (!waiting.length && !running) { over = true; return finish(); }
       for (let k = 0; k < waiting.length && running < all;) {
         const i = waiting[k], h = hostOf(items[i]);
         if ((busy.get(h) ?? 0) >= perHost) { k++; continue; }
         waiting.splice(k, 1);
         running++;
         busy.set(h, (busy.get(h) ?? 0) + 1);
-        Promise.resolve().then(() => run(items[i])).then((r) => { out[i] = r; }, (e) => { out[i] = failed(e); }).finally(() => {
+        Promise.resolve().then(() => run(items[i])).then((r) => { if (!over) { out[i] = r; done[i] = true; } }, (e) => { if (!over) { out[i] = failed(e); done[i] = true; } }).finally(() => {
           running--;
           busy.set(h, (busy.get(h) ?? 1) - 1);
           pump();
@@ -932,23 +958,45 @@ export function feedOncePerBoard(f: FetchFeed): FetchFeed {
   if (typeof one === "function") (g as { one?: unknown }).one = one;
   return g;
 }
-async function linksApplyTurn(o: ApplyChatDeps, many: { asks: LinkAsk[]; unread: string[] }): Promise<ApplyChatResult> {
+// "keep going" (and its plain variants): read the links still being read (LinkPendingStore). Only these words, alone.
+export function continueLinksAsk(message: string): boolean {
+  return /^(?:(?:ok(?:ay)?|yes|sure)[,.!]?\s+)?(?:please\s+)?(?:keep\s+going|continue|go\s+on|carry\s+on|keep\s+reading|read\s+the\s+rest(?:\s+of\s+(?:the|my)\s+links)?|finish\s+(?:reading\s+)?the\s+(?:rest|links))(?:\s+please)?\s*[.!]*$/i.test(String(message ?? "").trim());
+}
+type LinkFound = Awaited<ReturnType<typeof postingForLink>> | { kind: "unreadable"; why: string } | { kind: "late" };
+async function linksApplyTurn(o: ApplyChatDeps, many: { asks: LinkAsk[]; unread: string[] }, continuing = false): Promise<ApplyChatResult> {
   const take = many.asks;
   const missing: Missing[] = many.unread.map((u) => ({ job_id: null, company: "", title: u, reason: "not a posting link I can read (Greenhouse, Lever or Ashby)" }));
   const fetchFeed = feedOncePerBoard(o.link!.fetchFeed);
-  const found = await boundedAll<LinkAsk, Awaited<ReturnType<typeof postingForLink>> | { kind: "unreadable"; why: string }>(take, (ask) => ask.family, (ask) => postingForLink({ ask, db: o.link!.db, fetchFeed, now: o.now }),
-    (e: any) => ({ kind: "unreadable" as const, why: String((e as Error)?.message ?? e) }));
-  const list: ShortlistEntry[] = [], seen = new Set<string>();
+  const found = await boundedAll<LinkAsk, LinkFound>(take, (ask) => ask.family, (ask) => postingForLink({ ask, db: o.link!.db, fetchFeed, now: o.now }),
+    (e: any) => ({ kind: "unreadable" as const, why: String((e as Error)?.message ?? e) }), LINK_READS_AT_ONCE, LINK_READS_PER_HOST,
+    { ms: o.link!.budgetMs ?? LINK_READ_BUDGET_MS, late: () => ({ kind: "late" as const }) });
+  const list: ShortlistEntry[] = [], seen = new Set<string>(), later: string[] = [];
   found.forEach((f, i) => {
     const url = take[i].url;
-    if (f.kind === "unreadable") missing.push({ job_id: null, company: "", title: url, reason: "its board could not be read just now" });
+    if (f.kind === "late") later.push(url);
+    else if (f.kind === "unreadable") missing.push({ job_id: null, company: "", title: url, reason: "its board could not be read just now" });
     else if (f.kind !== "found") missing.push({ job_id: null, company: "", title: url, reason: "not among the open postings its board lists (it may have closed)" });
     else if (!seen.has(String(f.posting.job_id))) {
       seen.add(String(f.posting.job_id));
       list.push({ id: f.posting.job_id, title: f.posting.title, company: f.posting.company, location: f.posting.location ?? null, url: f.posting.url ?? url });
     }
   });
-  return (await applyManyTurn(o, { list, missing, note: "" }))!;
+  // The links not read in time: kept for this person (with any kept before), or, when they cannot be kept, each named as
+  // not read, never dropped. A continuing turn's own links replace what it took (setPending of what is still late).
+  let note = "";
+  const pending = o.link!.pending ?? null;
+  const before = continuing ? [] : await (pending ? pending.get(o.userId).catch(() => null) : Promise.resolve(null)) ?? [];
+  const keep = [...new Set([...before, ...later])];
+  const kept = later.length || continuing ? (pending ? await pending.set(o.userId, keep).then(() => true, () => false) : false) : true;
+  if (later.length) {
+    if (kept) note = `I read ${take.length - later.length} of the ${take.length} links in time; the other ${later.length} are still being read and are kept for you (nothing is dropped). Say "keep going" and I'll read the next of them. `;
+    else for (const u of later) missing.push({ job_id: null, company: "", title: u, reason: "not read in time just now, and I couldn't keep it to read later; paste it again" });
+  }
+  if (!list.length && later.length && kept) {
+    return { reply: `${note}Nothing is queued yet from the ones I read${missing.length ? `: ${missing.length} could not be queued (${missing.slice(0, 3).map((m) => `${m.title}: ${m.reason}`).join("; ")}${missing.length > 3 ? "; ..." : ""})` : ""}.`.trim(),
+      status: "none", intent: APPLY_QUEUE_INTENT, coverage: { queued: 0, total: take.length - later.length + many.unread.length } };
+  }
+  return (await applyManyTurn(o, { list, missing, note }))!;
 }
 
 // A role at a company with nothing on file: the company's registered board (121 BOARD_REGISTRY), read now. Exactly one

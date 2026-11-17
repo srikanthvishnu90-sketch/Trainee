@@ -32,3 +32,21 @@ Deno.test("'apply to 50 data roles' is the searched first-N ask: the 9 data role
   eq([r?.status, await w.n()], ["queued", 9], r?.reply);
   assert(/I found 9 open, not 50/.test(r!.reply), r!.reply);
 });
+// Review of ag/ma-02-no-cap (2026-11-17): a count that refers to what was already shown is never read as a search. Before:
+// "apply to 2 of the jobs on that list" searched for "list" ("I have no open of the jobs on that list postings"), and "apply
+// to 3 more roles like these" searched for "more" and "like".
+Deno.test("a count over the shown list is the list's first N; 'more' and 'like these' are never a search", async () => {
+  for (const m of ["apply to 2 of the jobs on that list", "apply to 2 of the roles", "apply to 3 roles from that list", "apply to 4 data roles from the list you showed", "apply to 3 jobs you just listed"]) {
+    const a = applyManyAsk(m);
+    eq(a?.kind, "first", m);
+    eq((a as any)?.what, undefined, `${m}: no search words`);
+  }
+  for (const m of ["apply to 3 more roles like these", "apply to 3 more roles like those", "apply to 5 more data roles"]) eq(applyManyAsk(m), null, m);
+  // The searched count with a role is unchanged by this.
+  eq((applyManyAsk("apply to 15 software engineering intern roles in Chicago") as any)?.what?.words, ["software", "engineering", "intern"]);
+  // Through the turn: no list on hand, "2 of the jobs on that list" asks for the list; it never searches for "list".
+  const w = await world([post(1, "List Manager", "Remote"), post(2, "Data Analyst", "Remote")]);
+  const r = await w.turn("apply to 2 of the jobs on that list");
+  assert(!/of the jobs on that list postings/.test(r?.reply ?? ""), r?.reply);
+  eq(await w.n(), 0, r?.reply);
+});

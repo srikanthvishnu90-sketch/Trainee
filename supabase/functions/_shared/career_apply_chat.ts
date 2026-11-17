@@ -260,6 +260,8 @@ export function findThenApplyAsk(message: string): ManyWhat | null {
   return m ? manyWhatOf(m[1]) : null;
 }
 const LIST_REFERENT = /^(?:(?:from|on|of|in)\s+(?:that|the|this|my|your|our)\s+(?:short\s*)?list(?:\s+(?:you|we)\s+(?:just\s+)?(?:made|found|listed|showed|sent|agreed(?:\s+on)?)(?:\s+me)?)?|(?:you|we)\s+(?:just\s+)?(?:found|listed|showed|sent)(?:\s+me)?)\b/;
+// The same referent anywhere after the role words ("data roles from the list you showed", "jobs on that list").
+const IN_LIST_REFERENT = /\b(?:from|on|of|in)\s+(?:that|the|this|my|your|our)\s+(?:short\s*)?list\b|\b(?:you|we)\s+(?:just\s+)?(?:found|listed|showed|sent)(?:\s+me)?\b/;
 export function applyManyAsk(message: string): ManyAsk | null {
   { const what = findThenApplyAsk(message); if (what) return { kind: "all", what }; }
   if (NOT_A_COMMAND.test(String(message ?? ""))) return null;
@@ -281,9 +283,16 @@ export function applyManyAsk(message: string): ManyAsk | null {
   // D-092 (owner, 2026-11-16): a count with a role ("apply to 50 data roles", "apply to 15 software engineering intern roles
   // in Chicago") is the searched first-N ask, as "the top N <role>" is; before, it was the router's batch delegation
   // (career_batch_apply), which listed other roles and readied none (eval MA02).
+  // Review of ma-02 (2026-11-17): a count that refers to what was already shown is never a search. "2 of the jobs on that
+  // list" / "3 roles from the list you showed" are the shown list's first N, as "the top three from that list" is (the
+  // referent words dropped, never read as a role); "3 more roles like these" / "5 more data roles" are not a new search for
+  // "more" or "like" (null here: the "more like those" turn or the router reads them).
   m = after.match(/^(\d{1,4}|two|three|four|five|six|seven|eight|nine|ten)\s+(.+)$/);
   if (m && /\b(?:roles?|jobs?|postings?|positions?|internships?|openings?)\b/.test(m[2])) {
-    const what = manyWhatOf(m[2]);
+    const rest = m[2].replace(LIST_REFERENT, "").trim();
+    if (/^of\s+(?:the|these|those|them|my|your)\b/.test(rest) || IN_LIST_REFERENT.test(rest)) return { kind: "first", n: numOf(m[1]) };
+    if (/\bmore\b/.test(rest) || /\blike\s+(?:these|those|them|that|this|the\s+(?:last|ones))\b/.test(rest)) return null;
+    const what = manyWhatOf(rest);
     if (what && what.words.length) return { kind: "first", n: numOf(m[1]), what };
   }
   // MASS APPLY END TO END: "the good ones", "the ones that fit me", "the best matches": the listed postings their confirmed

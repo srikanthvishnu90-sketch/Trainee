@@ -277,7 +277,7 @@ export function capacityAskOf(message: string): boolean {
 }
 export function capacityNote(): string {
   return "THEY ASK WHETHER YOU CAN DO A VOLUME OR PACE OF WORK (code read it from their words). That pace has not been verified on their account: never affirm it (no \"yes\", \"technically yes\", \"sure\", \"easily\"). " +
-    "Say in your first sentence that you haven't verified that pace and would not promise it, then what it would actually take, and a smaller first batch they approve one by one. (G5)";
+    "Say in your first sentence that you haven't verified that pace and would not promise it, then what it would actually take, and a smaller first batch to start with, approved as HOW APPROVAL WORKS says (one yes approves exactly the card shown). (G5)";
 }
 
 // G1 / D-007 (C1: add_profile_fact twice on a plain question): what a message states about the person. A question or a request

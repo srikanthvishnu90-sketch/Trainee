@@ -38,6 +38,9 @@ export interface FileService {
   claim(userId: string, id: string, name: string): Promise<boolean>;
   // WO-G: the review File of one prepared application, from code-built data only (reviewFromItem). Never reachable from a model.
   createReview?(userId: string, item: ReviewItem): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
+  // D-094: the File of one batch: every application of it, numbered as the card numbers them, each with its exact payload and
+  // the payload hash the yes binds (batchFromItems). Never reachable from a model.
+  createBatch?(userId: string, items: ReviewItem[]): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
   // Item 6 S0: a File family's page from code-built view data (file_family_serve.ts). Never reachable from a model.
   createFamily?(userId: string, family: string, title: string, view: unknown, o?: { ref?: Record<string, string> }): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
 }
@@ -76,6 +79,17 @@ export function reviewFromItem(r: ReviewItem, now: number): Record<string, unkno
     status: "prepared", stage: "prepared", prepared_at: new Date(now).toISOString(), as_of: new Date(now).toISOString(), ...(r.resume ? { resume: r.resume.label.slice(0, 100) } : {}), answers: [], problems: [],
     review: { url: r.url ?? undefined, hash12: r.hash12 || undefined, approvable: r.approvable, letter: r.letter, ...(r.expires_at ? { expires_at: r.expires_at } : {}), files: r.files, covers: r.covers,
       answers: r.answers.map((a) => ({ question: a.question, answer: a.answer, sensitive: !!a.sensitive })), unresolved: r.unresolved.map((u) => ({ question: u.question, ask: u.ask })) } };
+}
+
+// D-094: the batch File's data, from the review items (application_review.ts reviewOf) in card order. What it lists is what the
+// card's file_sha covers (20261116140000): the employer, role, application page, resume, files, every answer and the hash.
+export function batchFromItems(items: ReviewItem[], now: number): Record<string, unknown> {
+  return { title: `${items.length === 1 ? "1 application" : `${items.length} applications`} to approve`, status: "prepared",
+    prepared_at: new Date(now).toISOString(), as_of: new Date(now).toISOString(),
+    batch: { items: items.map((r, i) => ({ n: i + 1, prepared_id: r.id, payload_hash: r.payload_hash ?? "", employer: r.employer, ...(r.role ? { role: r.role } : {}),
+      ...(r.url ? { url: r.url } : {}), ...(r.resume_meta ? { resume: `${r.resume_meta.name} (${r.resume_meta.version}, ${r.resume_meta.target})` } : r.resume ? { resume: r.resume.label } : {}),
+      files: r.files, answers: r.answers.map((a) => ({ question: a.question, answer: a.answer })), unresolved: r.unresolved.map((u) => ({ question: u.question, ask: u.ask })),
+      approvable: r.approvable })) } };
 }
 
 export function createFileService(o: { store: FileKindStore; env: Env; now: () => number; records?: Records | null }): FileService {
@@ -122,6 +136,16 @@ export function createFileService(o: { store: FileKindStore; env: Env; now: () =
       // prepared application it names; the review kept here is the record of what was shown when the link was made.
       const live = { family: "F-09", from_code: true, live: true, ref: { prepared: item.id, ...(item.job_id ? { job: item.job_id } : {}) } };
       await o.store.put({ id, userId, kind: "application_review", data: { ...v.data, ...live }, state: {}, tag: null, created_at: now, expires_at: now + ttlHours() * 3600_000, revoked_at: null });
+      return { ok: true, id, url: links.url, webApp: links.webApp };
+    },
+    async createBatch(userId, items) {
+      if (!userId) return { ok: false, error: "not created: no person to make it for" };
+      const now = o.now(), v = validateKind("application_review", batchFromItems(items, now), { trusted: true, now });
+      if (!v.ok) return { ok: false, error: `not created: ${v.errors.slice(0, 3).join("; ")}` };
+      const id = [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      const links = await feedUrlsFor(o.env, userId, id, now);
+      if (!links.url && !links.webApp) return { ok: false, error: "not created: file links aren't set up yet" };
+      await o.store.put({ id, userId, kind: "application_review", data: v.data, state: {}, tag: null, created_at: now, expires_at: now + ttlHours() * 3600_000, revoked_at: null });
       return { ok: true, id, url: links.url, webApp: links.webApp };
     },
     // Item 6 S0: a File family's page, from view data built by code (never by a model: create() above validates a model's data

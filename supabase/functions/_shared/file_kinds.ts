@@ -123,6 +123,30 @@ class V {
   }
 }
 
+// D-094 (owner, 2026-11-16): the batch File lists every application of one batch, numbered 1..N as the card numbers them, each
+// with exactly what its payload sends (employer, role, application page, resume, files, every answer word for word) and the
+// payload hash the yes binds. Its stored data is what the card's file_sha covers (20261116140000), so nothing here is optional
+// guesswork: an item that does not validate refuses the whole File, and the card is then shown as before.
+export const BATCH_FILE_MAX = 10000;
+function batchOf(raw: unknown, v: V) {
+  const b = v.obj(raw, "batch");
+  const items = v.list(b.items, "batch.items", 1, BATCH_FILE_MAX).map((it: any, i: number) => {
+    const p = `batch.items[${i}]`;
+    if (it?.n !== i + 1) v.err(`${p}.n`, "must number the applications 1..N in card order");
+    if (typeof it?.prepared_id !== "string" || !/^[0-9a-f-]{36}$/i.test(it.prepared_id)) v.err(`${p}.prepared_id`, "must be the prepared application's id");
+    if (typeof it?.payload_hash !== "string" || !/^[0-9a-f]{64}$/.test(it.payload_hash)) v.err(`${p}.payload_hash`, "must be the payload's sha256");
+    return { n: i + 1, prepared_id: String(it?.prepared_id ?? ""), payload_hash: String(it?.payload_hash ?? ""),
+      employer: v.str(it?.employer, `${p}.employer`, { max: 100, templ: true }), role: v.str(it?.role, `${p}.role`, { max: 120, opt: true, templ: true }),
+      url: v.str(it?.url, `${p}.url`, { max: 500, opt: true, templ: true }), resume: v.str(it?.resume, `${p}.resume`, { max: 200, opt: true, templ: true }),
+      files: v.list(it?.files ?? [], `${p}.files`, 0, 6).map((f, k) => v.str(f, `${p}.files[${k}]`, { max: 160, templ: true })),
+      answers: v.list(it?.answers ?? [], `${p}.answers`, 0, 60).map((a, k) => ({ question: v.str(a?.question, `${p}.answers[${k}].question`, { max: 200, templ: true }),
+        answer: v.str(a?.answer, `${p}.answers[${k}].answer`, { max: 4000, multi: true, templ: true }) })),
+      unresolved: v.list(it?.unresolved ?? [], `${p}.unresolved`, 0, 20).map((u, k) => ({ question: v.str(u?.question, `${p}.unresolved[${k}].question`, { max: 200, templ: true }),
+        ask: v.str(u?.ask, `${p}.unresolved[${k}].ask`, { max: 600, templ: true }) })),
+      approvable: it?.approvable === true };
+  });
+  return { count: items.length, items };
+}
 // WO-G (fixes 12, 13): code-built proofs carry the one visible stage (application_review.ts stageOf) and, for a prepared
 // application, the review: what the approval covers, every answer word for word, every unresolved required question.
 // Only code builds these (trusted): a model never writes a stage, an answer or a question here.
@@ -178,6 +202,11 @@ const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = 
   },
   application_review(raw, v) {
     const x = v.obj(raw, "data");
+    // D-094: a batch's File (every application of one batch, each with its exact payload), built by code from the prepared rows.
+    if (v.trusted && x.batch && !x.review) {
+      return { from_prepared: true, title: v.str(x.title, "title", { max: 80 }), status: "prepared", prepared_at: v.time(x.prepared_at, "prepared_at"),
+        as_of: v.time(x.as_of, "as_of", false), batch: batchOf(x.batch, v) };
+    }
     if (!v.trusted || !x.review) { v.err("data", "an application review is built by Trainee from a prepared application only"); return {}; }
     return { from_prepared: true, title: v.str(x.title, "title", { max: 80 }), company: v.str(x.company, "company", { max: 100 }), role: v.str(x.role, "role", { max: 120, opt: true }),
       destination: v.str(x.destination, "destination", { max: 120, opt: true }), resume: v.str(x.resume, "resume", { max: 100, opt: true }), ids: v.str(x.ids, "ids", { max: 60, opt: true }),
@@ -415,6 +444,28 @@ const reviewLines = (d: any, tz?: string | null): string[] => {
     "## Conditions - in plain words", ...conditions(r, tz).map((c) => `- ${c}`), "", `What happens after approval. ${AFTER}`, "",
     "## Proof panel", `No submission confirmation. ${PROOF_BODY.none}`, "", APPROVE(r)];
 };
+// D-094: the batch File's page and its plain-text twin. One section per application, numbered as the card numbers them; the
+// approval is the chat card's one yes (hash-bound to this File), and this page cannot submit anything.
+const BATCH_HEAD = (n: number) => `${n === 1 ? "1 application" : `${n} applications`} - your yes approves exactly this list`;
+const BATCH_HOW = "Nothing is submitted from this page. Reply \"yes\" to the card in your Trainee chat to send every application below exactly as listed; \"yes except 2\" or \"only 1, 3\" use the numbers here. If this list changes after you saw it, a yes approves nothing.";
+const batchRows = (it: any): [string, string][] => [["Application page", it.url ?? "Employer application page"], ["Resume", it.resume ?? "None, so this cannot be sent"],
+  ...((it.files ?? []).length ? [["Files", it.files.join("; ")] as [string, string]] : []), ["Approval", it.payload_hash.slice(0, 12)]];
+const batchPageHtml = (d: any, tz?: string | null) => {
+  const items = d.batch.items ?? [];
+  return `<section class="r-hero"><p class="r-kick">${esc(BATCH_HEAD(items.length))}</p><p class="r-title">${esc(d.title)}</p><p class="r-sub">Prepared ${esc(whenIn(d.prepared_at, tz))}</p></section>`
+    + `<p class="state prepared" role="status"><strong>${esc(STAGE_LABEL.prepared)}.</strong> ${esc(BATCH_HOW)}</p>`
+    + items.map((it: any) => card(`${it.n}. ${it.employer}${it.role ? ` - ${it.role}` : ""}`, `<dl class="r-rows">${batchRows(it).map(([k, v]) => rowHtml(k, v)).join("")}</dl>`
+      + ((it.unresolved ?? []).length ? `<ul class="r-need">${it.unresolved.map((u: any) => `<li><strong>${esc(u.question)}: not entered.</strong> ${esc(u.ask)}</li>`).join("")}</ul>` : "")
+      + `<dl class="r-ans">${(it.answers ?? []).map((a: any) => `<div><dt>${esc(a.question)}</dt><dd>${esc(a.answer)}</dd></div>`).join("")}</dl>`, (it.unresolved ?? []).length ? "r-warn" : "")).join("")
+    + `<p class="r-approve" role="note">${esc(BATCH_HOW)}</p>`;
+};
+const batchLines = (d: any, tz?: string | null): string[] => {
+  const items = d.batch.items ?? [];
+  return [BATCH_HEAD(items.length).toUpperCase(), `Prepared ${whenIn(d.prepared_at, tz)}`, "", `Status: ${STAGE_LABEL.prepared}. ${BATCH_HOW}`, "",
+    ...items.flatMap((it: any) => [`## ${it.n}. ${it.employer}${it.role ? ` - ${it.role}` : ""}`, ...batchRows(it).map(([k, v]) => `- ${k}: ${v}`),
+      ...(it.unresolved ?? []).map((u: any) => `- Needs your answer: ${u.question}: not entered. ${u.ask}`),
+      ...(it.answers ?? []).map((a: any) => `- ${a.question}: ${a.answer}`), ""])];
+};
 const STATUS_NOTE: Record<string, string> = { queued: "Queued. Nothing has been submitted yet.", prepared: "Prepared. Nothing has been submitted yet.", submitted: "Submitted. The employer hasn't confirmed it.", uncertain: "Submission may have landed; the employer has not confirmed it.", confirmed: "Confirmed by the employer.", failed: "Failed. It was not submitted." };
 
 // ---------------------------------------------------------------- actions: what each kind offers, in what state
@@ -509,6 +560,7 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
       break;
     }
     case "application_review":
+      if (d.batch) { main = `<style>${PROOF_CSS}</style>` + batchPageHtml(d, o.tz); break; }
       // The p-67 header's mono ids and its overflow menu (the plain-text version); the shell above carries the title.
       main = `<style>${PROOF_CSS}</style><div class="rv-top">${d.ids ? `<p class="rv-ids">${esc(d.ids)}</p>` : ""}<details class="rv-more"><summary aria-label="More">\u22EE</summary><a href="?format=text">Plain text version</a></details></div>`
         + reviewPageHtml(d, o.tz) + sec("Flagged by you", `<ul class="why">${(Array.isArray(rec.state?.flags) ? rec.state.flags : []).map((f: any) => `<li>${esc(when(f.at))}: ${esc(f.note)}</li>`).join("")}</ul>`.replace(/^<ul class="why"><\/ul>$/, ""));
@@ -719,6 +771,7 @@ export function textOf(rec: FileRecord, o: { now: number; url?: string }): strin
       break;
     }
     case "application_review":
+      if (d.batch) { L.push(...batchLines(d), ""); break; }
       if (d.ids) L.push(d.ids, "");
       L.push(...reviewLines(d), "");
       break;

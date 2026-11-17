@@ -46,6 +46,7 @@ import { type Contact, contactsCsv, generate, type Person, sampleTasks, SEED } f
 import { PRICES } from "../../../supabase/functions/_shared/model_gateway.ts";
 import { askedPart, questionLine } from "../../../tests/helpers/one_question.ts";
 import { POSTING_PAGE } from "../../../tests/architect/helpers/posting_checks.ts";
+import { normalizeChatText, redactIdentity } from "../../../supabase/functions/_shared/identity_redact.ts";
 import { addStubPages, freeFixtureFetch, isFreeFixtureHost, isStubWebHost, servesFreeFixture, type StubPage, stubWebFetch } from "./web.ts";
 import type { FileRecord } from "../../../supabase/functions/_shared/file_kinds.ts";
 import { appendRow, appendSetRow, type CallEstimate, type E2EItem, type E2ERun, parseBudgetUsd, scoreRow, scoreSetRow } from "./score_log.ts";
@@ -374,7 +375,24 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       if (t.setup.includes("cloud")) { await say("turn on cloud"); await say("yes, turn it on"); }
       // ...and their resume as the file they sent and confirmed (the channel's file upload: career_resume_put, kind file),
       // which the product keeps for the cloud as is; the hosted preparation sends only that file (R9-F).
-      if (t.setup.includes("cloud") && t.setup.includes("resume")) {
+      if (t.setup.includes("cloud") && t.setup.includes("resume") && o.tasks) {
+        // A conversation eval (evals/career/mass-apply-conversations): the confirmed resume file is exactly what the person gave
+        // in chat, byte for byte (their pasted message as a text file), so the confirmed record's hash is their upload's and the
+        // facts read from it stay theirs (career_apply_profile_for keeps a fact only while its upload is the confirmed record).
+        // A PDF made from the text had another hash, so every resume fact was dropped and no "why it fits" line could be shown.
+        const given = new TextEncoder().encode(redactIdentity(normalizeChatText(`here is my resume:\n${P.resume}`).trim()).text); let b = ""; for (const c of given) b += String.fromCharCode(c);
+        // Their "yes, that's my resume" already confirmed this exact text as their record (kind paste, same hash, so the put
+        // below changes nothing): the record is made the file they gave (its bytes, kind file) and the cloud keeps it as the
+        // file it attaches, as career_resume_put does for a file record. Setup, not the person acting.
+        const sha = await sha256Hex(given);
+        await pg.sql(`select public.career_resume_put('${u}', '${sha}', 'file', 'e2e:resume-file', '${P.first}_${P.last}_Resume.txt', decode('${btoa(b)}', 'base64'), 'e2e: the person confirmed their resume file');
+          update public.career_resume_record set kind = 'file', filename = '${P.first}_${P.last}_Resume.txt', bytes = decode('${btoa(b)}', 'base64')
+          where user_id = '${u}' and state = 'confirmed' and sha256 = '${sha}';
+          insert into public.career_apply_cloud_resumes (user_id, sha256, filename, bytes, privacy_epoch)
+          select '${u}', '${sha}', '${P.first}_${P.last}_Resume.txt', decode('${btoa(b)}', 'base64'), coalesce((public.career_account_row_ensure('${u}')->>'epoch')::bigint, 0)
+          where exists (select from public.career_resume_record r where r.user_id = '${u}' and r.state = 'confirmed' and r.sha256 = '${sha}')
+          on conflict (user_id, sha256) do update set filename = excluded.filename, bytes = excluded.bytes`);
+      } else if (t.setup.includes("cloud") && t.setup.includes("resume")) {
         const pdf = resumePdf(P.resume); let b = ""; for (const c of pdf) b += String.fromCharCode(c);
         await pg.sql(`select public.career_resume_put('${u}', '${await sha256Hex(pdf)}', 'file', 'e2e:resume-file', '${P.first}_${P.last}_Resume.pdf', decode('${btoa(b)}', 'base64'), 'e2e: the person confirmed their resume file')`);
       }

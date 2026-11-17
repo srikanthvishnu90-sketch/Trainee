@@ -30,7 +30,7 @@
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
-const { fillForm, heldNow, recheckFilled, driftedFills, MARK_SIGNIN, EXTRACT, answerFor, factValue, factsFrom } = require("./ats-fill.cjs");
+const { resumeSetsOf, fillForm, heldNow, recheckFilled, driftedFills, MARK_SIGNIN, EXTRACT, answerFor, factValue, factsFrom } = require("./ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, OVERLAY_APPLY, CLOSED_MARK, CLOSED_TEXT, applyUrlFor } = require("./apply-entry.cjs");
 const { buildHandoff, PERSON_REASONS, pageDigest, unconfirmedDefaults } = require("./handoff.cjs");
 const NOT_OFFERED = new Set(["no_matching_option", "ambiguous_option"]);
@@ -721,16 +721,17 @@ function CONTROLS(arg) {
     }
     return false;
   };
-  const widgetOf = (e, v = "") => {
+  const widgetOf = (e) => {
     const near = [e.previousElementSibling, e.previousElementSibling && e.previousElementSibling.previousElementSibling, e.nextElementSibling, e.parentElement !== root && e.parentElement.tagName !== "FORM" ? e.parentElement : null];
-    // A container beside the hidden value is its widget's only when it holds at most one question: Teamtailor keeps the posting's
-    // job_id in the container of the whole form, which also holds the phone's country search box (role=combobox, "Search"); that
-    // box is not what the job_id is the value of (answered run of 2026-11-16: "Search: set by the page" on 9 postings).
+    // Teamtailor keeps the posting's job_id in the container of the whole form, which also holds the phone's country search box
+    // (intl-tel-input's role=combobox "Search"); that box is not what the job_id is the value of (answered run of 2026-11-16: "Search:
+    // set by the page" on 9 postings). Delta review of rs-07 (probes p07-widget-hidden, p07-widget-hidden-id, 2026-11-17): only that
+    // case is dropped, by what the widget is, never by how the hidden value looks. In a container holding several questions, a widget
+    // that is a phone box's own country picker (inside the intl-tel-input shell of a tel box) is not a neighbouring hidden value's
+    // widget. Every other widget keeps its hidden value, which is asked as before.
     const oneQuestion = (n) => new Set([...n.querySelectorAll("[data-upmore-q]")].map((x) => x.getAttribute("data-upmore-q"))).size <= 1;
-    // Review of the rs-07 split (probe p07-widget-hidden, 2026-11-17): dropping the neighbour's widget let a page-set work_location
-    // "Remote" beside a drawn listbox and two other questions go unconfirmed. A crowded container's widget is dropped only when the
-    // hidden value is itself page structure (structural: an id, a source, a position); any other value keeps the widget, and is asked.
-    for (const n of near) { if (!n) continue; if (n.matches(WIDGET)) return n; const w = n.querySelector(WIDGET); if (w && (oneQuestion(n) || !structural(e.name || "", v))) return n.matches("[role=group], [role=radiogroup]") || n.hasAttribute("aria-label") ? n : w; }
+    const phoneCountryPicker = (w) => { const s = w.closest(".iti"); return !!s && !!s.querySelector("input[type=tel]"); };
+    for (const n of near) { if (!n) continue; if (n.matches(WIDGET)) return n; const w = n.querySelector(WIDGET); if (w && (oneQuestion(n) || !phoneCountryPicker(w))) return n.matches("[role=group], [role=radiogroup]") || n.hasAttribute("aria-label") ? n : w; }
     return null;
   };
   const named = (w, value) => {
@@ -755,7 +756,7 @@ function CONTROLS(arg) {
         if (head) label = `${head.slice(0, 160)} (${squash(e.name) || e.type || e.tagName.toLowerCase()})`; }
       if (hidden) {
         const v = String(e.value || "").trim();
-        const w = widgetOf(e, v);
+        const w = widgetOf(e);
         // The "off" value a form keeps beside its own tick box of the same name (Lever: consent[marketing]=0 beside the box, sent
         // when it is not ticked) is that box's unticked state, not an answer of its own: the box is the question.
         const offOfBox = /^(?:0|no|false|off|)$/i.test(v) && !!e.name && [...(e.form ? e.form.elements : document.querySelectorAll("input"))].some((x) => x !== e && x.name === e.name && (x.type === "checkbox" || x.type === "radio"));
@@ -954,10 +955,14 @@ async function attempt(browser, p, opts, timing) {
   await ctx.route("**/*", (route) => guardRoute(route).catch(() => route.abort("blockedbyclient").catch(() => {})));
   // Round 4: the submit window's network guard (submitWindowVerdict), set just before the click and cleared once the outcome is read.
   let submitWindow = null, hiddenAtLoad = [];
+  const resumeUploads = []; // { at, host } of each request that sent the approved resume file (guardRoute)
   const loadedBefore = new Set(); // every GET address the page loaded before the submit window (no parameters, no fragment)
   async function guardRoute(route) {
     const req = route.request();
     if (!submitWindow && req.method() === "GET") { try { const x = new URL(req.url()); if (!x.search) loadedBefore.add(x.origin + x.pathname); } catch { /* none */ } }
+    // Delta review of rs-05: every request before the submit window that carries the approved resume file itself (a multipart part
+    // with its own file name): where the board stored it (handoff.cjs carriesResume). Recorded only; the request is judged below as always.
+    if (!submitWindow && (req.method() === "POST" || req.method() === "PUT")) { try { const b = req.postDataBuffer(); if (b && b.toString("latin1").includes(`filename="${require("node:path").basename(p.resume.path)}"`)) resumeUploads.push({ at: Date.now(), host: new URL(req.url()).hostname }); } catch { /* none */ } }
     if (submitWindow) {
       let nav = false; try { nav = req.isNavigationRequest(); } catch { /* none */ }
       const buf = req.postDataBuffer();
@@ -1149,10 +1154,6 @@ async function attempt(browser, p, opts, timing) {
     await declineCookies(page);
     // Round 5: the page as it was before anything was filled: its own constants (a job id, a shortcode, a source) are known here.
     hiddenAtLoad = await page.evaluate(() => [...document.querySelectorAll("input[type=hidden]")].filter((e) => e.name).map((e) => [e.name, String(e.value)])).catch(() => []);
-    // Review of the rs-05 split: the boxes named for the resume that are there and empty before anything is filled; only such a box,
-    // filled by the board once this run set the resume file, may carry the stored resume's address (handoff.cjs carriesResume).
-    const resumeBoxesEmptyAtLoad = new Set(await page.evaluate(() => [...document.querySelectorAll("input:not([type=file]):not([type=checkbox]):not([type=radio]), textarea")]
-      .filter((e) => e.name && /resume|\bcv\b|curriculum|lebenslauf/i.test(e.name) && !String(e.value || "").trim()).map((e) => e.name)).catch(() => []));
     const fr = { map: [], filled: [], needsUser: [], failed: [], invalid: [] };
     for (let step = 0; ; step++) {
       const r = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
@@ -1279,7 +1280,7 @@ async function attempt(browser, p, opts, timing) {
     if (formSnap) { const fs = JSON.parse(formSnap), why = sentDiffers(fs.dom, fs.rows); if (why) { const e = new NeedsUser("page_changed_at_submit", why); throw e; } }
     // The person's own confirmed answer to a question, as ats-fill reads it (an approved answer, else a confirmed fact).
     const known = factsFrom(p.facts || {}, p.answers || {});
-    const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country, resumeName: fr.filled.some((f) => f.source === "resume") ? require("node:path").basename(p.resume.path) : undefined, resumeBoxesEmptyAtLoad });
+    const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country, resumeName: fr.filled.some((f) => f.source === "resume") ? require("node:path").basename(p.resume.path) : undefined, resumeEvidence: { sets: resumeSetsOf(page), uploads: resumeUploads } });
     if (unconfirmed.length) { const e = new NeedsUser("missing_required_answer", unconfirmed[0].label); e.needs = unconfirmed; throw e; }
     if (!hasApproval(p)) throw new NeedsUser("not_approved", "payload changed after approval");
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });

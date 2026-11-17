@@ -19,7 +19,7 @@ let pw = null;
 for (const id of [process.env.UPMORE_PLAYWRIGHT_PATH, "playwright", "/opt/npm-tools/node_modules/playwright"].filter(Boolean)) { try { pw = require(id); break; } catch { /* next */ } }
 const skip = pw ? false : "PLAYWRIGHT_UNRESOLVABLE: set UPMORE_PLAYWRIGHT_PATH";
 let browser, server, base, wsUpgrades = 0;
-const received = [];
+const received = [], gets = [];
 const FIELDS = `<label>First Name <input name="first_name" required></label><label>Last Name <input name="last_name" required></label>
   <label>Email <input name="email" type="email" required></label>`;
 const PAGES = {
@@ -37,6 +37,7 @@ const PAGES = {
 before(async () => {
   if (!pw) return;
   server = http.createServer((req, res) => {
+    if (req.method === "GET") gets.push(req.url);
     if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS") { received.push(`${req.method} ${req.url}`); return res.writeHead(200).end("<h1>Thank you for applying</h1>"); }
     if (req.url === "/robots.txt") return res.writeHead(200, { "content-type": "text/plain" }).end("User-agent: *\nAllow: /\n");
     if (PAGES[req.url]) return res.writeHead(200, { "content-type": "text/html" }).end(`<!doctype html><title>Apply</title><h2>Apply</h2>${PAGES[req.url]}`);
@@ -47,7 +48,17 @@ before(async () => {
     const W = { "/w.js": sock.replace('self.location.host.replace(/^$/, "")', JSON.stringify(host)), "/wm.js": sock.replace('self.location.host.replace(/^$/, "")', JSON.stringify(host)),
       "/wf.js": `onmessage = (e) => { fetch("http://${host}/api/apply", { method: "POST", body: e.data }).catch(() => {}); };`,
       "/wn.js": `const inner = new Worker("http://${host}/w.js"); onmessage = (e) => inner.postMessage(e.data);` };
+    // The positive control's worker scripts: each only asks for a page by a RELATIVE address (GETs, which the dry run lets through),
+    // so the employer sees them only if the page's own worker really ran under the bench's page script.
+    W["/wp.js"] = `fetch("ping-classic"); importScripts("wp2.js"); const n = new Worker("wp3.js"); onmessage = () => {};`;
+    W["/wp2.js"] = `fetch("/ping-relative-import");`;
+    W["/wp3.js"] = `fetch("ping-nested");`;
+    W["/wpm.js"] = `import "./wpm2.js"; fetch("ping-module"); export {};`;
+    W["/wpm2.js"] = `fetch("/ping-module-import"); export {};`;
     if (W[req.url]) return res.writeHead(200, { "content-type": "text/javascript" }).end(W[req.url]);
+    // A same-origin frame that sends the typed answers over WebSocketStream and WebSocket (review probe p01-iframe-wsstream-bench).
+    if (req.url === "/frame") return res.writeHead(200, { "content-type": "text/html" }).end(`<!doctype html><script>let wr; try { const x = new WebSocketStream("ws://${host}/wss"); x.opened.then(({ writable }) => { wr = writable.getWriter(); wr.write("open"); }); } catch (e) {}
+      let so; try { so = new WebSocket("ws://${host}/ws"); } catch (e) {} onmessage = (e) => { if (wr) wr.write(e.data); try { so.send(e.data); } catch (x) {} };</script>`);
     res.writeHead(404).end();
   });
   // A socket upgrade is answered as a real server would (so a socket that got through would open and send): counted, and every frame.
@@ -127,3 +138,26 @@ for (const [k, start] of [["classic", 'new Worker("/w.js")'], ["module", 'new Wo
     assert.equal(wsUpgrades, 0);
   });
 }
+
+// Review of the rs-01 fix (2026-11-17, probes p01-worker-runs, p01-iframe-wsstream-bench): the worker tests above passed while the
+// bootstrap threw a SyntaxError and no worker ran at all. POSITIVE control: under the bench, the page's own classic worker, its
+// relative importScripts, the nested worker it starts by a relative address, and a module worker with a relative static import all
+// really run: the employer receives each of their GETs. Then a same-origin frame's WebSocketStream and WebSocket send nothing.
+test("positive control: the page's own workers really run under the bench (relative fetch, importScripts, nested worker, module import)", { skip, timeout: 60000 }, async () => {
+  received.length = 0; gets.length = 0;
+  PAGES["/worker-positive"] = `<form action="/submit" method="post">${FIELDS}<button type="submit">Submit application</button></form><script>new Worker("/wp.js"); new Worker("/wpm.js", { type: "module" });</script>`;
+  const x = await strictPosting(browser, { provider: "greenhouse", url: `${base}/worker-positive` }, { robots: new Map(), pacer: lib.createPacer({ gapMs: 0 }), ua: "test", resumePath: resumePath(), openCheck: false });
+  await new Promise((r) => setTimeout(r, 800));
+  assert.equal(x.result, "pass", JSON.stringify({ reason: x.reason, error: x.error }));
+  for (const u of ["/wp.js", "/ping-classic", "/wp2.js", "/ping-relative-import", "/wp3.js", "/ping-nested", "/wpm.js", "/wpm2.js", "/ping-module-import", "/ping-module"]) assert.ok(gets.includes(u), `${u} was asked for: ${gets.join(", ")}`);
+  assert.deepEqual(received, []);
+});
+test("a same-origin frame's WebSocketStream and WebSocket send nothing; the bench still passes", { skip, timeout: 60000 }, async () => {
+  received.length = 0; wsUpgrades = 0;
+  PAGES["/framed"] = `<form action="/submit" method="post">${FIELDS}<button type="submit">Submit application</button></form><iframe src="/frame" style="width:1px;height:1px;border:0"></iframe>
+    <script>document.addEventListener("input", () => document.querySelector("iframe").contentWindow.postMessage(new URLSearchParams(new FormData(document.querySelector("form"))).toString(), "*"), true);</script>`;
+  const x = await strictPosting(browser, { provider: "greenhouse", url: `${base}/framed` }, { robots: new Map(), pacer: lib.createPacer({ gapMs: 0 }), ua: "test", resumePath: resumePath(), openCheck: false });
+  await new Promise((r) => setTimeout(r, 600));
+  assert.equal(x.result, "pass", JSON.stringify({ reason: x.reason, error: x.error }));
+  assert.deepEqual(received, []); assert.equal(wsUpgrades, 0);
+});

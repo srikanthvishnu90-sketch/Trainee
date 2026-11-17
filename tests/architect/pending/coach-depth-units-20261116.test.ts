@@ -12,6 +12,10 @@
 //   CU-6  a contract is chosen by the tool's result: none when the open check is not_readable or unknown, or the call was
 //         refused or threw; a closed posting gets the closed contract, never "prepare it"
 //   CU-7  the search contract follows RESPONSE-RULES 3.1: more than one posting goes in a File, never a raw link list
+//   CU-9  (rv5, probe rv5-cd/probes/c5_search.ts) one search turn's system prompt and search contract never contradict:
+//         both follow RESPONSE-RULES 3.1, neither asks for each posting with its link on its own line
+//   CU-10 (rv5, probe rv5-cd/probes/c5_queue.ts) an apply contract that points at HOW APPROVAL WORKS comes with that block in
+//         the same turn's prompt, and the two say the same thing about the card
 //   CU-8  trunk's message-read contracts are gone from the prompt ("THIS REPLY MUST"); the pipeline's checks come from the
 //         contracts the tools attached (draft and requirements migrated), plus answer_first
 //   deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/pending/coach-depth-units-20261116.test.ts
@@ -124,4 +128,29 @@ Deno.test("CU-8 one contract system: the pipeline's checks come from the contrac
   // The two contracts that existed only in trunk's message reader are tool-attached now.
   ok(TOOL_CONTRACTS.inspect_apply_flow.includes("apply_requirements") && TASK_CONTRACTS.apply_requirements.checks?.includes("requirements"));
   ok(TOOL_CONTRACTS.draft_followup.includes("draft") && /not sent/.test(contractNote("draft")) && /referral itself/.test(contractNote("draft")));
+});
+
+const searchTurn = async (tool: string, input: unknown, extra: Record<string, unknown> = {}) => {
+  const seen: any[] = []; let i = 0;
+  const steps = [[{ type: "tool_use", id: "a", name: tool, input }], [{ type: "text", text: "ok" }]];
+  const P = (n: number, co: string) => ({ job_id: `j${n}`, company: co, title: "Data Analyst Intern", location: "Chicago, IL", url: `https://boards.greenhouse.io/${co.toLowerCase()}/jobs/${1000 + n}`, first_seen_at: "2026-11-10", description: "SQL, Python" });
+  await agentTurn({ message: "find me data analyst internships in chicago", history: [], stores: { profile: null }, userId: "u-cu9", threadId: "th", now: NOW, postings: async () => [P(1, "Acme"), P(2, "Brightloop"), P(3, "Citadel")], ...extra,
+    model: async (p: any) => { seen.push(structuredClone(p)); const c = steps[Math.min(i++, steps.length - 1)]; return { content: c, stop_reason: c[0].type === "tool_use" ? "tool_use" : "end_turn" }; } } as any);
+  const tr = seen[1].messages.at(-1).content.find((b: any) => b.type === "tool_result");
+  return { system: String(seen[1].system), result: String(tr?.content ?? "") };
+};
+Deno.test("CU-9 one search turn: the system prompt and the search contract give one rule for postings and links (RESPONSE-RULES 3.1)", async () => {
+  const { system, result } = await searchTurn("search_jobs", { query: "data analyst intern chicago" });
+  ok(result.includes(contractNote("search").slice(0, 80)), "the search contract came back with the result");
+  const both = `${system}\n${result}`;
+  ok(!/Name each with its\s+link/.test(both) && !/Each posting on its own line/.test(both), "a rule that lists every posting with its link on its own line");
+  for (const [where, t] of [["system prompt", system], ["contract", result]]) ok(/never a list of raw\s+links in chat \(RESPONSE-RULES 3\.1\)/.test(t) && /go in a File \(create_file\)/.test(t), `${where} does not state RESPONSE-RULES 3.1`);
+});
+Deno.test("CU-10 an apply contract comes with HOW APPROVAL WORKS in the same turn's prompt, saying the same about the card", async () => {
+  const { memoryWantStore } = await import("../../../supabase/functions/_shared/career_apply_want.ts");
+  const { approvalRulesText } = await import("../../../supabase/functions/_shared/agent/approval_rules.ts");
+  const { system, result } = await searchTurn("queue_applications", { postings: [{ url: "https://job-boards.greenhouse.io/acme/jobs/4000001", company: "Acme", title: "Data Analyst 1" }] }, { wants: memoryWantStore() });
+  ok(result.includes(contractNote("apply").slice(0, 80)), result.slice(0, 300));
+  ok(/HOW APPROVAL WORKS/.test(contractNote("apply")) && system.includes(approvalRulesText()), "the contract points at HOW APPROVAL WORKS, so the prompt carries it");
+  ok(/one card/.test(contractNote("apply")) && /one card listing every prepared application/.test(approvalRulesText()), "both: one card, one yes");
 });

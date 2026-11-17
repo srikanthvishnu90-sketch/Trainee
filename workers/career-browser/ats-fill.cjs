@@ -260,7 +260,10 @@ function STATE(qs) {
       // AngularJS (Breezy) shows an unset model as its own "? undefined:undefined ?" option: nothing is chosen.
       // Round 2: an option in a placeholder's words ("Please select", "Choose one", "--"), or a disabled one, is no answer whatever its value.
       case "select": { const o = el.options[el.selectedIndex]; const ph = !el.value || /^\? .* \?$/.test(el.value) || !o || o.disabled || /^[\s\-–—.…]*(?:(?:please\s+)?(?:select|choose|pick)(?:\s+(?:one|an?\s+(?:option|answer|value)))?)?[\s\-–—.…]*$/i.test(squash(o.textContent)); return { q: d.q, filled: !ph, text: ph ? "" : squash(o && o.textContent) }; }
-      case "radio": case "checkgroup": { const on = els.filter((e) => e.checked || (!("checked" in e) && e.getAttribute("aria-checked") === "true")); const picked = [...new Set(on.map((e) => e.getAttribute("data-upmore-o") ?? e.getAttribute("data-upmore-io")))]; return { q: d.q, filled: picked.length > 0, picked }; }
+      // A drawn option (Workable: the shown words in a role=radio wrapper around a hidden input) is chosen as the page shows it: its
+      // wrapper's aria-checked (answered run of 2026-11-16: the wrapper said chosen while the re-mounted hidden input's property did not).
+      case "radio": case "checkgroup": { const shownOn = (e) => { const w = e.closest("[role=radio], [role=checkbox]"); return !!w && w.getAttribute("aria-checked") === "true"; };
+        const on = els.filter((e) => e.checked || (!("checked" in e) && (e.getAttribute("aria-checked") === "true" || (d.drawn && shownOn(e))))); const picked = [...new Set(on.map((e) => e.getAttribute("data-upmore-o") ?? e.getAttribute("data-upmore-io")))]; return { q: d.q, filled: picked.length > 0, picked }; }
       case "buttons": { const on = els.filter((e) => e.getAttribute("aria-pressed") === "true"); return { q: d.q, filled: on.length > 0, picked: on.map((e) => e.getAttribute("data-upmore-o")) }; }
       case "checkbox": return { q: d.q, filled: !!el.checked, text: el.checked ? "checked" : "" };
       case "file": return { q: d.q, filled: !!(el.files && el.files.length), text: el.files && el.files[0] ? el.files[0].name : "" };

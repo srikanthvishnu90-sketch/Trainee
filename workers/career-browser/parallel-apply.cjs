@@ -745,6 +745,11 @@ function CONTROLS(arg) {
         : e.type === "file" ? [...(e.files || [])].map((f) => f.name).join(", ") || null : String(e.value) === "" ? null : String(e.value);
       const touched = (q !== null && filledQs.includes(q)) || (q === null && inQuestion(e));
       let label = squash((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder).slice(0, 200), hidden = e.type === "hidden", answer = false;
+      // A shown control with no label of its own (Breezy's salary-period select under "Desired Salary", preset to "Yearly"; CI
+      // 44021741347: asked with an empty name nobody could answer) is named by the heading just before it and its own kind, so the
+      // person can be asked about it in words.
+      if (!label && !hidden) { let head = ""; for (let a = e, i = 0; a && !head && i < 4 && a !== root; a = a.parentElement, i++) for (let c = a.previousElementSibling; c && !head; c = c.previousElementSibling) if (/^(H[1-4]|LEGEND|LABEL)$/.test(c.tagName) && squash(c.innerText)) head = squash(c.innerText);
+        if (head) label = `${head.slice(0, 160)} (${squash(e.name) || e.type || e.tagName.toLowerCase()})`; }
       if (hidden) {
         const w = widgetOf(e);
         const v = String(e.value || "").trim();

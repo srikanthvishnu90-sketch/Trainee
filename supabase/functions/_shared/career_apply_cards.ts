@@ -48,10 +48,21 @@ export function postedTerms(description: unknown): { pay: string | null; deadlin
   return { pay: pay ? pay.trim().slice(0, 120) : null, deadline: deadline ? deadline.trim() : null };
 }
 // The lines a card shows under one application's employer and role, from the posting row it was prepared for.
-export function postingDetailLines(p: { location?: string | null; description?: string | null }): string[] {
+export function postingDetailLines(p: { location?: string | null; description?: string | null }, confirmed: string[] = []): string[] {
   const { pay, deadline } = postedTerms(p.description);
   const where = String(p.location ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
-  return [...(where ? [`Where: ${where}`] : []), ...(pay ? [`Pay (as posted): ${pay}`] : []), ...(deadline ? [`Apply by (as posted): ${deadline}`] : [])];
+  const fit = fitLine(p.description, confirmed);
+  return [...(where ? [`Where: ${where}`] : []), ...(pay ? [`Pay (as posted): ${pay}`] : []), ...(deadline ? [`Apply by (as posted): ${deadline}`] : []), ...(fit ? [fit] : [])];
+}
+// "Why it fits": the posting's own requirements that a CONFIRMED fact of theirs names, word for word (case aside), and only
+// those; no confirmed fact, no requirements list, or nothing shared: no line (never a guess at fit).
+export function fitLine(description: unknown, confirmed: string[]): string | null {
+  const req = /\brequirements?\s*:\s*([^.]+)/i.exec(String(description ?? ""))?.[1];
+  if (!req || !confirmed.length) return null;
+  const said = ` ${confirmed.join(" \n ").toLowerCase()} `;
+  const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const hits = req.split(/\s*,\s*|\s+and\s+/).map((x) => x.trim()).filter((x) => x && x.length <= 40 && new RegExp(`(?:^|[^a-z0-9+#])${esc(x.toLowerCase())}(?:$|[^a-z0-9+#])`).test(said));
+  return hits.length ? `Why it fits: it asks for ${hits.slice(0, 4).join(", ")}, which your confirmed resume has` : null;
 }
 export interface Card {
   id: string;
@@ -935,9 +946,15 @@ export async function withRoles(admin: any, userId: string, rows: (Prepared & { 
     const got = jobs.length ? await admin.from("career_postings").select("job_id,title,company,location,description").in("job_id", jobs) : { data: [] };
     const posting = new Map<string, { title: string; company: string; location: string | null; description: string | null }>((got?.data ?? []).map((p: any) => [String(p.job_id),
       { title: String(p.title ?? ""), company: String(p.company ?? ""), location: p.location ?? null, description: p.description ?? null }]));
+    // Their confirmed facts' words, for "why it fits" (the profile the preparation reads, career_apply_profile_for: only facts
+    // the person confirmed with an event). Unreadable: no fit line, the card as before.
+    let prof: any = null;
+    try { prof = typeof admin.rpc === "function" ? await admin.rpc("career_apply_profile_for", { p_user: userId }) : null; } catch { prof = null; }
+    const confirmed = (Array.isArray(prof?.data?.facts) ? prof.data.facts : []).filter((f: any) => f && f.status === "confirmed" && f.needs_confirmation === false && f.confirmation_event_id)
+      .map((f: any) => [f.text, f.title, ...(Array.isArray(f.bullets) ? f.bullets : [])].filter((x) => typeof x === "string").join(" "));
     return rows.map((r) => {
       const hit = [byPrepared.get(r.id), viaAttempt.get(r.id)].map((j) => (j ? posting.get(j) : undefined)).find((p) => p && p.title && norm(p.company) === norm(r.company));
-      return { ...strip(r), role: hit ? hit.title : null, ...(hit ? { details: postingDetailLines(hit) } : {}) };
+      return { ...strip(r), role: hit ? hit.title : null, ...(hit ? { details: postingDetailLines(hit, confirmed) } : {}) };
     });
   } catch {
     return rows.map(strip);

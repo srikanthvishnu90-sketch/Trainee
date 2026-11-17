@@ -53,3 +53,17 @@ Deno.test("the hosted preparation's pushed card: role and posted terms from desc
   eq((out.body as any).push, "shown");
   assert(pushed.includes("1. Lumen — Data Analyst\n   Where: Chicago, IL\n   Pay (as posted): $70,000-$85,000\n   Email: a@example.test"), pushed);
 });
+
+Deno.test("why it fits: the posting's requirements a CONFIRMED fact names, and only those; none confirmed, no line", async () => {
+  const { fitLine } = await import("../../../supabase/functions/_shared/career_apply_cards.ts");
+  eq(fitLine("Data Analyst. Requirements: SQL, Python, dashboards, statistics.", ["Built a reporting dashboard in React and Python", "Cut reporting time by automating data pulls from PostgreSQL using SQL"]),
+    "Why it fits: it asks for SQL, Python, which your confirmed resume has");
+  eq(fitLine("Requirements: Go, Kubernetes.", []), null);
+  eq(fitLine("Requirements: Rust.", ["Python"]), null);
+  eq(fitLine("No requirements listed here", ["Python"]), null);
+  const confirmedAdmin = { ...admin([{ job_id: "greenhouse:lumen:801", title: "Data Analyst", company: "Lumen", location: "Chicago, IL", description: "Requirements: SQL, Python." }],
+    [{ prepared_id: "p1", posting_job_id: "greenhouse:lumen:801" }]),
+    rpc: async () => ({ data: { facts: [{ text: "Python and SQL dashboards", status: "confirmed", needs_confirmation: false, confirmation_event_id: "e1" }, { text: "Go", status: "draft", needs_confirmation: true }] } }) };
+  const [p] = await withRoles(confirmedAdmin, "u1", [{ id: "p1", company: "Lumen", card_lines: ["Lumen"] }]);
+  assert((p.details ?? []).includes("Why it fits: it asks for SQL, Python, which your confirmed resume has"), JSON.stringify(p.details));
+});

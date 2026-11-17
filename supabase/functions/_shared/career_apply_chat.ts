@@ -434,12 +434,15 @@ const BARE_NUMBER = /^(?:please\s+)?apply\s+(?:me\s+)?(?:to|for)\s+(\d{1,2})(?:\
 // the family is a keyword match, not a fit score), and ONE question to pick. Nothing is queued; no family mentioned: not this turn's.
 const VAGUE = /^(?:(?:ok(?:ay)?|so|hey|please|pls)[,\s]+)*(?:(?:can|could) you\s+(?:just\s+)?(?:please\s+)?)?(?:just\s+)?apply\s+(?:me\s+)?(?:to|for)\s+(?:some|a few|any|a bunch of|a couple of|more|a lot of|lots of)?\s*(?:jobs?|roles?|positions?|openings?|internships?)(?:\s+for\s+me)?(?:\s+please)?[.!?]*$/i;
 const FAMILIES: { label: string; words: string[]; signals: RegExp }[] = [
-  { label: "software engineering", words: ["software"], signals: /\b(?:react|python|go|java|typescript|javascript|kubernetes|software|computer science|backend|frontend)\b/i },
+  { label: "software engineering", words: ["software"], signals: /\b(?:react|python|golang|java|typescript|javascript|kubernetes|software|computer science|backend|frontend)\b/i },
   { label: "data", words: ["data"], signals: /\b(?:sql|data|statistics|analytics|dashboards?|tableau|python)\b/i },
   { label: "finance", words: ["financial"], signals: /\b(?:finance|financial|excel|dcf|valuation|investment|banking)\b/i },
 ];
 async function proposeBatch(o: ApplyChatDeps): Promise<ApplyChatResult | null> {
-  const said = (o.facts ?? []).map((f) => String(f?.text ?? f?.value ?? "")).join(" \n ");
+  // Review rv-ma3: the person's CONFIRMED facts only (never a fact stated in chat this turn, a draft, one awaiting a yes, or a
+  // quarantined one), since the reply says "your confirmed facts mention"; and only unambiguous signals ("go" was "I love to go hiking").
+  const said = (o.facts ?? []).filter((f) => f && typeof f === "object" && !f.stated && !f.needs_confirmation && f.status !== "draft" && !f.quarantine && !f.quarantined)
+    .map((f) => String(f?.text ?? f?.value ?? "")).join(" \n ");
   const fams = FAMILIES.filter((f) => f.signals.test(said));
   if (!fams.length) return null;
   const found: { label: string; n: number; eg: string[] }[] = [];

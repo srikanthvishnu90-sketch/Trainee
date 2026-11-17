@@ -44,7 +44,7 @@ import { AREAS, type Area, type E2EState, type Expect, judgeE2E, linkedFileIds, 
 import { ATS_HOST, atsRef, FakeGmail, htmlText, personAnswers, readPdf, resumePdf, sha256Hex, stubDryRunEngine, stubEngine, StubAts, stubSubmitEngine } from "./worlds.ts";
 import { type Contact, contactsCsv, generate, type Person, sampleTasks, SEED } from "./generate.ts";
 import { PRICES } from "../../../supabase/functions/_shared/model_gateway.ts";
-import { askedPart, questionLine } from "../../../tests/helpers/one_question.ts";
+import { askedPart, numberedQuestions, questionLine } from "../../../tests/helpers/one_question.ts";
 import { POSTING_PAGE } from "../../../tests/architect/helpers/posting_checks.ts";
 import { addStubPages, freeFixtureFetch, isFreeFixtureHost, isStubWebHost, servesFreeFixture, type StubPage, stubWebFetch } from "./web.ts";
 import type { FileRecord } from "../../../supabase/functions/_shared/file_kinds.ts";
@@ -378,13 +378,24 @@ export async function runE2E(o: { label: string; brain: string; model: "fake" | 
       // a question they have no answer to is left open (the task then fails on its real outcome).
       // The thread's newest message from Trainee: what the person sees last (a reply, or a question the preparation pushed).
       const lastShown = async () => String(await json(pg, `select to_json(m.content) from public.agent_messages m join public.agent_threads th on th.id = m.thread_id where th.user_id = '${u}' and m.role = 'assistant' order by m.created_at desc, m.id desc limit 1`) ?? "");
-      const asks = (x: string) => /(?:One question|Question 1 of \d+) only you can answer/.test(askedPart(x));
+      const asks = (x: string) => /(?:One question|Question 1 of \d+) only you can answer|\d+ questions only you can answer are holding up/.test(askedPart(x));
       const answerAsked = async (last: string) => {
         for (let round = 0; round < 4; round++) {
           const shown = await lastShown();
           let text = round === 0 && asks(last) ? last : asks(shown) ? shown : "";
           if (!text) return;
           for (let n = 0; text && n < 12; n++) {
+            // D-093: a batch's questions all at once: one reply, each answered by its number (one with no answer is left open).
+            const many = numberedQuestions(text);
+            if (many.length) {
+              const parts = many.map(([k, q]) => { const a = answers.find(([re]) => re.test(q)); if (!a) prepLog.push(`the person has no answer to: ${q.slice(0, 100)}`); return a ? `${k} ${a[1]}` : null; }).filter(Boolean);
+              if (!parts.length) return;
+              const t0 = performance.now(), r = await say(parts.join("\n"));
+              turnMs.push(performance.now() - t0); said.push(parts.join("\n"));
+              replies.push(r.reply); intents.push(r.intent); bodies.push(r.body);
+              text = asks(r.reply) ? r.reply : "";
+              continue;
+            }
             const line = questionLine(text), a = answers.find(([re]) => re.test(line));
             if (!a) { prepLog.push(`the person has no answer to: ${line.slice(0, 100)}`); return; }
             const t0 = performance.now(), r = await say(a[1]);

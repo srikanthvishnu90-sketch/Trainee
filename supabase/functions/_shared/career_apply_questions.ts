@@ -78,6 +78,7 @@ export const QUESTIONS_INTENT = "career_apply_questions";
 // One question per message, on every channel (owner, 2026-10-31): the next is asked after the answer, and the card is
 // built only when none is left open (career_hosted_prepare.ts prepareAfterAnswers).
 export const PER_TEXT = 1;
+export const TEXT_LIMIT = 3800; // D-093: one numbered message of a batch's questions stays a text
 export const TEXT_BUDGET = 1600; // two or more questions stay under this; one alone may go to 4,000, never cut
 const MAX_ANSWER = 2000;
 
@@ -227,6 +228,22 @@ export function questionsText(
 ): { take: OpenQuestion[]; text: string } | null {
   const ask = qs.filter((q) => !NEVER_BY_TEXT.test(q.label));
   if (!ask.length) return null;
+  // D-093 (owner, 2026-11-16, "All at once"): more than one question open across a batch: ONE numbered message with every
+  // one (each once, with how many applications it holds), answered in one reply, each answer reused on every application
+  // that asks it. One question alone keeps E3 below. As many as fit one text (TEXT_LIMIT); the rest follow, said so.
+  if (ask.length > 1) {
+    const head = `${ask.length} questions only you can answer are holding up your applications. Answer them all in one message, one line each, starting with its number; each answer is reused on every application that asks it.`;
+    const foot = `Reply like:\n1 <your answer>\n2 <your answer>`;
+    const take: OpenQuestion[] = [], lines: string[] = [];
+    for (const [i, q] of ask.entries()) {
+      const needed = neededSentence(q, batch);
+      const l = [`${line(q, i + 1)}${needed ? ` ${needed}` : ""}`, notes?.(q, i + 1) ?? ""].filter(Boolean).join("\n");
+      if (take.length && [head, ...lines, l, foot].join("\n").length > TEXT_LIMIT) break;
+      take.push(q); lines.push(l);
+    }
+    const more = ask.length - take.length;
+    return { take, text: [head.replace(`${ask.length} questions`, `${take.length} questions`), ...lines, ...(more ? [`${more} more come after you answer these.`] : []), foot].join("\n") };
+  }
   const take = ask.slice(0, PER_TEXT), q = take[0];
   // An identity-number question is never asked by text, so it is not counted among the ones asked.
   const all = Math.max(total - (qs.length - ask.length), 1), rest = all - 1;

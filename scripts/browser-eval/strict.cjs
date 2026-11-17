@@ -145,7 +145,10 @@ function strictStop() {
   };
 }
 // The page script of the dry run: every form submit, form.submit() and requestSubmit() is cancelled (eval-lib SUBMIT_TRAP's
-// rule), and a WebSocket never opens (a socket is not a request the gate sees): it reports closed and sends nothing.
+// rule). A WebSocket opened from the page or from a worker it starts never opens (a socket is not a request the gate sees): it
+// reports closed and sends nothing; WebTransport and peer connections are refused. Stated limit: a GET that carries typed values
+// in its address to another host (an image beacon, a script URL) is a GET, and the gate lets GETs through; images are not fetched,
+// but other GETs are, so the bench does not prove that no answer can leave through a GET's address.
 function STRICT_INIT() {
   window.__strictTrapped = 0;
   const hit = () => { window.__strictTrapped++; try { window.__evalSubmitAttempt(); } catch { /* not bound in the strict bench */ } };
@@ -159,6 +162,37 @@ function STRICT_INIT() {
   }
   NoSocket.CONNECTING = 0; NoSocket.OPEN = 1; NoSocket.CLOSING = 2; NoSocket.CLOSED = 3;
   window.WebSocket = NoSocket;
+  // Other channels the request gate does not see are refused outright: WebTransport and peer connections (a data channel through a
+  // relay server), in the page and in every worker below.
+  const refuse = (what) => function () { throw new DOMException(`${what} is refused by the dry run`, "SecurityError"); };
+  for (const k of ["WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection"]) if (k in window) window[k] = refuse(k);
+  // Review of the rs-01 split (probe p01-worker-ws-bench): a page script's own Worker or SharedWorker runs outside this page script,
+  // so a socket it opened reached the employer while the bench reported a pass. Every worker the page starts now starts from a
+  // bootstrap that first installs the same refusals (WebSocket, WebTransport, peer connections; and the same bootstrap for any worker
+  // it starts itself), then loads the page's own worker script (importScripts, or a dynamic import for a module worker).
+  const PRELUDE = `(() => {
+    class NoSocket { constructor(u) { this.url = String(u); this.readyState = 3; setTimeout(() => { if (typeof this.onclose === "function") this.onclose({ type: "close" }); }, 0); }
+      send() {} close() {} addEventListener() {} removeEventListener() {} dispatchEvent() { return false; } }
+    NoSocket.CONNECTING = 0; NoSocket.OPEN = 1; NoSocket.CLOSING = 2; NoSocket.CLOSED = 3;
+    self.WebSocket = NoSocket;
+    for (const k of ["WebTransport", "RTCPeerConnection"]) if (k in self) self[k] = function () { throw new Error(k + " is refused by the dry run"); };
+    const P = __PRELUDE__;
+    for (const k of ["Worker", "SharedWorker"]) { const O = self[k]; if (typeof O !== "function") continue;
+      self[k] = function (u, o) { const abs = new URL(u, self.location.href).href, mod = o && o.type === "module";
+        const src = P.replace("__PRELUDE__", JSON.stringify(P)) + (mod ? "\nawait import(" + JSON.stringify(abs) + ");" : "\nimportScripts(" + JSON.stringify(abs) + ");");
+        return new O(URL.createObjectURL(new Blob([src], { type: "text/javascript" })), o); }; }
+  })();`;
+  for (const k of ["Worker", "SharedWorker"]) {
+    const O = window[k]; if (typeof O !== "function") continue;
+    const W = function (u, o) {
+      const abs = new URL(u, location.href).href, mod = o && o.type === "module";
+      window.__strictWorkers = (window.__strictWorkers || 0) + 1;
+      const src = PRELUDE.replace("__PRELUDE__", JSON.stringify(PRELUDE)) + (mod ? `\nawait import(${JSON.stringify(abs)});` : `\nimportScripts(${JSON.stringify(abs)});`);
+      return new O(URL.createObjectURL(new Blob([src], { type: "text/javascript" })), o);
+    };
+    W.prototype = O.prototype;
+    window[k] = W;
+  }
   // A board's own resume upload is answered inside the browser (SIMULATED_UPLOADS), so its body never goes over the wire and the
   // browser fires no upload progress for it. Greenhouse's job-boards upload shows the file only once its upload reached 100%
   // (strict runs 43276162667 and CI 44021741347: 19 'Attach' rows, progress bar left at 0%). For those same addresses only, the

@@ -41,20 +41,26 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 // Arguments are compared as VALUES, never as JSON (review rv5): a string and a one-item list are the same value, and case,
 // whitespace, order and repeats do not matter. A number or a true/false (a count, a limit) is not a value that tells two calls
 // apart (norm gives null).
+const canon = (x: unknown): string => x && typeof x === "object" && !Array.isArray(x)
+  ? `{${Object.keys(x as Record<string, unknown>).sort().map((k) => `${k}:${canon((x as Record<string, unknown>)[k])}`).join(",")}}`
+  : Array.isArray(x) ? `[${x.map(canon).join(",")}]` : String(x).trim().toLowerCase().replace(/\s+/g, " ");
 const norm = (v: unknown): string[] | null => typeof v === "number" || typeof v === "boolean" ? null
-  : [...new Set((Array.isArray(v) ? v : [v]).filter(filled).map((x) => String(x).trim().toLowerCase().replace(/\s+/g, " ")))].sort();
+  : [...new Set((Array.isArray(v) ? v : [v]).filter(filled).map(canon))].sort();
 const sameValue = (a: unknown, b: unknown) => { const x = norm(a), y = norm(b); return x === null || y === null || JSON.stringify(x) === JSON.stringify(y); };
-// A category the person named in place of employers ("trading firms", "big tech"): a later call may name the firms instead.
-const CATEGORY = /\b(?:firms?|companies|startups?|banks?|funds?|shops|employers|big tech|faang)\b/i;
-// Architect ruling (review rv6, D-097): a later call agrees with an input the refused call already had when its value holds that
-// value: equal under norm, a list holding every item (a superset), and a category word met by any firm the refused call did
-// not already name. A count-like input (a number or a true/false) may differ.
-const holds = (refusedV: unknown, laterV: unknown): boolean => {
+// Review rv7 (D-097 as amended): the category exception is for EMPLOYER inputs only, and only for an item that IS, whole and
+// normalized, one of these phrases the person can use in place of employers. A name that merely contains such a word ("Bank of
+// America", "Founders Fund", "Deutsche Bank") is a name and must be held exactly; so is every other input (a role, a school).
+const EMPLOYER_INPUTS = new Set(["employers", "employer", "companies", "company", "firms", "firm"]);
+export const CATEGORY_PHRASES: ReadonlySet<string> = new Set(["trading firms", "hedge funds", "quant firms", "banks", "investment banks", "big tech", "faang", "startups", "tech companies", "consulting firms"]);
+// Architect ruling (reviews rv6 and rv7, D-097): a later call holds an input the refused call already had when, normalized, its
+// value is equal, or, for a list, a superset; for an employer input a category phrase item is met by any employer the refused
+// call did not already name. A count-like input (a number or a true/false) may differ.
+const holds = (key: string, refusedV: unknown, laterV: unknown): boolean => {
   const was = norm(refusedV), now = norm(laterV);
   if (was === null) return true;
   if (now === null || !now.length) return false;
-  const extra = now.filter((x) => !was.includes(x));
-  return was.every((x) => now.includes(x) || (CATEGORY.test(x) && extra.length > 0));
+  const extra = now.filter((x) => !was.includes(x)), category = EMPLOYER_INPUTS.has(key.toLowerCase());
+  return was.every((x) => now.includes(x) || (category && CATEGORY_PHRASES.has(x) && extra.length > 0));
 };
 // Whether a later call repeats a refused one (for the retry count, loop.ts): the same tool, and no input the refused call had is
 // given another value.
@@ -67,11 +73,11 @@ export function unrunCalls(log: CallRec[]): { name: string; args: string[]; fail
     if (r.outcome !== "refused") return;
     // Architect ruling (review rv6, D-097, superseding rv5's "whatever its other arguments"): a refused call is RESOLVED only by a
     // later call of the same tool that ran and (1) has every required input the refused call lacked and (2) holds every input the
-    // refused call already had (holds: same value, a superset list, a category met by named firms; counts may differ). A run about
+    // refused call already had (holds: same value, a superset list, an employer category phrase met by named firms; counts may differ). A run about
     // another subject (another employer) resolves nothing. Only a call never resolved gets the line; it "failed" when such a
     // later call ran and threw.
     const retries = log.slice(i + 1).filter((x) => x.name === r.name && x.outcome !== "refused" && (r.missing ?? []).every((k) => filled(x.input?.[k]))
-      && Object.entries(r.input ?? {}).filter(([, v]) => filled(v)).every(([k, v]) => holds(v, x.input?.[k])));
+      && Object.entries(r.input ?? {}).filter(([, v]) => filled(v)).every(([k, v]) => holds(k, v, x.input?.[k])));
     if (retries.some((x) => x.outcome === "ok")) return;
     const args = subjectArgs(r.input ?? {});
     const failed = retries.some((x) => x.outcome === "threw");

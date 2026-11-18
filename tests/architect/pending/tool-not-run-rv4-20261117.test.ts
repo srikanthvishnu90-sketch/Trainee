@@ -12,7 +12,7 @@
 import assertNode from "node:assert/strict";
 import { runAgentTurn, type ToolSpec } from "../../../supabase/functions/_shared/agent/loop.ts";
 import { leakedWords } from "../../../supabase/functions/_shared/agent/reply_guards.ts";
-import { notRunLine, withNotRun } from "../../../supabase/functions/_shared/agent/not_run.ts";
+import { notRunLine, unrunCalls, withNotRun } from "../../../supabase/functions/_shared/agent/not_run.ts";
 import { agentTurn, shortenedOk } from "../../../supabase/functions/agent-chat/career_brain.ts";
 import { canRun } from "../helpers/response_world.ts";
 import { runConversation, type Step } from "../helpers/mirror_process.ts";
@@ -162,4 +162,43 @@ Deno.test("NR-16 (rv6) a later run about another subject never resolves a refuse
   // A named employer is no category: "Google" is not met by "Meta".
   const notCat = await run([fp], scripted([use("find_people", { employers: ["Google"] }, "a"), use("find_people", { school: "Lakeshore", employers: ["Meta"] }, "b"), text("Found 1.")]), msg);
   ok(/for Google did not run this time/.test(notCat.reply), notCat.reply);
+  // Review rv7 (probe rv7-cda/probes/a7_holds.ts, D-097 as amended): the category exception is for employer inputs only, and only
+  // for an item that IS a category phrase; a name containing "Bank" or "Fund" is a name; every other input holds exactly.
+  const c = (input: any, outcome: string, missing?: string[]) => ({ name: "find_people", input, outcome, missing }) as any;
+  const UNRESOLVED: [string, any[]][] = [
+    ["BofA named employer resolved by Google", [c({ employers: ["Bank of America"], role: "analyst" }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Google"], role: "analyst" }, "ok")]],
+    ["Deutsche Bank resolved by Meta", [c({ employers: ["Deutsche Bank"] }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Meta"] }, "ok")]],
+    ["Founders Fund resolved by Stripe", [c({ employers: ["Founders Fund"] }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Stripe"] }, "ok")]],
+    ["Silicon Valley Bank resolved by Apple", [c({ employers: ["Silicon Valley Bank"] }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Apple"] }, "ok")]],
+    ["role 'hedge fund trader' changed to SWE", [c({ employers: ["Citadel"], role: "hedge fund trader" }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Citadel"], role: "software engineer" }, "ok")]],
+    ["role 'startup founder' changed", [c({ employers: ["Google"], role: "startup founder" }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Google"], role: "recruiter" }, "ok")]],
+    ["role 'bank teller' changed", [c({ employers: ["Chase"], role: "bank teller" }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Chase"], role: "engineer" }, "ok")]],
+    ["school changed", [c({ school: "Lakeshore", role: "trader" }, "refused", ["employers"]), c({ school: "Hillcrest", employers: ["Google"], role: "trader" }, "ok")]],
+    ["role dropped", [c({ employers: ["Jane Street"], role: "trader" }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Jane Street"] }, "ok")]],
+    ["object input content", [{ name: "x", input: { a: { firm: "Jane Street" } }, outcome: "refused", missing: ["b"] }, { name: "x", input: { a: { firm: "Google" }, b: "1" }, outcome: "ok" }]],
+    // Known and accepted (D-097): these fail safe, with a not-run line that a looser match would have left out.
+    ["known: comma string vs list", [c({ employers: "Google, Meta" }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Google", "Meta"] }, "ok")]],
+    ["known: 'Google and Meta' vs list", [c({ employers: ["Google and Meta"] }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Google", "Meta"] }, "ok")]],
+    ["known: role plural", [c({ employers: ["Jane Street"], role: "trader" }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Jane Street"], role: "traders" }, "ok")]],
+    ["known: school filled with a fuller name", [c({ school: "Lakeshore", employers: [] }, "refused", ["employers"]), c({ school: "Lakeshore University", employers: ["Google"] }, "ok")]],
+    ["retry asked", [c({ employers: ["Jane Street"] }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Jane Street"] }, "asked")]],
+  ];
+  for (const [label, log] of UNRESOLVED) { const u = unrunCalls(log); ok(u.length === 1 && !u[0].failed, `${label}: ${JSON.stringify(u)}`); }
+  const threw = unrunCalls([c({ employers: ["Jane Street"] }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Jane Street"] }, "threw")]);
+  ok(threw.length === 1 && threw[0].failed, `retry threw: ${JSON.stringify(threw)}`);
+  const RESOLVED: [string, any[]][] = [
+    ["big tech met by any firm (a category phrase)", [c({ employers: ["big tech"] }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Joe's Pizza"] }, "ok")]],
+    ["trading firms + Jane Street met by Jane Street + Google", [c({ employers: ["Jane Street", "trading firms"] }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Jane Street", "Google"] }, "ok")]],
+    ["exact retry (case, whitespace)", [c({ employers: ["Jane Street"] }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["jane  street "] }, "ok")]],
+  ];
+  for (const [label, log] of RESOLVED) eq(unrunCalls(log), [], label);
+  // A category phrase is no category for any other input: a role "banks" must hold exactly.
+  eq(unrunCalls([c({ employers: ["Google"], role: "banks" }, "refused", ["school"]), c({ school: "Lakeshore", employers: ["Google"], role: "analyst" }, "ok")]).length, 1, "role is never a category");
+  // a7_bofa_e2e.ts through the loop: the reply that says "none at Bank of America" keeps code's line.
+  const fpa: ToolSpec = { name: "find_people", effect: "read", description: "find_people",
+    input_schema: { type: "object", properties: { school: { type: "string" }, employers: { type: "array", items: { type: "string" } }, role: { type: "string" } }, required: ["school", "employers"] } as any,
+    run: async (i: any) => ({ status: "ok", leads: [{ name: "Ana Ruiz", employer: i.employers }] }) };
+  const bofa = await run([fpa], scripted([use("find_people", { employers: ["Bank of America"], role: "analyst" }, "a"), use("find_people", { school: "Lakeshore", employers: ["Google"], role: "analyst" }, "b"), text("I found 1 Lakeshore analyst at Google; none at Bank of America.")]), "lakeshore alumni at bank of america and google analysts");
+  ok(bofa.reply.startsWith("The people search for Bank of America and analyst did not run this time"), bofa.reply);
+  eq(bofa.not_run, [{ label: "people search", failed: false }]);
 });

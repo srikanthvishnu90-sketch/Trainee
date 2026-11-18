@@ -30,7 +30,7 @@
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
-const { resumeSetsOf, fillForm, heldNow, recheckFilled, driftedFills, MARK_SIGNIN, EXTRACT, answerFor, factValue, factsFrom } = require("./ats-fill.cjs");
+const { rowsOtherCountry, nationalOnly, resumeSetsOf, fillForm, heldNow, recheckFilled, driftedFills, MARK_SIGNIN, EXTRACT, answerFor, factValue, factsFrom } = require("./ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, OVERLAY_APPLY, CLOSED_MARK, CLOSED_TEXT, applyUrlFor } = require("./apply-entry.cjs");
 const { buildHandoff, PERSON_REASONS, pageDigest, unconfirmedDefaults } = require("./handoff.cjs");
 const NOT_OFFERED = new Set(["no_matching_option", "ambiguous_option"]);
@@ -745,9 +745,12 @@ function CONTROLS(arg) {
   // Round 3 of the rs-07 review (2026-11-17): both a posting-id field name (job_id, posting_id, requisition_id, jobId, Teamtailor's
   // ...[job_id]) AND a value equal to the leading digits of the job segment of this page's address (/jobs/<id>-slug), never any
   // other path segment (an office, a ZIP, a requisition path).
-  const POSTING_ID_NAME = /(?:^|[^a-z0-9])(?:job_id|posting_id|requisition_id)\]?$|(?:^|[^a-zA-Z0-9])jobId\]?$/;
+  // Round 4: the name is exactly one of these, alone, after a "." prefix, or as the trailing [...] group (Teamtailor's
+  // candidate[job_applications_attributes][0][job_id]); alternate_job_id, previous_job_id, other_posting_id and the like are not.
+  const POSTING_ID_NAMES = ["job_id", "posting_id", "requisition_id", "jobId"];
+  const postingIdName = (n) => POSTING_ID_NAMES.some((x) => n === x || n.endsWith("." + x) || n.endsWith("[" + x + "]"));
   const postingOwnId = (name, v) => {
-    if (!/^\d{5,}$/.test(v) || !POSTING_ID_NAME.test(String(name || ""))) return false;
+    if (!/^\d{5,}$/.test(v) || !postingIdName(String(name || ""))) return false;
     const m = [...location.pathname.matchAll(/\/jobs\/(\d{5,})(?=-|\/|$)/g)].pop();
     return !!m && m[1] === v;
   };
@@ -1290,6 +1293,15 @@ async function attempt(browser, p, opts, timing) {
     // Round 3: what the browser would send must be what the form's controls show: a page whose formdata handler adds or changes an
     // entry is sending something nobody sees. Refused here, before the submitting record.
     if (formSnap) { const fs = JSON.parse(formSnap), why = sentDiffers(fs.dom, fs.rows); if (why) { const e = new NeedsUser("page_changed_at_submit", why); throw e; } }
+    // Round 4 of the rs-00 review: a phone sent as its national digits alone goes only when nothing else the submit would send (these
+    // very rows, the pressed submitter included) names a country or dial code other than the approved one (ats-fill rowsOtherCountry).
+    if (sentRows) for (const f of fr.filled) {
+      const cc = /^\s*\+(\d{1,3})[\s\-.(]/.exec(String(f.value || ""));
+      if (!cc || !f.d || !f.d.name) continue;
+      const row = sentRows.find(([n]) => n === f.d.name);
+      if (!row || !nationalOnly(f.value, row[1])) continue;
+      if (rowsOtherCountry(sentRows, cc[1], factsFrom(p.facts || {}, p.answers || {}).country)) { const e = new NeedsUser("field_not_filled", f.label); e.needs = [{ label: f.label, reason: "phone_country_unconfirmed" }]; throw e; }
+    }
     // The person's own confirmed answer to a question, as ats-fill reads it (an approved answer, else a confirmed fact).
     const known = factsFrom(p.facts || {}, p.answers || {});
     const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country, resumeName: fr.filled.some((f) => f.source === "resume") ? require("node:path").basename(p.resume.path) : undefined, resumeEvidence: { sets: resumeSetsOf(page), uploads: resumeUploads } });

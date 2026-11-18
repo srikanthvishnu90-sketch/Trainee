@@ -959,7 +959,7 @@ const CareerJobs = (() => {
     const needsSponsorship = c.needs_sponsorship === true || /sponsor/i.test(s(c.work_authorization));
     const citizenOnly = /\b(u\.?s\.? citizens? only|must be a u\.?s\.? citizen|requires? u\.?s\.? citizenship|us citizenship required)\b/.test(jd);
     const noSponsor = /\b(no sponsorship|will not sponsor|cannot sponsor|unable to sponsor|without sponsorship|does not offer sponsorship)\b/.test(jd);
-    if (citizenOnly && !/citizen/i.test(s(c.work_authorization))) fails.push(`work authorization: posting requires US citizenship; your profile says ${s(c.work_authorization) || "not a US citizen"}`);
+    if (citizenOnly && !/citizen/i.test(s(c.work_authorization))) fails.push(s(c.work_authorization) ? `work authorization: posting requires US citizenship; your profile says ${s(c.work_authorization)}` : "work authorization: the posting requires US citizenship; your work authorization isn't on file");
     else if (needsSponsorship && noSponsor) fails.push(`work authorization: posting offers no sponsorship; you said you need sponsorship`);
     else if (needsSponsorship && citizenOnly) fails.push(`work authorization: posting requires US citizenship; you said you need sponsorship`);
     const needsClearance = /\b(ts\/sci|top secret|security clearance|secret clearance)\b/.test(jd);

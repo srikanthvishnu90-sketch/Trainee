@@ -19,6 +19,7 @@ import { careerAskCanon } from "./career_ask_canon.ts";
 import { applyText, linkAsk, type LinkAsk, linksAsk, possessiveAsk, postingForLink, postingsForRole } from "./career_apply_link.ts";
 import { sameCompany, type TrackedApp } from "./career_mail.ts";
 import { fitOf, scoringProfileFor } from "./career_search.ts";
+import { quarantinedFact } from "./fact_quarantine.ts";
 // FEATURE 1 (2026-10-25): positions in the list, the listed postings checked on file, no resume on file, the server
 // prepare asked for the rows queued, and the coverage line (career_apply_from_chat.ts).
 import { contentOf, type GateResult, gateSummary } from "./career_apply_gate.ts";
@@ -208,41 +209,74 @@ export function manyWhatOf(rest: string): ManyWhat | null {
 // them") or point at a list ("you found", "on that list").
 const ALL_HEAD = /^(?:all(?:\s+of)?(?:\s+the)?|every(?:\s+single)?(?:\s+one\s+of\s+the)?|each(?:\s+of\s+the)?)\s+(.+)$/i;
 const ALL_REFERENT = /\b(?:you(?:'ve| have)?\s+(?:just\s+)?(?:found|listed|showed|shown|sent|gave)|(?:on|from|in)\s+(?:the|that|this|your|my)\s+(?:short\s*)?list)\b/i;
-const ALL_QUALIFY = /\s+(?:that\s+|which\s+)?(?:i(?:'m|\s+am)?\s+(?:qualify|qualified|eligible)(?:\s+for)?|i\s+(?:fit|match)|(?:fit|fits|match|matches|suit|suits)\s+me|i'?d\s+be\s+a\s+(?:good\s+)?fit\s+for)\b.*$/i;
-const ALL_EXCLUDE = /\s*,?\s*(?:(?:and|but)\s+)?(?:skip(?:ping)?|except(?:\s+for)?|excluding|exclude|not(?:\s+at)?|other\s+than|leave\s+out|without)\s+(?:the\s+ones?\s+at\s+|anything\s+at\s+|at\s+)?((?:[A-Z][\w&.'’-]*)(?:\s+[A-Z][\w&.'’-]*)*(?:\s*(?:,|\band\b|\bor\b)\s*(?:[A-Z][\w&.'’-]*)(?:\s+[A-Z][\w&.'’-]*)*)*)\s*(?:ones?|roles?|jobs?)?\s*[.!]?\s*$/;
-// A place ruled out: "not remote", "but not Remote", "except the ones in Ohio", "excluding anything in Texas or Ohio". Read
-// before the employers to skip, so "not Remote" is never an employer called Remote, and cut from the role words.
-// Each place is whole words, none of them a clause word, so the list stops where the next clause starts ("except the ones in
-// Ohio and skip Stripe": the place is Ohio, and "skip Stripe" is read as an employer to skip, never as a place).
-const CLAUSE = String.raw`(?:but|skip(?:ping)?|except|excluding|exclude|not|no|other|leave|without|outside|besides|that|which|and|or)\b`;
-const PLACE_ITEM = String.raw`(?!${CLAUSE})[a-z][a-z.'-]*(?:\s+(?!${CLAUSE})[a-z][a-z.'-]*)*`;
-const ALL_NOT_PLACE = new RegExp(String.raw`\s*,?\s*(?:(?:and|but)\s+)?(?:but\s+)?(?:not|except(?:\s+for)?|excluding|exclude|other\s+than|outside(?:\s+of)?|skip(?:ping)?|leave\s+out|without)\s+(?:(?:the\s+ones?|anything|any|those|ones?|roles?|jobs?|postings?)\s+)?(?:(?:that(?:'s|\s+are|\s+is)|which\s+are)\s+)?(?:(?:in|from|(?:based|located)\s+in)\s+(?:the\s+)?(${PLACE_ITEM}(?:\s*(?:,|\bor\b|\band\b)\s*${PLACE_ITEM})*)|((?:fully\s+)?remote))(?=\s*(?:,|[.!]|$|(?:(?:and|or)\s+)?${CLAUSE}))`, "i");
+// "that I qualify for" (and its other wordings), wherever it sits in the ask.
+const QUALIFY_PHRASE = /\s*,?\s*\b(?:(?:that|which)\s+)?(?:i(?:'m|\s+am)?\s+(?:qualify|qualified|eligible)(?:\s+for)?|i\s+(?:fit|match)|(?:fit|fits|match|matches|suit|suits)\s+me|i'?d\s+be\s+a\s+(?:good\s+)?fit\s+for)\b/i;
 const ALL_REMOTE = /\s+(?:that|which)(?:'s|\s+is|\s+are|'re)\s+(?:fully\s+)?remote\b/i;
+// MASS APPLY CONVERSATIONS (architect ruling on review rv-ma5, B1): an exclusion clause is read whole or not at all. Everything
+// from the first exclusion word ("except", "not", "skip", "don't apply to", "avoid", "ignore", "never", "nothing at", "no",
+// "without", "besides", "outside", "other than", "anywhere but", "but") is the clause; it is cut into its parts at every
+// separator and exclusion word, and each part is a place ("in Ohio", "remote") or a name to leave out. Whether a name is an
+// employer or a place is decided against the postings found (resolveExclusions); a part that is neither queues nothing and
+// is asked about, never dropped and never read as a search word.
+const EXCL_KW = String.raw`(?:but\s+not|but\s+skip(?:ping)?|except(?:\s+for)?|excluding|exclude|not|skip(?:ping)?|(?:don['’]?t|do\s+not)(?:\s+apply)?(?:\s+(?:to|at|for))?|avoid|ignore|never|nothing|no|without|besides|other\s+than|outside(?:\s+of)?|leave\s+out|anywhere\s+but|but)`;
+const EXCL_START = new RegExp(String.raw`(?:^|[\s,;.&]+)\b${EXCL_KW}\b`, "i");
+const EXCL_SPLIT = new RegExp(String.raw`[,;.&]|\band\b|\bor\b|\balso\b|\bplease\b|\b${EXCL_KW}\b`, "gi");
+// The ask without its exclusion clause and its "that I qualify for": what is searched for (or the list filter).
+export function withoutExclusions(text: string): string {
+  const t = String(text ?? "").replace(QUALIFY_PHRASE, " ");
+  const at = EXCL_START.exec(t);
+  return (at ? t.slice(0, at.index) : t).replace(/\s+/g, " ").trim();
+}
+// The parts of an exclusion clause: places they ruled out (lower case, "remote" included) and names to leave out (as typed).
+export function exclusionParts(clause: string): { notPlaces: string[]; exclude: string[] } {
+  const notPlaces: string[] = [], exclude: string[] = [];
+  // Each part with the word before it: a part after a bare "or"/"and"/"," keeps the kind of the part before it ("in Ohio or
+  // Texas": both places); an exclusion word starts afresh. The kind is a reading only: resolveExclusions decides on the postings.
+  const text = String(clause ?? ""), parts: { raw: string; joined: boolean }[] = [];
+  let from = 0, joined = false;
+  for (const m of text.matchAll(EXCL_SPLIT)) {
+    parts.push({ raw: text.slice(from, m.index), joined });
+    joined = /^(?:,|and|or|&)$/i.test(m[0].trim());
+    from = (m.index ?? 0) + m[0].length;
+  }
+  parts.push({ raw: text.slice(from), joined });
+  let lastPlace = false;
+  for (const { raw, joined: inherit } of parts) {
+    let x = String(raw ?? "").trim().replace(/[.!?]+$/, "");
+    x = x.replace(/^(?:(?:the|those|these|any|anything|everything|all|ones?|roles?|jobs?|postings?|positions?|openings?|internships?|apply(?:ing)?|to|for)\s+)+/i, "");
+    x = x.replace(/^(?:that(?:'s|\s+are|\s+is)|which\s+are)\s+/i, "");
+    const m = /^(?:(in|from|based\s+in|located\s+in)|(at|with))\s+(?:the\s+)?(.*)$/i.exec(x);
+    const place = m ? !!m[1] : inherit && lastPlace;
+    if (m) x = m[3];
+    x = x.replace(/\s+(?:ones?|roles?|jobs?|postings?|positions?|openings?|internships?)$/i, "").replace(/^the\s+/i, "").trim();
+    if (!x) continue;
+    lastPlace = place;
+    if (/^(?:fully\s+)?remote$/i.test(x)) notPlaces.push("remote");
+    else if (place) notPlaces.push(x.toLowerCase());
+    else exclude.push(x);
+  }
+  return { notPlaces: [...new Set(notPlaces)], exclude: [...new Set(exclude)] };
+}
 export function allSearchOf(raw: string): { search: ManyWhat; qualify?: true; exclude?: string[]; notPlaces?: string[] } | null {
   const after = /\bapply\b(?:\s+me)?(?:\s+(?:to|for))?\s+(.*)$/i.exec(String(raw ?? "").replace(/[.!]+\s*$/, "").trim())?.[1];
   if (!after || ALL_REFERENT.test(after)) return null;
   const head = ALL_HEAD.exec(after);
   if (!head) return null;
   let rest = head[1];
-  let exclude: string[] | undefined;
-  const notPlaces: string[] = [];
-  for (let np = ALL_NOT_PLACE.exec(rest); np; np = ALL_NOT_PLACE.exec(rest)) {
-    if (np[2]) notPlaces.push("remote");
-    else notPlaces.push(...np[1].split(/\s*(?:,|\bor\b|\band\b)\s*/).map((x) => x.trim().toLowerCase()).filter(Boolean));
-    rest = `${rest.slice(0, np.index)}${rest.slice(np.index + np[0].length)}`;
-  }
-  const ex = ALL_EXCLUDE.exec(rest);
-  if (ex) { exclude = ex[1].split(/\s*(?:,|\band\b|\bor\b)\s*/).map((c) => c.trim()).filter(Boolean); rest = rest.slice(0, ex.index); }
-  const qualify = ALL_QUALIFY.test(rest);
-  if (qualify) rest = rest.replace(ALL_QUALIFY, "");
+  const qualify = QUALIFY_PHRASE.test(rest);
+  if (qualify) rest = rest.replace(QUALIFY_PHRASE, " ");
   const remote = ALL_REMOTE.test(rest);
-  if (remote) rest = rest.replace(ALL_REMOTE, "");
+  if (remote) rest = rest.replace(ALL_REMOTE, " ");
+  const at = EXCL_START.exec(rest);
+  const { notPlaces, exclude } = at ? exclusionParts(rest.slice(at.index)) : { notPlaces: [], exclude: [] };
+  if (at) rest = rest.slice(0, at.index);
+  rest = rest.replace(/[\s,;.&]+$/, "").replace(/\s+(?:please|thanks?)$/i, "");
   const what = manyWhatOf(rest.trim());
   if (!what || !what.words.length || what.company) return null;
   // "in Chicago or remote", "in NYC, Boston and SF": each place on its own.
   const places = [...new Set([...(what.place ? what.place.split(/\s*,\s*(?:or\s+|and\s+)?|\s+or\s+|\s+and\s+/).map((x) => x.trim()).filter(Boolean) : []), ...(remote ? ["remote"] : [])])];
   const search: ManyWhat = { ...what, role: what.role.replace(/\s+(?:roles?|jobs?|positions?|postings?|openings?)$/i, ""), place: places[0] ?? null, ...(places.length > 1 ? { places } : {}) };
-  return { search, ...(qualify ? { qualify: true as const } : {}), ...(exclude?.length ? { exclude } : {}), ...(notPlaces.length ? { notPlaces: [...new Set(notPlaces)] } : {}) };
+  return { search, ...(qualify ? { qualify: true as const } : {}), ...(exclude.length ? { exclude } : {}), ...(notPlaces.length ? { notPlaces } : {}) };
 }
 // One message queues at most this many (owner review of #366): a bigger ask is told plainly how many went and why.
 export const MANY_MAX = 50;
@@ -252,7 +286,7 @@ const NOT_A_COMMAND = /\b(?:i|we)\s+(?:wouldn'?t|would\s+not|won'?t|will\s+not|s
 // The postings on file that are what the person named: every role word in the title, the place in the location (or
 // remote), passed to the search itself so a place is never cut by a nationwide newest-first limit. Ranked by fit from
 // their confirmed facts when it can be computed (career_search.ts fitOf), else newest first, and the reply says which.
-async function postingsFor(o: ApplyChatDeps, what: ManyWhat): Promise<{ list: ShortlistEntry[]; rankedBy: "fit" | "newest"; ruledOut: Map<string, string>; checked: boolean }> {
+async function postingsFor(o: ApplyChatDeps, what: ManyWhat): Promise<{ list: ShortlistEntry[]; rankedBy: "fit" | "newest"; ruledOut: Map<string, string>; checked: boolean; unchecked: Map<string, string> }> {
   // MASS APPLY CONVERSATIONS: several places ("in Chicago or remote") are each searched as one place is, then merged.
   const places = what.places?.length ? what.places : [what.place];
   const seen = new Set<string>(), matched: any[] = [];
@@ -268,22 +302,30 @@ async function postingsFor(o: ApplyChatDeps, what: ManyWhat): Promise<{ list: Sh
   const ruledOut = new Map<string, string>();
   // Review rv-ma3: only CONFIRMED facts rank and rule out (confirmedOf): a fact stated in chat or a draft is never called confirmed.
   const trusted = confirmedOf(o.facts);
-  let checked = DEGREE_LEVEL.some(([re]) => re.test(trusted.map((f) => String(f?.text ?? f?.value ?? "")).join(" \n ")));
+  // Something confirmed to check against at all; with nothing, "that I qualify for" is not checked (qualifyUnchecked).
+  const checked = trusted.length > 0;
+  // Per posting (rv-ma5 B3): a requirement it states that no confirmed fact can check: not checked, with what is missing.
+  const unchecked = new Map<string, string>();
+  for (const p of matched) { const why = uncheckedRequirement(p?.description, trusted); if (why && p?.job_id) unchecked.set(String(p.job_id), why); }
+  // The fit ranks only when facts about the work itself are confirmed (a skill, an experience, a project): "best fit for your
+  // confirmed facts" is never said from an interest or a school alone (rv-ma5 B3).
+  const relevant = trusted.some((f) => ["skill", "experience", "project", "projects"].includes(String(f?.kind ?? "")));
   try {
-    const sp = scoringProfileFor({ facts: trusted });
+    const sp = checked ? scoringProfileFor({ facts: trusted }) : null;
     if (sp) {
-      checked = true;
       const scored = matched.map((p, i) => ({ p, i, f: fitOf(p, sp) }));
-      for (const x of scored) if (x.f.excluded && x.p?.job_id) ruledOut.set(String(x.p.job_id), String(x.f.gaps?.[0] ?? ""));
-      // A posting the fit excludes (a knockout) ranks after every other, whatever its score; then by score; then newest.
-      const rank = (x: { f: { excluded: boolean; score: number | null } }) => x.f.excluded ? -Infinity : (x.f.score ?? -1);
-      scored.sort((a, b) => (rank(b) - rank(a)) || a.i - b.i);
-      ordered = scored.map((x) => x.p);
-      rankedBy = "fit";
+      for (const x of scored) if (x.f.excluded && x.p?.job_id && !unchecked.has(String(x.p.job_id))) ruledOut.set(String(x.p.job_id), String(x.f.gaps?.[0] ?? ""));
+      if (relevant) {
+        // A posting the fit excludes (a knockout) ranks after every other, whatever its score; then by score; then newest.
+        const rank = (x: { f: { excluded: boolean; score: number | null } }) => x.f.excluded ? -Infinity : (x.f.score ?? -1);
+        scored.sort((a, b) => (rank(b) - rank(a)) || a.i - b.i);
+        ordered = scored.map((x) => x.p);
+        rankedBy = "fit";
+      }
     }
   } catch { /* fit unknown: newest first, and said so */ }
-  for (const p of matched) { const why = degreeShort(p?.description, trusted); if (why && p?.job_id && !ruledOut.has(String(p.job_id))) ruledOut.set(String(p.job_id), why); }
-  return { rankedBy, ruledOut, checked, list: ordered.map((p) => ({ id: p.job_id ?? null, title: p.title ?? null, company: p.company ?? null, location: p.location ?? null, url: p.url ?? null })) };
+  for (const p of matched) { const why = degreeShort(p?.description, trusted); if (why && p?.job_id && !ruledOut.has(String(p.job_id)) && !unchecked.has(String(p.job_id))) ruledOut.set(String(p.job_id), why); }
+  return { rankedBy, ruledOut, checked, unchecked, list: ordered.map((p) => ({ id: p.job_id ?? null, title: p.title ?? null, company: p.company ?? null, location: p.location ?? null, url: p.url ?? null })) };
 }
 // A degree the posting requires that the person's confirmed facts show they do not hold ("must be enrolled in a PhD program"
 // against a confirmed B.S.): the reason, or null. Only a requirement the posting states with "must", "required" or
@@ -291,7 +333,33 @@ async function postingsFor(o: ApplyChatDeps, what: ManyWhat): Promise<{ list: Sh
 // The person's confirmed facts only: never a fact they stated in chat this turn (chatScreenFacts marks it stated), a draft, one
 // that still needs their yes, or a quarantined one.
 // deno-lint-ignore no-explicit-any
-export const confirmedOf = (facts: any[] | null | undefined): any[] => (facts ?? []).filter((f) => f && typeof f === "object" && !f.stated && !f.needs_confirmation && f.status !== "draft" && !f.quarantine && !f.quarantined);
+// Architect ruling (rv-ma5 B3): trunk's usableFact (122-career-profile.js): status confirmed (or none recorded) only, so a pending,
+// rejected or draft fact, one that still needs their yes, a quarantined one and one only stated in chat are never used.
+export const confirmedOf = (facts: any[] | null | undefined): any[] => (facts ?? []).filter((f) => f && typeof f === "object" && !Array.isArray(f) && !f.stated && !f.needs_confirmation &&
+  f.status !== "draft" && (f.status === undefined || f.status === null || f.status === "confirmed") && !quarantinedFact(f) && !f.quarantine);
+// Architect ruling (rv-ma5 B3): "that I qualify for" queues a posting only when EVERY requirement it states was checked against a
+// confirmed fact. Each requirement this reads, with the confirmed fact that can check it; a requirement with no such fact makes
+// the posting NOT CHECKED (named, not queued), never ineligible and never qualified.
+const factText = (f: any) => String([f?.kind, f?.name, f?.title, f?.text, f?.value].filter((x) => typeof x === "string").join(" "));
+const REQUIREMENTS: { need: RegExp; has: (facts: any[]) => boolean; missing: string }[] = [
+  { need: /\b(?:u\.?s\.? citizens? only|must be an? u\.?s\.? citizen|requires? u\.?s\.? citizenship|u\.?s\.? citizenship (?:is )?required)\b/i,
+    has: (fs) => fs.some((f) => /\b(?:citizen|citizenship|work authori[sz]ation|authori[sz]ed to work|green card|permanent resident|visa|sponsor)/i.test(factText(f))), missing: "the posting requires US citizenship; your work authorization isn't on file" },
+  { need: /\b(?:no (?:visa )?sponsorship|will not sponsor|cannot sponsor|unable to sponsor|without sponsorship|does not offer sponsorship)\b/i,
+    has: (fs) => fs.some((f) => /\b(?:citizen|work authori[sz]ation|authori[sz]ed to work|green card|permanent resident|visa|sponsor)/i.test(factText(f))), missing: "the posting offers no sponsorship; your work authorization isn't on file" },
+  { need: /\b(?:ts\/sci|top secret|security clearance|secret clearance)\b/i, has: (fs) => fs.some((f) => /\bclearance\b/i.test(factText(f))), missing: "the posting requires a security clearance; no clearance is on file" },
+  { need: /\b(?:must\s+be\s+(?:enrolled|pursuing|a\s+current)|required|requires|must\s+have|enrolled\s+in)\b[^.]{0,80}\b(?:ph\.?\s?d|doctor(?:al|ate)|master'?s|m\.s\.|bachelor'?s?|b\.s\.|b\.a\.|degree)/i,
+    has: (fs) => fs.some((f) => DEGREE_LEVEL.some(([re]) => re.test(factText(f)))), missing: "the posting requires a degree; your degree isn't on file" },
+  { need: /\b\d+\+?\s*(?:years?|yrs)(?:\s+of)?(?:\s+(?:professional|relevant|work|industry|full[- ]time))?\s+(?:experience|exp)\b/i,
+    has: (fs) => fs.some((f) => f?.kind === "experience" && /\d{4}-\d{2}/.test(String(f?.start ?? ""))), missing: "the posting asks for years of experience; no dated experience is on file" },
+  { need: /\b(?:graduat\w*|class of)\D{0,12}20\d\d\b/i, has: (fs) => fs.some((f) => f?.kind === "education" && /\b20\d\d\b/.test(factText(f))), missing: "the posting targets a graduation year; yours isn't on file" },
+  { need: /\b(?:must (?:reside|live) in|residents? of|within \d+ miles)\b/i, has: (fs) => fs.some((f) => f?.kind === "location"), missing: "the posting limits where you live; where you live isn't on file" },
+  { need: /\b(?:must (?:hold|have|possess)|requires?)\b[^.]{0,40}\b(?:license|licence|certification|certificate)\b/i, has: (fs) => fs.some((f) => /\b(?:license|licence|certif)/i.test(factText(f))), missing: "the posting requires a license or certification; none is on file" },
+];
+export function uncheckedRequirement(description: unknown, facts: any[]): string | null {
+  const d = String(description ?? "");
+  for (const r of REQUIREMENTS) if (r.need.test(d) && !r.has(facts)) return r.missing;
+  return null;
+}
 const DEGREE_LEVEL: [RegExp, number, string][] = [[/\b(?:ph\.?\s?d|doctor(?:al|ate))(?![a-z])/i, 3, "a PhD"], [/\b(?:master'?s|m\.s\.|m\.?eng|mba)(?![a-z])/i, 2, "a master's"], [/\b(?:bachelor'?s?|b\.s\.|b\.a\.|b\.sc|undergraduate)(?![a-z])/i, 1, "a bachelor's"]];
 export function degreeShort(description: unknown, facts: any[]): string | null {
   const d = String(description ?? "");
@@ -351,7 +419,7 @@ export function applyManyAsk(message: string): ManyAsk | null {
   // MASS APPLY CONVERSATIONS: "every <role> in <place>", with the employers to skip and "that I qualify for", is a search.
   const searched = raw === null || QUESTION.test(raw) || /\bapplied\b/i.test(raw) ? null : allSearchOf(raw);
   if (searched) {
-    const after = raw!.replace(new RegExp(ALL_NOT_PLACE.source, "gi"), "").replace(ALL_EXCLUDE, "").toLowerCase().replace(/[.!]+$/, "").replace(/\s+/g, " ").match(/\bapply\b(?:\s+me)?(?:\s+(?:to|for))?\s+(.*)$/)?.[1] ?? "";
+    const after = withoutExclusions(raw!).toLowerCase().replace(/[.!]+$/, "").replace(/\s+/g, " ").match(/\bapply\b(?:\s+me)?(?:\s+(?:to|for))?\s+(.*)$/)?.[1] ?? "";
     const filter = listFilterOf(after);
     return { kind: "all", ...(filter ? { filter } : {}), ...searched };
   }
@@ -676,14 +744,44 @@ type Missing = { job_id: string | null; company: string; title: string; reason: 
 const qualifyUnchecked = (n: number) => `I couldn't check "that I qualify for": I have no confirmed facts about you to check ${n === 1 ? "this posting" : `these ${n} postings`} against, so I won't guess and nothing was queued. Send your resume and confirm what I read, or ask again without "that I qualify for" to apply to ${n === 1 ? "it" : `all ${n}`}.`;
 // What an "all" ask ruled out, left out by name with why: a place ("you said not Ohio"), an employer ("you said skip Stripe"),
 // and for "that I qualify for" what their confirmed facts rule out.
-function leaveOut(list: ShortlistEntry[], ask: Extract<ManyAsk, { kind: "all" }>, ruledOut: Map<string, string>, skipped: string[]): ShortlistEntry[] {
+// The place of theirs a posting is in, of the places they ruled out ("remote" also read on the title), or null.
+function placeRuledOut(e: ShortlistEntry, notPlaces: string[] | undefined): string | null {
+  for (const p of notPlaces ?? []) {
+    const re = p === "remote" ? /\bremote\b/i : placePattern(p);
+    if (re ? re.test(p === "remote" ? `${e.location ?? ""} ${e.title ?? ""}` : String(e.location ?? "")) : lower(e.location).includes(p)) return p;
+  }
+  return null;
+}
+// Architect ruling (rv-ma5 B1): each part of an exclusion clause is resolved against the postings found: a place one of them is
+// in ("remote" always reads), or an employer one of them is at (any case). A part that is neither, or both, is returned as
+// unclear: nothing is queued and the person is asked, never a guess and never dropped.
+function resolveExclusions(list: ShortlistEntry[], exclude: string[], notPlaces: string[]): { exclude: string[]; notPlaces: string[]; unclear?: string } {
+  const places: string[] = [], employers: string[] = [];
+  const isPlace = (p: string) => p === "remote" || list.some((e) => placeRuledOut(e, [p]) !== null);
+  const employerOf = (c: string) => list.find((e) => employerKey(e.company) && employerKey(e.company) === employerKey(c))?.company ?? null;
+  for (const p of notPlaces) {
+    if (isPlace(p)) places.push(p);
+    else if (employerOf(p)) employers.push(String(employerOf(p)));
+    else return { exclude, notPlaces, unclear: p };
+  }
+  for (const c of exclude) {
+    const emp = employerOf(c), place = /^(?:fully\s+)?remote$/i.test(c) ? "remote" : isPlace(lower(c)) ? lower(c) : null;
+    if (emp && !place) employers.push(c);
+    else if (place && !emp) places.push(place);
+    else return { exclude, notPlaces, unclear: c };
+  }
+  return { exclude: [...new Set(employers)], notPlaces: [...new Set(places)] };
+}
+const unclearExclusion = (part: string, n: number) => `I couldn't tell what "${part.slice(0, 80)}" leaves out: it isn't an employer or a place in the ${n} posting${n === 1 ? "" : "s"} I found. Is it an employer or a place? Nothing was queued.`;
+function leaveOut(list: ShortlistEntry[], ask: Extract<ManyAsk, { kind: "all" }>, ruledOut: Map<string, string>, skipped: string[], unchecked: Map<string, string> = new Map(), notChecked: string[] = []): ShortlistEntry[] {
   if (!ask.exclude?.length && !ask.qualify && !ask.notPlaces?.length) return list;
   const skip = (ask.exclude ?? []).map(employerKey);
-  const notIn = (ask.notPlaces ?? []).map((p) => ({ p, re: p === "remote" ? /\bremote\b/i : placePattern(p) }));
   return list.filter((e) => {
-    const out = notIn.find(({ p, re }) => re ? re.test(p === "remote" ? `${e.location ?? ""} ${e.title ?? ""}` : String(e.location ?? "")) : lower(e.location).includes(p));
-    if (out) { skipped.push(`${nameOf(e)} (you said not ${out.p.replace(/\b\w/g, (c) => c.toUpperCase())})`); return false; }
+    const out = placeRuledOut(e, ask.notPlaces);
+    if (out) { skipped.push(`${nameOf(e)} (you said not ${out.replace(/\b\w/g, (c) => c.toUpperCase())})`); return false; }
     if (skip.includes(employerKey(e.company))) { skipped.push(`${nameOf(e)} (you said skip ${e.company})`); return false; }
+    const nc = ask.qualify && e.id ? unchecked.get(String(e.id)) : undefined;
+    if (nc !== undefined) { notChecked.push(`${nameOf(e)} (${nc})`); return false; }
     const why = ask.qualify && e.id ? ruledOut.get(String(e.id)) : undefined;
     if (why !== undefined) { skipped.push(`${nameOf(e)} (${why || "your confirmed facts rule it out"})`); return false; }
     return true;
@@ -697,20 +795,34 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   // place other than remote (the thread's list is not where they asked for); otherwise it is the list's filter, as before.
   const hasList = (o.shortlist ?? []).some((e) => e && (e.url || e.id));
   let skipped: string[] = [];
+  const notChecked: string[] = [];
   if (ask.kind === "all" && ask.search && !ask.what && (!hasList || ask.notPlaces?.length || (ask.search.places ?? [ask.search.place]).some((p) => p && p !== "remote"))) {
     ask = { kind: "all", what: ask.search, ...(ask.qualify ? { qualify: true as const } : {}), ...(ask.exclude ? { exclude: ask.exclude } : {}), ...(ask.notPlaces ? { notPlaces: ask.notPlaces } : {}) };
   }
   // MASS APPLY: "the top N <role> in <place>" is searched for here, not read from the thread's last list.
   const what = ask.kind === "first" || ask.kind === "all" ? ask.what : undefined;
   let list: ShortlistEntry[], rankedBy: "fit" | "newest" = "newest";
+  // rv-ma5 B1: an exclusion word left in what is searched for ("the top 2 SWE internships except Stripe") is a clause this could
+  // not read: nothing is searched or queued, and the part is asked about.
+  const leftover = what ? EXCL_START.exec(` ${what.role}`) : null;
+  if (what && leftover) return { reply: `I couldn't tell what "${` ${what.role}`.slice(leftover.index).trim().slice(0, 80)}" leaves out, so nothing was queued. Is it an employer or a place? Say it as "apply to every <role> except <Employer> and the ones in <place>".`, status: "none", intent, queued: [], refused: [] };
   if (what) {
-    let ruledOut = new Map<string, string>(), checked = false;
-    try { ({ list, rankedBy, ruledOut, checked } = await postingsFor(o, what)); }
+    let ruledOut = new Map<string, string>(), checked = false, unchecked = new Map<string, string>();
+    try { ({ list, rankedBy, ruledOut, checked, unchecked } = await postingsFor(o, what)); }
     catch { return { reply: `I couldn't search the postings just now, so nothing was queued. Ask again in a minute.`, status: "unreadable", intent, queued: [], refused: [] }; }
+    // rv-ma5 B1: every part of the exclusion clause resolves against what was found, or nothing is queued and it is asked about.
+    if (ask.kind === "all" && list.length && (ask.exclude?.length || ask.notPlaces?.length)) {
+      const r = resolveExclusions(list, ask.exclude ?? [], ask.notPlaces ?? []);
+      if (r.unclear !== undefined) return { reply: unclearExclusion(r.unclear, list.length), status: "none", intent, queued: [], refused: [] };
+      ask = { ...ask, exclude: r.exclude, notPlaces: r.notPlaces };
+    }
     // "that I qualify for" with no confirmed fact to check the postings against: never every posting, silently (review rv-ma3).
     if (ask.kind === "all" && ask.qualify && !checked && list.length) return { reply: qualifyUnchecked(list.length), status: "none", intent, queued: [], refused: [] };
-    // The employers they said to skip, and (for "that I qualify for") what their confirmed facts rule out: left out by name, with why.
-    if (ask.kind === "all") list = leaveOut(list, ask, ruledOut, skipped);
+    // The employers they said to skip, and (for "that I qualify for") what their confirmed facts rule out or could not check:
+    // left out by name, with why.
+    const found = list.length;
+    if (ask.kind === "all") list = leaveOut(list, ask, ruledOut, skipped, unchecked, notChecked);
+    if (!list.length && found) return { reply: `None of the ${found} open ${what.role || "matching"} posting${found === 1 ? "" : "s"} I found can be queued, so nothing was queued.${skipped.length ? ` Left out: ${listed(skipped, 8)}.` : ""}${notChecked.length ? ` Not checked, so not queued: ${listed(notChecked, 8)}.` : ""}`, status: "none", intent, queued: [], refused: [] };
     if (!list.length) return { reply: `I have no open ${what.role || "matching"} postings${what.company ? ` at ${what.company.replace(/\b\w/g, (c) => c.toUpperCase())}` : ""}${what.place ? ` in ${what.place.replace(/\b\w/g, (c) => c.toUpperCase())}` : ""} on file, so nothing was queued. Say "find <role> jobs in <place>" to look wider.`, status: "none", intent, queued: [], refused: [] };
   } else {
     list = given ? given.list : (o.shortlist ?? []).filter((e) => e && (e.url || e.id));
@@ -719,7 +831,9 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
     if (!given && ask.kind === "all" && list.length && (ask.qualify || ask.exclude?.length || ask.notPlaces?.length)) {
       if (ask.qualify) return { reply: `I can't check "that I qualify for" against the ${list.length} I listed, so I won't guess and nothing was queued. Say "apply to every <role> in <place> that I qualify for" and I'll search and check each posting against your confirmed facts, or "apply to all of them".`, status: "none", intent, queued: [], refused: [] };
       const all = list.length;
-      list = leaveOut(list, ask, new Map(), skipped);
+      const r = resolveExclusions(list, ask.exclude ?? [], ask.notPlaces ?? []);
+      if (r.unclear !== undefined) return { reply: unclearExclusion(r.unclear, all).replace("I found", "I listed"), status: "none", intent, queued: [], refused: [] };
+      list = leaveOut(list, { ...ask, exclude: r.exclude, notPlaces: r.notPlaces }, new Map(), skipped);
       if (!list.length) return { reply: `Every one of the ${all} I listed is one you said to leave out (${listed(skipped, 8)}), so nothing was queued.`, status: "none", intent, queued: [], refused: [] };
     }
   }
@@ -788,7 +902,7 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
     slice = list.slice(0, MANY_MAX);
     const order = rankedBy === "fit" ? "best fit for your confirmed facts first" : "newest first (I couldn't rank them by fit)";
     const where = (what.places?.length ? what.places : what.place ? [what.place] : []).map((p) => p.replace(/\b\w/g, (c) => c.toUpperCase()));
-    note = `I found ${list.length} open ${what.role || "matching"} posting${list.length === 1 ? "" : "s"}${where.length ? ` in ${where.join(" or ")}` : ""} on file${list.length > MANY_MAX ? `; one message queues at most ${MANY_MAX}, so I took the first ${MANY_MAX}` : ""}. Ranked ${order}. ${skipped.length ? `Left out: ${listed(skipped, 8)}. ` : ""}`;
+    note = `I found ${list.length} open ${what.role || "matching"} posting${list.length === 1 ? "" : "s"}${where.length ? ` in ${where.join(" or ")}` : ""} on file${list.length > MANY_MAX ? `; one message queues at most ${MANY_MAX}, so I took the first ${MANY_MAX}` : ""}. Ranked ${order}. ${skipped.length ? `Left out: ${listed(skipped, 8)}. ` : ""}${notChecked.length ? `Not checked, so not queued: ${listed(notChecked, 8)}. ` : ""}`;
   } else slice = list.slice();
   // The thread's list with employers left out: said by name (a searched ask says it in its own note above).
   if (!what && skipped.length) note = `Left out: ${listed(skipped, 8)}. ${note}`;

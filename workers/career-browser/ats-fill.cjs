@@ -479,27 +479,71 @@ async function noCountryNotion(page, d) {
     return true;
   }, [d.q]).catch(() => false);
 }
-// The country codes that dial a given code (a small table; a code not in it allows only the code itself).
-const DIAL_ISO = { 1: ["us", "usa", "ca", "can"], 44: ["gb", "uk", "gbr"], 31: ["nl", "nld"], 49: ["de", "deu"], 33: ["fr", "fra"], 46: ["se", "swe"], 47: ["no", "nor"], 45: ["dk", "dnk"], 34: ["es", "esp"], 39: ["it", "ita"], 61: ["au", "aus"], 91: ["in", "ind"], 353: ["ie", "irl"] };
-async function postsOtherCountry(page, d, dial) {
-  return page.evaluate(([q, dial, isos]) => {
+// Round 4 of the rs-00 review (2026-11-17), architect ruling: the country check is structural, not a list of field names. Every
+// row the submit would send (the form's FormData, form-associated elements included, plus the pressed submitter; parallel-apply
+// checks its own sentRows the same way) is read. A row names a country when a token of its NAME (split on non-alphanumerics,
+// camelCase and digits) is one of COUNTRY_TOKENS, or its VALUE is a dial code ("+NN", "00NN", or bare NN-NNN in a row so named),
+// a number starting with one, an ISO 3166 alpha-2 / alpha-3 code or a country's name (countries.json, every assigned country), or
+// JSON with such a key. National-only digits refuse when any row names a country or code other than the approved one: the approved
+// dial code, or the person's own confirmed country; with no such fact, the countries of DIAL_ISO that dial the approved code.
+const COUNTRIES = require("./countries.json").countries;
+const COUNTRY_TOKENS = new Set(["cc", "iso", "iso2", "iso3", "country", "countrycode", "nation", "nationality", "region", "dial", "dialcode", "code", "prefix", "locale", "calling"]);
+const DIAL_ISO = { 1: ["US", "CA"], 44: ["GB"], 31: ["NL"], 49: ["DE"], 33: ["FR"], 46: ["SE"], 47: ["NO"], 45: ["DK"], 34: ["ES"], 39: ["IT"], 61: ["AU"], 91: ["IN"], 353: ["IE"] };
+const cnorm = (x) => String(x || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+const BY_CODE = new Map(), BY_NAME = new Map();
+for (const c of COUNTRIES) { BY_CODE.set(c.a2.toLowerCase(), c); BY_CODE.set(c.a3.toLowerCase(), c); for (const n of c.names) BY_NAME.set(n, c); }
+BY_CODE.set("uk", BY_CODE.get("gb"));
+const nameTokens = (n) => String(n || "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Za-z])(\d)/g, "$1 $2").replace(/(\d)([A-Za-z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+// The countries the approved number may name: the person's confirmed country (when it dials the approved code), else the table.
+function allowedCountries(dial, country) {
+  const c = country && (BY_NAME.get(cnorm(country)) || BY_CODE.get(cnorm(country)));
+  if (c) return c.dial === String(dial) ? [c] : [];
+  return (DIAL_ISO[dial] || []).map((a2) => BY_CODE.get(a2.toLowerCase())).filter(Boolean);
+}
+// What one value names: { dials: [...], countries: [...] } (countries as entries of countries.json).
+function valueNames(v, tokenRow) {
+  const out = { dials: [], countries: [] }, t = String(v ?? "").trim();
+  if (!t) return out;
+  let m;
+  if ((m = /^(?:\+|00)\s*(\d{1,3})(?:\b|$)/.exec(t))) out.dials.push(m[1]);
+  else if (tokenRow && (m = /^(\d{1,3})(?:-\d{1,4})?$/.exec(t))) out.dials.push(m[1]);
+  const low = cnorm(t);
+  if (/^[A-Za-z]{2,3}$/.test(t) && (tokenRow || t === t.toUpperCase()) && BY_CODE.has(t.toLowerCase())) out.countries.push(BY_CODE.get(t.toLowerCase()));
+  else if (BY_NAME.has(low)) out.countries.push(BY_NAME.get(low));
+  if (/^[[{]/.test(t)) { try { const walk = (o) => { if (!o || typeof o !== "object") return; for (const [k, x] of Object.entries(o)) { const tok = nameTokens(k).some((y) => COUNTRY_TOKENS.has(y)); if (typeof x === "object") walk(x); else { const n = valueNames(x, tok); out.dials.push(...n.dials); out.countries.push(...n.countries); if (tok && String(x).trim() && !n.dials.length && !n.countries.length) out.countries.push(null); } } }; walk(JSON.parse(t)); } catch { /* not JSON */ } }
+  return out;
+}
+// Does any row name a country or dial code other than the approved one? A token-named row with a value that names nothing known
+// (a country spelled some other way) also refuses: it says a country, and not provably the approved one.
+function rowsOtherCountry(rows, dial, country) {
+  const ok = allowedCountries(String(dial), country);
+  for (const [n, v] of rows || []) {
+    if (typeof v !== "string") continue;
+    const tok = nameTokens(n).some((x) => COUNTRY_TOKENS.has(x));
+    const named = valueNames(v, tok);
+    if (named.dials.some((x) => x !== String(dial))) return true;
+    if (named.countries.some((c) => !c || !ok.includes(c))) return true;
+    if (tok && v.trim() && !named.dials.length && !named.countries.length) return true;
+  }
+  return false;
+}
+// The rows this form would send, read from the page: its FormData (form-associated elements included) and every named submit
+// control of it (whichever is pressed is sent; parallel-apply checks the one pressed with its own sentRows).
+async function formRows(page, d) {
+  return page.evaluate(([q]) => {
     const el = document.querySelector(`[data-upmore-q="${q}"]`);
-    if (!el) return true;
-    const form = el.form || el.closest("form");
-    if (!form) return true;
-    const ok = (v) => { const x = String(v).trim().toLowerCase().replace(/\s+/g, ""); return x === "" || x === "+" + dial || x === dial || x === "00" + dial || isos.includes(x); };
-    const NAMED = /iso|(?:^|[^a-z])cc(?:[^a-z]|$)|region|countr|dial|calling|prefix|locale/i;
-    const CODE = /^(?:[a-z]{2,3}|\+\s?\d{1,4})$/i;
-    const kind = {};
-    for (const c of form.elements) { const n = c.getAttribute && c.getAttribute("name"); if (n) kind[n] = kind[n] || (c.tagName === "SELECT" ? "select" : /^(INPUT|TEXTAREA|BUTTON|FIELDSET|OUTPUT|OBJECT)$/.test(c.tagName) ? "plain" : "custom"); }
-    let entries; try { entries = [...new FormData(form).entries()]; } catch { return true; }
-    for (const [n, v] of entries) {
-      if (typeof v !== "string") continue;
-      if (NAMED.test(n) && !ok(v)) return true;
-      if ((kind[n] === "select" || kind[n] === "custom") && CODE.test(v.trim()) && !ok(v)) return true;
-    }
-    return false;
-  }, [d.q, String(dial), DIAL_ISO[dial] || []]).catch(() => true);
+    const form = el && (el.form || el.closest("form"));
+    if (!form) return null;
+    let rows; try { rows = [...new FormData(form).entries()].map(([n, v]) => [n, typeof v === "string" ? v : ""]); } catch { return null; }
+    for (const b of form.elements) if (b.name && /^(submit|image)$/i.test(b.type || "") || (b.tagName === "BUTTON" && b.name && (!b.type || b.type === "submit"))) rows.push([b.name, String(b.value || "")]);
+    return rows;
+  }, [d.q]).catch(() => null);
+}
+const PAGE_FACTS = new WeakMap();
+async function postsOtherCountry(page, d, dial) {
+  const rows = await formRows(page, d);
+  if (!rows) return true;
+  return rowsOtherCountry(rows, dial, (PAGE_FACTS.get(page) || {}).country);
 }
 async function onlyRunnerFields(page, d, filledQs) {
   return page.evaluate(([q, mine]) => {
@@ -530,22 +574,46 @@ async function phoneSame(page, d, value, text) {
   if (!String(value).trim().startsWith("+") || got.length >= want.length || !want.endsWith(got)) return false;
   const dial = want.slice(0, want.length - got.length);
   if (dial.length > 3) return false;
-  const shown = await page.evaluate(([q]) => {
+  // Every piece of the box's own intl-tel-input display (selected dial code, selected-country title and aria-label, the selected
+  // flag's iti__xx class, the shell's data-country / data-dial-code): each one that names a country or code must name the approved
+  // one, and the dial code must be shown (round 4: "+31" shown under a "+1" title, or data-country="nl", refuses).
+  const pieces = await page.evaluate(([q]) => {
     const el = document.querySelector(`[data-upmore-q="${q}"]`);
-    if (!el) return "";
-    // Only the box's own intl-tel-input shell: the .iti that wraps it and no other box or question. Anything else, a parent that
-    // also holds another phone widget included, is no evidence.
+    if (!el) return null;
+    // Only the box's own intl-tel-input shell: the .iti that wraps it and no other box or question.
     const box = el.parentElement && el.parentElement.closest(".iti");
-    if (!box) return "";
+    if (!box) return null;
     const others = [...box.querySelectorAll("input, select, textarea")].filter((x) => x !== el && x.type !== "hidden" && !x.closest(".iti__dropdown-content, .iti__country-list, [role=listbox]") && x.type !== "search");
-    if (others.length || box.querySelectorAll("[data-upmore-q]").length > 1 || box.querySelectorAll(".iti").length) return "";
+    if (others.length || box.querySelectorAll("[data-upmore-q]").length > 1 || box.querySelectorAll(".iti").length) return null;
     const LIST = "ul, [role=listbox], .iti__country-list, .iti__dropdown-content";
-    const bits = [];
-    for (const n of box.querySelectorAll(".iti__selected-dial-code")) if (!n.closest(LIST)) bits.push(n.textContent || "");
-    for (const n of box.querySelectorAll(".iti__selected-flag, .iti__selected-country")) if (!n.closest(LIST)) bits.push(n.getAttribute("title") || "", n.getAttribute("aria-label") || "");
-    return bits.join(" | ");
-  }, [d.q]).catch(() => "");
-  if (!new RegExp(`\\+\\s?${dial}(?!\\d)`).test(shown)) return false;
+    const out = [];
+    for (const n of box.querySelectorAll(".iti__selected-dial-code")) if (!n.closest(LIST)) out.push(["dial", n.textContent || ""]);
+    for (const n of [box, ...box.querySelectorAll(".iti__selected-flag, .iti__selected-country, .iti__flag")]) {
+      if (n !== box && n.closest(LIST)) continue;
+      if (n !== box) { out.push(["text", n.getAttribute("title") || ""], ["text", n.getAttribute("aria-label") || ""]); }
+      for (const c of n.classList) { const m = /^iti__([a-z]{2})$/.exec(c); if (m && !/^(?:flag|arrow|hide)$/.test(m[1])) out.push(["iso", m[1]]); }
+      for (const a of ["data-country", "data-country-code", "data-dial-code", "data-iso", "data-iso2"]) if (n.hasAttribute(a)) out.push([a === "data-dial-code" ? "dial" : "iso", n.getAttribute(a) || ""]);
+    }
+    return out;
+  }, [d.q]).catch(() => null);
+  if (!pieces) return false;
+  const ok = allowedCountries(dial, (PAGE_FACTS.get(page) || {}).country);
+  let shown = false;
+  for (const [kind, raw] of pieces) {
+    const t = String(raw || "").trim();
+    if (!t) continue;
+    const dials = [...t.matchAll(/\+\s?(\d{1,4})(?!\d)/g)].map((m) => m[1]).concat(kind === "dial" && /^\d{1,3}$/.test(t) ? [t] : []);
+    if (dials.some((x) => x !== dial)) return false;
+    if (dials.length) shown = true;
+    const iso = kind === "iso" ? BY_CODE.get(t.toLowerCase()) : null;
+    if (kind === "iso" && (!iso || !ok.includes(iso))) return false;
+    if (kind === "text") {
+      // A title such as "Netherlands (Nederland): +31" or "United States": every country name in it must be an approved one.
+      const words = cnorm(t.replace(/\+\s?\d+/g, " "));
+      for (const c of COUNTRIES) for (const nm of c.names) if (nm.length > 3 && (` ${words} `).includes(` ${nm} `) && !ok.includes(c)) return false;
+    }
+  }
+  if (!shown) return false;
   return !(await postsOtherCountry(page, d, dial));
 }
 async function fillSelect(page, d, value) {
@@ -1000,6 +1068,7 @@ async function doFill(page, d, dec, ctx) {
 async function fillForm(page, ctx0) {
   const ctx = { facts: {}, answers: {}, ...ctx0 };
   ctx.facts = factsFrom(ctx.facts, ctx.answers);
+  PAGE_FACTS.set(page, ctx.facts);
   const map = [], filled = [], needsUser = [], failed = [];
   const handled = new Set();
   for (let pass = 0; pass < 3; pass++) {
@@ -1153,6 +1222,7 @@ const isPlaceholderOption = (text, disabled) => !!disabled || PLACEHOLDER_OPTION
 // A box the board re-rendered (its tag gone) is found again as recheckFilled finds it; a place the fill chose from the board's own
 // list is the same place by the fill's own rule (holdsApproved, with the confirmed facts).
 async function driftedFills(page, filled, facts = {}) {
+  if (facts && facts.country && !PAGE_FACTS.has(page)) PAGE_FACTS.set(page, facts);
   const typed = filled.filter((f) => ["text", "textarea"].includes(f.kind) && f.source !== "resume");
   if (!typed.length) return [];
   const held = await heldNow(page, typed, { menus: false });
@@ -1191,4 +1261,4 @@ function holdsApproved(f, want, facts = {}) {
   if (key === "state") return !matchState([held], want).error;
   return false;
 }
-module.exports = { resumeSetsOf, PLACEHOLDER_OPTION, isPlaceholderOption, driftedFills, isHoneypot, MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };
+module.exports = { rowsOtherCountry, nationalOnly, digitsOf, resumeSetsOf, PLACEHOLDER_OPTION, isPlaceholderOption, driftedFills, isHoneypot, MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };

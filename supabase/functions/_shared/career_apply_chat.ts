@@ -246,7 +246,7 @@ export function exclusionParts(clause: string): { notPlaces: string[]; exclude: 
     x = x.replace(/^(?:(?:the|those|these|any|anything|everything|all|ones?|roles?|jobs?|postings?|positions?|openings?|internships?|apply(?:ing)?|to|for)\s+)+/i, "");
     x = x.replace(/^(?:that(?:'s|\s+are|\s+is)|which\s+are)\s+/i, "");
     const m = /^(?:(in|from|based\s+in|located\s+in)|(at|with))\s+(?:the\s+)?(.*)$/i.exec(x);
-    const place = m ? !!m[1] : inherit && lastPlace;
+    const place: boolean = m ? !!m[1] : inherit && lastPlace;
     if (m) x = m[3];
     x = x.replace(/\s+(?:ones?|roles?|jobs?|postings?|positions?|openings?|internships?)$/i, "").replace(/^the\s+/i, "").trim();
     if (!x) continue;

@@ -174,8 +174,8 @@ after the resume box is a page-set "Search" / "Sök" value (the job id) and its 
 delta reviews of 2026-11-17 left it: a hidden value's neighbouring container that holds several questions is dropped only when
 every widget in it is a phone box's own country picker (inside the intl-tel-input shell of a tel box, Teamtailor's "Search");
 otherwise its first widget that is not one is the hidden value's, so a phone picker placed first never hides a real listbox. The
-job id itself is page structure only with both a posting-id field name (job_id, posting_id, requisition_id, jobId, Teamtailor's
-`[job_id]`) and a value equal to the leading digits of the address's job segment (`/jobs/<id>-slug`); an office, ZIP or other path
+job id itself is page structure only with both a posting-id field name (exactly job_id, posting_id, requisition_id or jobId, alone, after a
+"." prefix or as the trailing `[...]` group, as Teamtailor's `[job_id]`; alternate_job_id and the like are not) and a value equal to the leading digits of the address's job segment (`/jobs/<id>-slug`); an office, ZIP or other path
 segment never counts, and any other value, id-looking or not, keeps the widget and is asked.
 
 Left, named: Workable's drawn Yes/No radios read back unheld after a full form (11); Greenhouse react-select boxes in other
@@ -239,12 +239,16 @@ Open only: sample 7 / 196 headline, 37 (+40) answered; held-out 12 / 191 headlin
 The bracketed rows had their resume upload simulated and are never a pass. The Recruitee gains (held-out headline 0 → 5, answered
 0 → 13) depend on rs-11's fix (a phone box reset to a bare dial code is set again); that fix was tightened after this run by the review and delta
 review of 2026-11-17: the re-set must read back as exactly the approved number, and a box holding only the approved number's
-national digits (its country code gone) holds that number only when the selected dial-code display of the box's own intl-tel-input
-shell (the one wrapping that box and no other widget or question) shows the approved code (its selected dial code, or its
-selected-country title or label; hint or help text, select words and a neighbouring widget are never evidence), or the form posts
-no field the runner did not fill itself and shows no country notion at all; and in every case nothing the form would post (its form
-data, form-associated elements included: a field named like iso, cc, region, country, dial or prefix, a select's or a custom
-element's value) names a country or dial code other than the approved one (rs-00, default-deny: anything else is handed off). So the Recruitee rows were
+national digits (its country code gone) holds that number only when the box's own intl-tel-input shell (the one wrapping that box and
+no other widget or question) shows the approved dial code and every piece of its display (selected dial code, selected-country
+title and label, selected flag, the shell's data-country / data-dial-code) agrees with it, or the form posts no field the runner did
+not fill itself and shows no country notion at all. In every case the country check is structural: every row the submit would send
+(the form data, form-associated elements included, and the pressed submit control) is read, and a row names a country when a token
+of its name (split on punctuation, camelCase and digits) is cc, iso, iso2, iso3, country, countrycode, nation, nationality, region,
+dial, dialcode, code, prefix, locale or calling, or its value is a dial code, a number starting with one, an ISO 3166 code or country
+name (`workers/career-browser/countries.json`, every assigned country) or JSON with such a key. Any row naming another country or
+code hands the phone off; a "+1" country is allowed only as the person's own confirmed country, or (with none confirmed) US or CA
+(rs-00, default-deny). So the Recruitee rows were
 measured before that tightening and may fall where a widget strips the approved country code.
 Left: Workable `no_submit_control` (3 and 4; not reproduced locally: the same postings reach Submit in a local dry run), Ashby's own
 dropdowns (an `ashby-application-form-input-autocomplete` list that drew no options after typing in a local dry run; no request was

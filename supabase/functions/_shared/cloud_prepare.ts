@@ -132,6 +132,9 @@ export interface PrepareBridgeDeps {
   now?: () => number;
   // WO-G: the review File links for a card's applications (application_review_links.ts); absent, the card is as before.
   review?: (user: string, preparedIds: string[]) => Promise<string | null>;
+  // MASS APPLY CONVERSATIONS: each ready application's role and what its posting states (where, pay and deadline as posted),
+  // shown on the card (career_apply_cards.ts withRoles); absent or failing, the card is as before.
+  describe?: (user: string, rows: any[]) => Promise<any[]>;
 }
 // MASS APPLY CONVERSATIONS (2026-11-17, ag/ma-10-whole-request-prep; source ag/mass-apply-10 b01849ec0; D-092 and D-094,
 // owner 2026-11-16: every posting of a request prepared in one pass; D-NO-LIMITS): the person's candidates are read whole
@@ -214,7 +217,8 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
           job_id: String(o?.job_id ?? "").slice(0, 300), outcome: String(o?.outcome ?? "").slice(0, 20), detail: String(o?.detail ?? "").slice(0, 300),
         })) : [];
         // The card the person asked for, shown now: every application this request made ready, as the card shows them.
-        const ready = await d.rpc("career_apply_prepare_request_ready", { p_id: id, p_lease: lease });
+        let ready = await d.rpc("career_apply_prepare_request_ready", { p_id: id, p_lease: lease });
+        if (d.describe && Array.isArray(ready) && ready.length) ready = await d.describe(user, ready).catch(() => ready);
         let card: string | null = null, push = "nothing_ready";
         const c = Array.isArray(ready) && ready.length ? cardFor(ready.filter((r: any) => { const one = cardFor([r]); return one !== null && "take" in one; })) : null;
         // MASS APPLY (2026-11-01): ONE card for the batch. While the person still has a question open (another posting of

@@ -71,6 +71,17 @@ const URLCASES = [
   ["/jobs/120000-senior-engineer", "salary_expectation", "120000", "Desired yearly salary", "120,000"],
   ["/req/0040012/apply", "office_id", "0040012", "Which office would you work from?", "Amsterdam office"],
   ["/jobs/55555-engineer", "office_id", "55555", "Which office would you work from?", "Amsterdam office"],
+  // Round 4 (probe p07-r4): a posting-id-like name that is not exactly one, or the job digits not exactly the address's own job id.
+  ["/jobs/55555-engineer?c=1", "alternate_job_id", "55555", "Which other role interests you?", "Senior engineer"],
+  ["/jobs/55555-engineer?c=2", "previous_job_id", "55555", "Which other role interests you?", "Senior engineer"],
+  ["/jobs/55555-engineer?c=3", "referral_job_id", "55555", "Which other role interests you?", "Senior engineer"],
+  ["/jobs/55555-engineer?c=4", "other_posting_id", "55555", "Which other role interests you?", "Senior engineer"],
+  ["/offices/40012/jobs/55555-engineer", "job_id", "40012", "Which office would you work from?", "Amsterdam office"],
+  ["/jobs/55555-a/jobs/40012-b", "job_id", "55555", "Which office would you work from?", "Amsterdam office"],
+  ["/jobs/0055555-engineer", "job_id", "55555", "Which office would you work from?", "Amsterdam office"],
+  ["/jobs/55555x-engineer", "job_id", "55555", "Location", "Stockholm"],
+  ["/jobs/55555.engineer", "job_id", "55555", "Location", "Stockholm"],
+  ["/jobs/55555-engineer?c=5", "job_id ", "55555", "Location", "Stockholm"],
 ];
 const mkUrl = (name, val, lbl, opt) => `<!doctype html><html><body><h1>Apply</h1><form action="/applications" method="post">
 <label>First name <input name="first_name" required></label><label>Last name <input name="last_name" required></label>

@@ -745,9 +745,12 @@ function CONTROLS(arg) {
   // Round 3 of the rs-07 review (2026-11-17): both a posting-id field name (job_id, posting_id, requisition_id, jobId, Teamtailor's
   // ...[job_id]) AND a value equal to the leading digits of the job segment of this page's address (/jobs/<id>-slug), never any
   // other path segment (an office, a ZIP, a requisition path).
-  const POSTING_ID_NAME = /(?:^|[^a-z0-9])(?:job_id|posting_id|requisition_id)\]?$|(?:^|[^a-zA-Z0-9])jobId\]?$/;
+  // Round 4: the name is exactly one of these, alone, after a "." prefix, or as the trailing [...] group (Teamtailor's
+  // candidate[job_applications_attributes][0][job_id]); alternate_job_id, previous_job_id, other_posting_id and the like are not.
+  const POSTING_ID_NAMES = ["job_id", "posting_id", "requisition_id", "jobId"];
+  const postingIdName = (n) => POSTING_ID_NAMES.some((x) => n === x || n.endsWith("." + x) || n.endsWith("[" + x + "]"));
   const postingOwnId = (name, v) => {
-    if (!/^\d{5,}$/.test(v) || !POSTING_ID_NAME.test(String(name || ""))) return false;
+    if (!/^\d{5,}$/.test(v) || !postingIdName(String(name || ""))) return false;
     const m = [...location.pathname.matchAll(/\/jobs\/(\d{5,})(?=-|\/|$)/g)].pop();
     return !!m && m[1] === v;
   };

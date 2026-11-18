@@ -33,7 +33,8 @@ Deno.test("a fact only stated in chat is never read as 'your confirmed facts men
 Deno.test("'go' is not a software signal; 'golang' and the rest are", async () => {
   const hike = await vague([{ id: "F-1", text: "I love to go hiking on weekends", status: "confirmed", needs_confirmation: false }]);
   assert(!/software engineering roles/.test(hike.r?.reply ?? ""), hike.r?.reply);
-  const go = await vague([{ id: "F-2", text: "Wrote a Golang service", status: "confirmed", needs_confirmation: false }]);
+  // rv-ma5: structured evidence only, so the Golang evidence is a confirmed skill fact (was the free text "Wrote a Golang service").
+  const go = await vague([{ id: "F-2", kind: "skill", name: "Golang", text: "Skill: Golang", status: "confirmed", needs_confirmation: false }]);
   assert(/software engineering roles: 2 open postings/.test(go.r?.reply ?? ""), go.r?.reply);
   eq(go.queued, 0);
 });

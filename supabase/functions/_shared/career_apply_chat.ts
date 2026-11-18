@@ -433,17 +433,28 @@ const BARE_NUMBER = /^(?:please\s+)?apply\s+(?:me\s+)?(?:to|for)\s+(\d{1,2})(?:\
 // family's words in a confirmed fact), each with how many OPEN postings are on file (a count, never a claim that they fit:
 // the family is a keyword match, not a fit score), and ONE question to pick. Nothing is queued; no family mentioned: not this turn's.
 const VAGUE = /^(?:(?:ok(?:ay)?|so|hey|please|pls)[,\s]+)*(?:(?:can|could) you\s+(?:just\s+)?(?:please\s+)?)?(?:just\s+)?apply\s+(?:me\s+)?(?:to|for)\s+(?:some|a few|any|a bunch of|a couple of|more|a lot of|lots of)?\s*(?:jobs?|roles?|positions?|openings?|internships?)(?:\s+for\s+me)?(?:\s+please)?[.!?]*$/i;
-const FAMILIES: { label: string; words: string[]; signals: RegExp }[] = [
-  { label: "software engineering", words: ["software"], signals: /\b(?:react|python|golang|java|typescript|javascript|kubernetes|software|computer science|backend|frontend)\b/i },
-  { label: "data", words: ["data"], signals: /\b(?:sql|data|statistics|analytics|dashboards?|tableau|python)\b/i },
-  { label: "finance", words: ["financial"], signals: /\b(?:finance|financial|excel|dcf|valuation|investment|banking)\b/i },
+// Architect ruling (rv-ma5): the proposal reads only STRUCTURED evidence: the names of confirmed skill facts, matched whole
+// ("Microsoft Excel", "Python"), and the titles of confirmed experience entries, matched as whole role phrases ("Data Analyst",
+// "Investment Banking Analyst"). Never a word from a description, an interest or a hobby ("excel at customer service", "react
+// calmly", "investment in community gardens", "Java coffee", "python and gecko care" are no evidence).
+const FAMILIES: { label: string; words: string[]; skills: string[]; titles: RegExp }[] = [
+  { label: "software engineering", words: ["software"], skills: ["react", "react.js", "python", "golang", "java", "typescript", "javascript", "kubernetes", "c++", "node.js", "django", "swift", "kotlin", "rust"],
+    titles: /\b(?:software (?:engineer|engineering|developer|development)|(?:backend|back-end|frontend|front-end|full[- ]?stack|web|mobile|ios|android) (?:engineer|developer)|swe)\b/i },
+  { label: "data", words: ["data"], skills: ["sql", "python", "tableau", "power bi", "pandas", "data analysis", "statistics", "r", "excel", "microsoft excel"],
+    titles: /\b(?:data (?:analyst|scientist|engineer|analytics)|business intelligence|bi (?:analyst|developer)|analytics (?:engineer|intern|analyst))\b/i },
+  { label: "finance", words: ["financial"], skills: ["financial modeling", "financial modelling", "dcf", "valuation", "investment banking", "microsoft excel", "excel", "accounting"],
+    titles: /\b(?:financial analyst|finance (?:intern|analyst)|investment banking|equity research|private equity|accountant|accounting (?:intern|analyst))\b/i },
 ];
+// trunk's usableFact (122-career-profile.js): status confirmed (or none recorded); never pending, rejected, draft, awaiting a
+// yes, quarantined, or only stated in chat.
+// deno-lint-ignore no-explicit-any
+const usable = (f: any) => f && typeof f === "object" && !f.stated && !f.needs_confirmation && f.status !== "draft" && (f.status === undefined || f.status === null || f.status === "confirmed") && !f.quarantine && !f.quarantined;
+const skillName = (f: any) => String(f?.name || f?.value || String(f?.text ?? "").replace(/^skill:\s*/i, "")).replace(/^[\s\-•*]+/, "").trim().toLowerCase();
 async function proposeBatch(o: ApplyChatDeps): Promise<ApplyChatResult | null> {
-  // Review rv-ma3: the person's CONFIRMED facts only (never a fact stated in chat this turn, a draft, one awaiting a yes, or a
-  // quarantined one), since the reply says "your confirmed facts mention"; and only unambiguous signals ("go" was "I love to go hiking").
-  const said = (o.facts ?? []).filter((f) => f && typeof f === "object" && !f.stated && !f.needs_confirmation && f.status !== "draft" && !f.quarantine && !f.quarantined)
-    .map((f) => String(f?.text ?? f?.value ?? "")).join(" \n ");
-  const fams = FAMILIES.filter((f) => f.signals.test(said));
+  const facts = (o.facts ?? []).filter(usable);
+  const skills = new Set(facts.filter((f) => f.kind === "skill").map(skillName).filter(Boolean));
+  const titles = facts.filter((f) => f.kind === "experience" && typeof f.title === "string").map((f) => String(f.title));
+  const fams = FAMILIES.filter((f) => f.skills.some((k) => skills.has(k)) || titles.some((t) => f.titles.test(t)));
   if (!fams.length) return null;
   const found: { label: string; n: number; eg: string[] }[] = [];
   for (const f of fams) {

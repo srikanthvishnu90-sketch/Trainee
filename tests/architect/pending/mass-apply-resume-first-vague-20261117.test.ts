@@ -16,7 +16,10 @@ const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const T = Date.parse("2026-11-17T18:00:00Z");
 const post = (i: number, company: string, title: string, location = "Chicago, IL") => ({ job_id: `greenhouse:v${i}:${7000 + i}`, provider: "greenhouse", board: `v${i}`, company, title, location,
   url: `https://boards.greenhouse.io/v${i}/jobs/${7000 + i}`, description: "Python, SQL.", first_seen_at: new Date(T - i * 60000).toISOString(), last_seen_at: new Date(T).toISOString(), posted_at: null, closed_at: null }) as any;
-const FACTS = [{ id: "F-1", text: "Built a reporting dashboard in React and Python", status: "confirmed", needs_confirmation: false }];
+// Architect ruling (rv-ma5): the proposal reads structured evidence only (confirmed skill facts, confirmed experience titles), so
+// the fixture's evidence is two confirmed skills (was the free-text entry "Built a reporting dashboard in React and Python").
+const FACTS = [{ id: "F-1", kind: "skill", name: "React", text: "Skill: React", status: "confirmed", needs_confirmation: false },
+  { id: "F-2", kind: "skill", name: "Python", text: "Skill: Python", status: "confirmed", needs_confirmation: false }];
 async function world(resume: boolean | null, facts: any[] = FACTS) {
   const db = memoryPostingsDb();
   await db.putMany([post(1, "Northwind", "Software Engineering Intern"), post(2, "Tidal", "Software Engineer Intern"), post(3, "Lumen", "Data Analyst"), post(4, "Juno", "Product Design Intern"),
@@ -61,7 +64,7 @@ Deno.test("a vague ask with a confirmed resume: open counts by family, never 'fi
 Deno.test("exactly one open posting is said in the singular", async () => {
   const db = memoryPostingsDb();
   await db.putMany([post(1, "Lumen", "Data Analyst")]);
-  const r = await applyTurn({ message: "can you just apply to some jobs for me", userId: "u1", now: T, wants: memoryWantStore(), apps: async () => [], facts: [{ id: "F-3", text: "SQL and Tableau dashboards", status: "confirmed" }],
+  const r = await applyTurn({ message: "can you just apply to some jobs for me", userId: "u1", now: T, wants: memoryWantStore(), apps: async () => [], facts: [{ id: "F-3", kind: "skill", name: "SQL", text: "Skill: SQL", status: "confirmed" }], // rv-ma5: a skill fact (was free text "SQL and Tableau dashboards")
     shortlist: null, postings: { search: (w: string[], l: number) => db.search(w, l) }, resumeOnFile: async () => true });
   assert(/1\. data roles: 1 open posting on file \(for example Data Analyst at Lumen\)/.test(r!.reply), r?.reply);
   assert(!/1 open postings|1 open \(/.test(r!.reply), r!.reply);

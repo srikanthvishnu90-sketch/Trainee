@@ -89,6 +89,24 @@ Deno.test("S3 r12 / H034: a sentence a suggestion unit holds stands without the 
   }
 });
 
+Deno.test("S3 r12 / H034: a question whose count word counts the items this reply shows stands; any other count does not", async () => {
+  // (probe-r12-ruling3 1 and 4: the roles stood, and "Which of those four sounds closest to what you want?" was dropped for "four")
+  const { l } = await emptySearch(H034, "entry level help desk IT support");
+  const sg = l.units.find((u) => u.kind === "suggestion")!;
+  const four = `People moving into computer and IT work commonly start as IT support or help desk technician, technical or customer support at a software company, data entry or records clerk, or QA tester [${sg.id}].`;
+  const ok = await verifyTagged(`${four} Which of those four sounds closest to what you want?`, l, { ask: H034, judge: null });
+  assert(ok.text.includes("Which of those four sounds closest to what you want?") && ok.text.includes("QA tester"), JSON.stringify(ok));
+  const listed = await verifyTagged(`1. IT support or help desk technician [${sg.id}].\n2. QA tester [${sg.id}].\nWhich of these two fits you best?`, l, { ask: H034, judge: null });
+  assert(listed.text.endsWith("Which of these two fits you best?"), listed.text);
+  // (a count that is not what the reply shows, or a list that did not stand, refuses the question as before)
+  const wrong = await verifyTagged(`${four} Which of those three sounds closest to what you want?`, l, { ask: H034, judge: null });
+  assert(!wrong.text.includes("those three"), wrong.text);
+  const gone = await verifyTagged("Zorblax Medical, Quintel Care, Brightline Health and Arden Labs pay $90 an hour. Which of those four sounds best?", l, { ask: H034, judge: null });
+  assert(!gone.text.includes("those four"), gone.text);
+  const alone = await verifyTagged("Which of those four sounds closest to what you want?", l, { ask: H034, judge: null });
+  eq(alone.text, "");
+});
+
 Deno.test("S3 r12 / H034: a tag written after the sentence's stop cites that sentence, not the next one", async () => {
   // (probe-r12-ruling: "…nothing to show yet. [E2] Cashiers commonly…" and the repair's "…not postings. [E3]" on its own line)
   const { l } = await emptySearch(H034, "entry level help desk support");

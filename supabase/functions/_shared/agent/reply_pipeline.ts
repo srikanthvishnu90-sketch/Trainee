@@ -242,6 +242,21 @@ const NO_POSTING = /\b(?:not|no|never|nor|zero|0)\s+(?:an?\s+|any\s+)?(?:[\p{L}-
 const forClaim = (us: EvidenceUnit[], text: string) => POSTING_CLAIM.test(String(text).replace(NO_POSTING, " ")) ? us.filter((u) => u.kind !== "suggestion") : us;
 const TAG_AFTER_STOP = /([.!?])(["'\u201d)\]]*)[ \t]*(\[E\d+(?:\s*,\s*E\d+)*\])/g;
 const SUGGESTION_UNSAFE = /\b(?:pay|pays|paid|paying|salar\w*|wages?|earn\w*|requir\w*|sponsor\w*|degrees?|certif\w*|licen[cs]\w*|guarantee\w*|always|never)\b|[$€£%]/i;
+// "those four", "these 3", "the two": a count referring back to items
+const COUNT_REF = /\b(those|these|the)\s+(two|three|four|five|six|seven|eight|nine|ten|[2-9]|10)\b/i;
+const COUNT_WORDS: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+const countOf = (w: string) => COUNT_WORDS[w.toLowerCase()] ?? Number(w);
+// How many items the reply lists: its numbered or bulleted lines, or the longest series in one of its sentences ("A, B, C, or D"),
+// whichever is more.
+export function listCount(reply: string): number {
+  const marked = String(reply).split("\n").filter((l) => /^\s*(?:\d{1,2}[.)]|[-\u2022*])\s+\S/.test(l)).length;
+  const series = Math.max(0, ...String(reply).split("\n").flatMap((l) => splitSentences(l)).map((x) => {
+    const body = x.includes(":") ? x.slice(x.indexOf(":") + 1) : x;
+    const parts = body.replace(/[.!?]+$/, "").split(/,\s+(?:(?:and|or)\s+)?/).filter((p) => /\p{L}/u.test(p));
+    return parts.length >= 3 ? parts.length : 0;
+  }));
+  return Math.max(marked, series);
+}
 const LIST_MARK = /^\s*(?:\(?\d{1,2}[.)]|[-•*]|[a-z][.)])\s*$/i;
 export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: SupportJudge | null; own?: string[]; onRecord?: (s: string) => boolean | null; ask?: string; carry?: string | null } = {}): Promise<Verified> {
   // (a question to the person may name only what their own record or their ask names)
@@ -249,6 +264,11 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const own = new Set((o.own ?? []).map((x) => x.trim()));
   // (S3 r12: a tag written after the sentence's own stop, "nothing to show yet. [E2] Cashiers…", is that sentence's: the split put it
   // on the next one, so the sentence it ended went uncited and the next one carried a unit that is not about it)
+  // (S3 r12, H034: "Which of those four sounds closest to what you want?" after a list of four roles: the count word counts what this
+  // reply shows, so it is no figure; the question is read as the plain question it is without it. Any other count still refuses it.)
+  const shown = listCount(stripTags(String(reply ?? "")));
+  const counted = new Set<string>();
+  const countedQuestion = (q: string) => { const m = COUNT_REF.exec(q); return !!m && countOf(m[2]) === shown && shown >= 2 && personQuestion(q.replace(m[0], m[1]), allowed); };
   const lines = String(reply ?? "").replace(TAG_AFTER_STOP, " $3$1$2").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : splitSentences(l).filter((x) => x.trim()));
   const raw = lines.map((l) => [...l]);
   const failures: Failure[] = [], kept: string[] = [];
@@ -325,7 +345,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
     const { ids, text } = tagsOf(x);
     lines[a][b] = text;
-    if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || personQuestion(text, allowed)) return carryPast(text);
+    if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || personQuestion(text, allowed) || (countedQuestion(text) && !!counted.add(`${a}:${b}`))) return carryPast(text);
     if (rec(text) === true) return carryPast(text);
     // The record's verdict comes before the plain-sentence rule: a sentence about the record that the record contradicts fails.
     if (rec(text) === false) { failures.push({ sentence: text, reason: "it is not what the person's record holds" }); bad.add(`${a}:${b}`); return; }
@@ -348,7 +368,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (!units.length) { failures.push({ sentence: text, reason: "it states a fact and no evidence unit holds it" }); bad.add(`${a}:${b}`); return; }
     citeAt.set(`${a}:${b}`, ids);
     for (const c of clausesOf(text)) {
-      if (noClaim(c) || personQuestion(c, allowed) || rec(c) === true) continue;
+      if (noClaim(c) || personQuestion(c, allowed) || (countedQuestion(c) && !!counted.add(`${a}:${b}`)) || rec(c) === true) continue;
       if (rec(c) === false) return fail(a, b, text, `"${c}" is not what the person's record holds`);
       // Round 3 of #849: every clause, not only one with a figure ("The posting is open", "It requires a clearance").
       const names = owners.length ? mentioned(c) : [];
@@ -456,6 +476,14 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   asks.forEach((x, j) => { const c = checks[x.k]; if (!yesAt.has(x.k) && asks.findIndex((y) => y.k === x.k) === j && !bad.has(`${c.a}:${c.b}`)) { failures.push({ sentence: c.claim, reason: c.untagged ? "it states a fact and cites no evidence unit, and no unit states it" : `the cited unit does not state "${x.claim}"`, subject: c.subject ?? null }); bad.add(`${c.a}:${c.b}`); } });
   // (S3 r12: a list marker split off as its own piece, "1." of "1. Help desk …", goes with the item it numbers: an item dropped above
   // left "1. 2. 3." standing as the reply)
+  // (a counted question stands only while what it counts still stands: its items checked above, it is checked again on what is kept)
+  for (const key of counted) {
+    if (bad.has(key)) continue;
+    const [a, b] = key.split(":").map(Number);
+    const keptText = lines.map((l, i) => l.filter((x, j) => x && !bad.has(`${i}:${j}`) && `${i}:${j}` !== key).join(" ")).join("\n");
+    const m = COUNT_REF.exec(lines[a][b]);
+    if (m && countOf(m[2]) !== listCount(keptText)) { failures.push({ sentence: lines[a][b], reason: `"${m[0]}" counts items this reply no longer shows` }); bad.add(key); }
+  }
   lines.forEach((l, a) => l.forEach((x, b) => { if (LIST_MARK.test(x) && (b + 1 >= l.length || bad.has(`${a}:${b + 1}`) || LIST_MARK.test(l[b + 1] ?? ""))) bad.add(`${a}:${b}`); }));
   const text = lines.map((l, a) => l.filter((x, b) => x && !bad.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   const cites: string[] = [], citeOf: [string, string[]][] = [];

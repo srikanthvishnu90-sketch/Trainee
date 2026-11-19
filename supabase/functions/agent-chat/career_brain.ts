@@ -259,6 +259,8 @@ export async function agentTurn(o: {
     model: o.model,
     ctx,
   });
+  // (S3 r12: the model's own draft, for what the pipeline and the condense pass dropped from it: dropDanglingCounts below)
+  const draft0 = String(result.reply ?? "");
   // Rounds 2 and 3 (owner must-fix; D-024): a turn that asks about, or whose reply speaks of, the status of their applications
   // stands on a lookup. When the model made none, code reads the record itself (the same read-only tool), on any turn, whatever
   // else it did; what is then said about their applications is code's (applicationsEnforced, at the end of the turn).
@@ -591,7 +593,11 @@ export async function agentTurn(o: {
   // after the pipeline and the condense pass, never judged.
   // (and, first, a sentence counting back to a list the delivered reply no longer shows goes: reply_pipeline.ts dropDanglingCounts;
   // probe-r12-nextstep-5, "Pick whichever of the four roles above…" after the condense pass dropped the roles)
-  if (withSupport.reply && withSupport.stopped === "final" && !withSupport.show) (withSupport as any).reply = dropDanglingCounts(String(withSupport.reply));
+  if (withSupport.reply && withSupport.stopped === "final" && !withSupport.show) {
+    const finalText = String(withSupport.reply).replace(/\s+/g, " ");
+    const droppedLines = stripTags(draft0).split("\n").filter((l) => /\p{L}/u.test(l) && !finalText.includes(l.replace(/^\s*(?:\d{1,2}[.)]|[-\u2022*])\s+/, "").replace(/\s+/g, " ").trim()));
+    (withSupport as any).reply = dropDanglingCounts(String(withSupport.reply), droppedLines.join("\n"));
+  }
   if ((ctx.turn as any)?.emptySearch) await watchHostReady.catch(() => null);
   const nextStep = withSupport.reply && withSupport.stopped === "final" && !withSupport.show
     ? nextStepLine(String(withSupport.reply), (ctx.turn as any)?.emptySearch ?? null, Array.isArray(withSupport.postings) && withSupport.postings.length > 0,

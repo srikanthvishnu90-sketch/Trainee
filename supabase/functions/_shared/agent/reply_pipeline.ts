@@ -243,10 +243,10 @@ const forClaim = (us: EvidenceUnit[], text: string) => POSTING_CLAIM.test(String
 const TAG_AFTER_STOP = /([.!?])(["'\u201d)\]]*)[ \t]*(\[E\d+(?:\s*,\s*E\d+)*\])/g;
 // "those four", "these 3", "the two": a count referring back to items
 const COUNT_REF = /\b(those|these|the)\s+(two|three|four|five|six|seven|eight|nine|ten|[2-9]|10)\b/i;
-// A count that refers back to items: "those four", "these 3" (deictic), "the four roles above" / "the 3 I listed", "one of the five",
-// "all four". "The 10 postings in your File" refers to no list here and is not one.
+// An explicit back-reference to a list in this reply (review of cbea914e9: never a bare "all N" or "one of the N", which state true
+// counts, "I sent all 5 applications"): "those four", "these 3", "the four roles above", "the 3 I listed", "the two below".
 const N_WORD = "two|three|four|five|six|seven|eight|nine|ten|[2-9]|10";
-const BACK_REF = new RegExp(`\\b(?:those|these)\\s+(${N_WORD})\\b|\\bthe\\s+(${N_WORD})(?:\\s+[\\p{L}-]+){0,2}?\\s+(?:above|listed|I (?:named|listed|mentioned|gave))\\b|\\b(?:one|any|each|either|which|whichever|all|pick|choose)\\s+of\\s+(?:the|those|these)\\s+(${N_WORD})\\b|\\ball\\s+(${N_WORD})\\b`, "giu");
+const BACK_REF = new RegExp(`\\b(?:those|these)\\s+(${N_WORD})\\b|\\bthe\\s+(${N_WORD})(?:\\s+[\\p{L}-]+){0,2}?\\s+(?:above|listed|below|I (?:named|listed))\\b`, "giu");
 const COUNT_WORDS: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
 const countOf = (w: string) => COUNT_WORDS[w.toLowerCase()] ?? Number(w);
 // How many items the reply lists: its numbered or bulleted lines, or the longest series in one of its sentences ("A, B, C, or D"),
@@ -261,21 +261,31 @@ export function listCount(reply: string): number {
   return Math.max(marked, series);
 }
 const LIST_MARK = /^\s*(?:\(?\d{1,2}[.)]|[-•*]|[a-z][.)])\s*$/i;
-// (S3 r12, architect ruling) The same rule on a finished reply, whichever path made it (the pipeline, the untagged path, the condense
-// pass that rewrites a long reply in fewer words): a sentence that counts back to a list goes when the reply no longer shows that many
-// items. Returns the reply unchanged when nothing dangles.
-export function dropDanglingCounts(reply: string): string {
+// (S3 r12, architect ruling, narrowed after the review of cbea914e9) A sentence that refers back to a list in this reply ("which of
+// those four", "the four roles above") dangles only when the list it refers to was DROPPED: the sentences dropped this turn held a
+// list, and what is kept no longer shows that many items. Shown items: numbered or bulleted lines, a series in one sentence, a pair
+// ("A and B", "A or B") for a count of two, and a File link (the items are in the File). A reply is never emptied by this.
+export function danglingRef(sentence: string, kept: string, dropped: string): string | null {
+  const refs = [...String(sentence).matchAll(BACK_REF)].map((m) => ({ said: m[0], n: countOf(m[1] ?? m[2] ?? "") })).filter((r) => r.n >= 2);
+  if (!refs.length || !String(dropped ?? "").trim() || listCount(dropped) < 2 && !/(?:^|\n)\s*(?:\d{1,2}[.)]|[-\u2022*])\s/.test(dropped)) return null;
+  if (/https?:\/\/\S+/.test(kept)) return null;
+  const listed = listCount(kept), own = listCount(sentence);
+  const pair = /\p{L}[\p{L}\s/-]{1,60}\s(?:and|or)\s\p{L}/u.test(kept);
+  const off = refs.find((r) => r.n !== listed && r.n !== own && !(r.n === 2 && pair));
+  return off ? off.said : null;
+}
+// The rule on a finished reply, whichever path made it: `dropped` is what the turn's draft said that the reply no longer does.
+export function dropDanglingCounts(reply: string, dropped = ""): string {
+  if (!String(dropped ?? "").trim()) return String(reply ?? "");
   const lines = String(reply ?? "").split("\n").map((l) => splitSentences(l));
   const gone = new Set<string>();
   lines.forEach((l, a) => l.forEach((x, b) => {
-    const refs = [...x.matchAll(BACK_REF)].map((m) => countOf(m[1] ?? m[2] ?? m[3] ?? m[4] ?? "")).filter((n) => n >= 2);
-    if (!refs.length) return;
     const rest = lines.map((l2, i) => l2.filter((_, j) => !(i === a && j === b) && !gone.has(`${i}:${j}`)).join(" ")).join("\n");
-    const listed = listCount(rest), own = listCount(x);
-    if (refs.some((n) => n !== listed && n !== own)) gone.add(`${a}:${b}`);
+    if (danglingRef(x, rest, dropped)) gone.add(`${a}:${b}`);
   }));
   if (!gone.size) return String(reply ?? "");
-  return lines.map((l, a) => l.filter((_, b) => !gone.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  const out = lines.map((l, a) => l.filter((_, b) => !gone.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return /\p{L}/u.test(out) ? out : String(reply ?? "");
 }
 export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: SupportJudge | null; own?: string[]; onRecord?: (s: string) => boolean | null; ask?: string; carry?: string | null } = {}): Promise<Verified> {
   // (a question to the person may name only what their own record or their ask names)
@@ -493,18 +503,15 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   // (S3 r12: a list marker split off as its own piece, "1." of "1. Help desk …", goes with the item it numbers: an item dropped above
   // left "1. 2. 3." standing as the reply)
   // (a counted question stands only while what it counts still stands: its items checked above, it is checked again on what is kept)
-  // (S3 r12, architect ruling: and so does ANY kept sentence that counts back to a list, "the four roles above", "those 3", "pick one
-  // of the five": the items it refers to must still stand, as many as it says; a dangling reference is a defect, so it goes too.
-  // probe-r12-nextstep-5: "Pick whichever of the four roles above sounds closest…" stood after the four roles were dropped)
+  // (S3 r12, architect ruling, narrowed after the review of cbea914e9: a kept sentence that refers back to a list goes when that list
+  // was among what this pass dropped, danglingRef; never the last thing standing)
+  const droppedText = lines.filter((l, i) => l.some((y, j) => y && bad.has(`${i}:${j}`))).map((l) => l.filter((y) => !!y).join(" ")).join("\n");
   lines.forEach((l, a) => l.forEach((x, b) => {
     const key = `${a}:${b}`;
-    if (!x || bad.has(key)) return;
-    const refs = [...x.matchAll(BACK_REF)].map((m) => ({ said: m[0], n: countOf(m[1] ?? m[2] ?? m[3] ?? m[4] ?? "") })).filter((r) => r.n >= 2);
-    if (!refs.length) return;
+    if (!x || bad.has(key) || !droppedText.trim()) return;
     const keptText = lines.map((l2, i) => l2.filter((y, j) => y && !bad.has(`${i}:${j}`) && `${i}:${j}` !== key).join(" ")).join("\n");
-    const listed = listCount(keptText), own = listCount(x);
-    const off = refs.find((r) => r.n !== listed && r.n !== own);
-    if (off) { failures.push({ sentence: x, reason: `"${off.said}" counts items this reply no longer shows` }); bad.add(key); }
+    const off = danglingRef(x, keptText, droppedText);
+    if (off && /\p{L}/u.test(keptText.replace(/https?:\/\/\S+/g, ""))) { failures.push({ sentence: x, reason: `"${off}" counts items this reply no longer shows` }); bad.add(key); }
   }));
   lines.forEach((l, a) => l.forEach((x, b) => { if (LIST_MARK.test(x) && (b + 1 >= l.length || bad.has(`${a}:${b + 1}`) || LIST_MARK.test(l[b + 1] ?? ""))) bad.add(`${a}:${b}`); }));
   const text = lines.map((l, a) => l.filter((x, b) => x && !bad.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();

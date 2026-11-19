@@ -181,29 +181,46 @@ const PROFILE = { facts: [{ id: "F-001", kind: "experience", text: "I'm a regist
 const turn = (query: string, draft: string, message = H035, stores: Record<string, unknown> = { profile: structuredClone(PROFILE) }) => agentTurn({ message, history: [], stores, userId: "u-ns", threadId: "t-ns", now: NOW,
   model: stub(query, draft), postings: async () => [], supportJudge: yes } as any) as Promise<any>;
 
-Deno.test("S3 r12 / H034, architect ruling: any sentence that counts back to a list goes when the list is not shown, or the count is off", async () => {
+Deno.test("S3 r12 / H034, architect ruling (narrowed): a back-reference to a list goes only when that list was dropped", async () => {
   // (probe-r12-nextstep-5: "Pick whichever of the four roles above sounds closest and I'll search for it" was delivered after the
-  // roles were gone; the delivered reply is checked whatever path made it, the pipeline's kept text too)
+  // four roles were dropped)
   const four = "People moving into computer work commonly start as IT support or help desk technician, technical or customer support at a software company, data entry or records clerk, or QA tester.";
   const saved = "Saved: you're a cashier, and you want to do something with computers.";
-  for (const ref of ["Pick whichever of the four roles above sounds closest and I'll search for it.", "I can search all four for you.", "I'll look up the 4 roles I listed next.", "Which of those four sounds closest?"]) {
-    eq(dropDanglingCounts(`${saved} ${ref}`), saved, `dangling: ${ref}`);
-    eq(dropDanglingCounts(`${four} ${ref}`), `${four} ${ref}`, `kept list: ${ref}`);
-    eq(dropDanglingCounts(`${four} ${ref.replace(/four|4/, "three")}`), four, `wrong count: ${ref}`);
-    eq(dropDanglingCounts(`1. IT support\n2. Data entry\n3. QA tester\n4. Tech support\n${ref}`), `1. IT support\n2. Data entry\n3. QA tester\n4. Tech support\n${ref}`, `numbered: ${ref}`);
+  const droppedList = "1. IT support\n2. Data entry\n3. QA tester\n4. Tech support";
+  for (const ref of ["Pick whichever of the four roles above sounds closest and I'll search for it.", "I'll look up the 4 roles I listed next.", "Which of those four sounds closest?"]) {
+    eq(dropDanglingCounts(`${saved} ${ref}`, droppedList), saved, `dangling: ${ref}`);
+    eq(dropDanglingCounts(`${saved} ${ref}`, ""), `${saved} ${ref}`, `nothing dropped: ${ref}`);
+    eq(dropDanglingCounts(`${saved} ${ref}`, "Nothing has been sent."), `${saved} ${ref}`, `what was dropped held no list: ${ref}`);
+    eq(dropDanglingCounts(`${four} ${ref}`, droppedList), `${four} ${ref}`, `the list is still shown: ${ref}`);
+    eq(dropDanglingCounts(ref, droppedList), ref, `never emptied: ${ref}`);
   }
-  // (a count that refers to no list is untouched)
-  eq(dropDanglingCounts(`${saved} I can put the 10 postings I find in a File for you.`), `${saved} I can put the 10 postings I find in a File for you.`);
-  // (in the pipeline, on what it keeps)
+  // (in the pipeline, on what it drops)
   const { l } = await emptySearch(H034, "entry level help desk IT support");
-  const v = await verifyTagged("1. Plumber [E99].\n2. Welder [E99].\n3. Electrician [E99].\n4. Carpenter [E99].\nWhich of those four sounds closest to what you want?", l, { ask: H034, judge: yes });
-  assert(!v.text.includes("those four"), v.text);
-  // (through a real turn: the delivered reply)
-  const r = await turn("entry level help desk IT support", `${saved} Pick whichever of the four roles above sounds closest and I'll search for it.`, H034);
+  const v = await verifyTagged(`Nothing has been sent or applied to.\n1. Plumber [E99].\n2. Welder [E99].\n3. Electrician [E99].\n4. Carpenter [E99].\nWhich of those four sounds closest to what you want?`, l, { ask: H034, judge: yes });
+  assert(!v.text.includes("those four") && v.text.includes("Nothing has been sent"), v.text);
+  // (through a real turn: the condense or pipeline path dropped the list, the reference goes)
+  const r: any = await turn("entry level help desk IT support", `1. Plumber [E99].\n2. Welder [E99].\n3. Electrician [E99].\n4. Carpenter [E99].\nNothing has been sent or applied to. Pick whichever of the four roles above sounds closest and I'll search for it.`, H034);
   assert(!String(r.reply).includes("four roles above"), r.reply);
 });
 
-// ---- review of ac1e068aa (REJECT): probes p1-p4 as regression tests, and the verified next-step line
+Deno.test("review p5, p6: true counts stay (no bare 'all N' or 'one of the N'; a File link, a pair or the sentence's own series shows the items)", async () => {
+  const droppedList = "1. IT support\n2. Data entry\n3. QA tester\n4. Tech support";
+  for (const r of ["I sent all 5 applications. Nothing else is waiting on you.", "Applied to all three roles you picked. You'll see them on your list.",
+    "I put the 10 matching postings in a File:\nhttps://trainee.app/f/abc\nWhich of those 10 should I apply to first?",
+    "Your File has 12 postings:\nhttps://trainee.app/f/abc\nPick any of the 12 and I'll prepare it.", "All four answers you gave were strong. Want another question?",
+    "Of the 3 interviews you have, the Stripe one is first.", "These 3 steps matter: tailor, apply, follow up.", "1. Help desk technician\n2. QA tester\nWhich of those two fits?",
+    "Help desk technician and QA tester are two good starts. Which of those two fits?", "You applied to 4 jobs last week; all four are still pending."]) {
+    eq(dropDanglingCounts(r), r, r);
+    eq(dropDanglingCounts(r, droppedList), r, `with a dropped list: ${r}`);
+  }
+  for (const draft of ["Sounds good. Practice the STAR format for all three stories you mentioned, then send me your first one.",
+    "Great, all four of your references said yes, so you're set there. Want me to draft the thank-you note?",
+    "Ok. Pick all three of the roles you're interested in and I'll keep them in mind."]) {
+    const model = async () => ({ content: [{ type: "text", text: draft }], stop_reason: "end_turn" });
+    const r: any = await agentTurn({ message: "i have three stories ready for my interview: the outage, the migration and the launch", history: [], stores: { profile: { facts: [] } }, userId: "u", threadId: "t", now: NOW, model, postings: async () => [], supportJudge: yes } as any);
+    eq(r.reply, draft, draft);
+  }
+});
 
 Deno.test("review p1: a suggestion-held claim goes to the support judge like any other, and a no drops it", async () => {
   const { l } = await emptySearch(H034, "entry level help desk IT support");

@@ -444,6 +444,10 @@ export const CONTRACTS: Record<string, Contract> = {
   requirements: { id: "requirements", says: "A question about what is needed lists each thing needed.", missing: (r) => (r.match(/(?:^|\n)\s*(?:\d+[.)]|[-•])\s+/g) ?? []).length >= 2 || (r.match(/,|;/g) ?? []).length >= 2 ? null : "the reply does not list what is needed" },
   draft: { id: "draft", says: "A draft the person sends themselves says, after it, that it was not sent.", missing: (r) => /\bnot sent\b|\bnothing (?:was )?sent\b/i.test(r) ? null : "the draft is not marked as not sent" },
 };
+// Review rv4 (architect ruling, 2026-11-17: one contract system): the product never picks a contract from the person's message.
+// The brain's contracts are attached to the tool whose result the reply reports (task_contracts.ts withContracts) and the
+// pipeline's checks come from them (pipelineContracts). This reader is called by nothing in the product; it stays only because
+// an existing architect assertion (tests/architect/pending/reply-pipeline-20261114.test.ts) pins it, for the architect to retire.
 export function contractsFor(intent: string | null, message: string): Contract[] {
   const m = String(message ?? "").toLowerCase(), out: Contract[] = [CONTRACTS.answer_first];
   if (/\breferr?al\b|\brefer me\b/.test(m)) out.push(CONTRACTS.referral);
@@ -451,7 +455,6 @@ export function contractsFor(intent: string | null, message: string): Contract[]
   if (/\bwhat (?:do i|would i|will i) need\b|\bwhat(?:'s| is) (?:needed|required)\b|\brequirements?\b|\bwhat do you need\b/.test(m)) out.push(CONTRACTS.requirements);
   return out;
 }
-export const contractBlock = (cs: Contract[]) => cs.length ? `THIS REPLY MUST: ${cs.map((c) => c.says).join(" ")}` : "";
 
 // ------------------------------------------------------------------------------------------------ repair + fallback
 export type RepairModel = (o: { system: string; user: string }) => Promise<string>;

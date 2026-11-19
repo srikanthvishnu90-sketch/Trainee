@@ -3,7 +3,8 @@
 // recorded) plus what a messy message needs to have something to act on:
 //   postings   six fictional internships with Greenhouse job links (board "wv"), beside the response world's four.
 //   person     "resume": "confirmed" seeds a confirmed resume file (tests/flow/resume-seed.ts) and a handful of confirmed
-//              profile facts (school, major, graduation, skills, one job), all fictional; "none" has nothing on file.
+//              profile facts (school, major, graduation, skills, one job), all fictional, on the account's memory (as a
+//              texting person's profile is kept); "none" has nothing on file.
 //   offer      "offer": n prepares n applications for the first n wv postings (the same payload builder the apply tests use,
 //              tests/architect/scenarios-apply-r3-battery.ts payloadOf), so the setup search ends with the one yes question
 //              (D-MS-1) and a later "yeah do it" has a real batch to approve or not.
@@ -51,6 +52,12 @@ export async function openWordVomitWorld(people: number, opts: { model?: (req: R
       // The seeded file holds one fact; add the person's other confirmed facts to the same stored profile.
       const facts = FACTS.map(([kind, text], k) => ({ id: `wv-fact-${k}`, kind, status: "confirmed", needs_confirmation: false, confirmation_event_id: `seed-resume-${p.id.slice(-12)}`, text }));
       await w.pg.sql(`update public.agent_flow_state set state = jsonb_set(state, '{career,stores,profile,facts}', (state->'career'->'stores'->'profile'->'facts') || ${lit(JSON.stringify(facts))}::jsonb) where user_id = '${p.id}'`);
+      // A texting person's profile is the account's, not one thread's (career_account_memory.ts, ROOT CAUSE 3): the confirmed
+      // facts ride the account record's memory, as they do for everyone on Telegram, WhatsApp or iMessage. Without this the
+      // fresh chat thread saw no resume at all.
+      await w.pg.sql(`update public.career_watch_kv set value = value || jsonb_build_object('memory', jsonb_build_object('v', 1, 'profile',
+          (select state->'career'->'stores'->'profile' from public.agent_flow_state where user_id = '${p.id}' limit 1), 'updated_at', now()::text))
+        where user_id = '${p.id}' and key = 'career:account'`);
     }
     if (s.offer) {
       const sha = (await w.pg.sql(`select encode(sha256(convert_to(${lit(RESUME_A)}, 'UTF8')), 'hex')`)).trim();

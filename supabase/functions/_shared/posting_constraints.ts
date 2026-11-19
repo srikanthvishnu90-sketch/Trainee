@@ -167,6 +167,10 @@ export function roleTextOf(text: string): string {
 // A workplace the person rules out ("nothing in an office", "no office", "not onsite", "I don't want to work in an office", "never in
 // person"): remote only. Not one: "not fully onsite" (hybrid is fine) and "no more than 2 office days" (a count of days).
 export const NO_OFFICE = /\b(?:nothing|no|not|never|without|(?:i\s+)?(?:don'?t|do not|won'?t|will not)\s+(?:want|work|go)(?:\s+to\s+(?:work|be|go))?)\s+(?:(?:in|at|from|into|to)\s+)?(?:(?:an?|the|any)\s+)?(?:offices?|on[- ]?site|in[- ]office|in[- ]person|commut(?:e|es|ing))\b(?![- ]days?\b)(?:\s+(?:jobs?|roles?|work|positions?))?/;
+// S3 r12b review: the district words written after a city, and the places a search names besides its own.
+const PLACE_DISTRICT = "downtown|uptown|midtown|area|metro(?:politan)?(?:\\s+area)?|suburbs?|region|proper";
+const SECOND_PLACE = new RegExp(`(?:\\b(?:to|or|and|then)\\s+|[,/]\\s*)(?:${[...US_CITIES].sort((a, b) => b.length - a.length).map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")}|${Object.values(STATE_NAMES).join("|")}|${ABROAD.source})(?![\\w-])`, "g");
+const HEDGE = /\bi (?:guess|think|suppose|reckon|mean)\b|\b(?:maybe|perhaps|probably|ideally|preferably|if possible|or so)\b/g;
 export function searchTextOf(message: string): SearchText {
   const raw = String(message ?? "").replace(/\s+/g, " ").trim();
   let t = lc(raw);
@@ -204,10 +208,21 @@ export function searchTextOf(message: string): SearchText {
   if (place) {
     const esc = place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const states = Object.entries(STATE_NAMES).flatMap(([c, n]) => [c, n]).sort((a, b) => b.length - a.length).map((x) => x.replace(/ /g, "\\s+")).join("|");
+    // S3 r12b review: the alias spelled out is the place ("in New York City" left the role "data analyst city").
+    for (const k of Object.keys(ALIAS).sort((a, b) => b.length - a.length)) if (ALIAS[k] === place) t = t.replace(new RegExp(`\\b${k}\\b`, "g"), place);
     t = t.replace(new RegExp(`\\b${esc}\\s*,\\s*(?:${states})\\b`, "g"), place);
+    // S3 r12b review (PR #871): without the comma too, and a country or a district after the city: "in Austin TX", "in Columbus
+    // Ohio", "in London UK", "in Chicago downtown" left the role "data analyst tx" / "ohio" / "uk" / "downtown". ("ok", "hi", "or",
+    // "in" and "me" are words before they are states; "co-op" is not Colorado.)
+    t = t.replace(new RegExp(`\\b${esc}\\s+(?:${states.split("|").filter((x) => !["ok", "hi", "or", "in", "me"].includes(x)).join("|")}|${ABROAD.source}|${PLACE_DISTRICT})(?:\\s+(?:${PLACE_DISTRICT}))?(?![\\w-])`, "g"), place);
   }
   if (place) t = t.replace(new RegExp(`\\b(?:in|near|around|based in|located in)\\s+${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ").replace(new RegExp(`\\b${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ");
   for (const [k, v] of Object.entries(ALIAS)) if (v === place) t = t.replace(new RegExp(`\\b${k}\\b`, "g"), " ");
+  // S3 r12b review: a second place after the one searched ("in Austin to Dallas", "in Austin or Dallas") is a place, never a role
+  // word; the search has one place, so it is left out of the role, not searched.
+  if (place) t = t.replace(SECOND_PLACE, " ");
+  // A hedge is how the person talks, never a title ("analyst roles in Austin i guess" searched the role "analyst guess").
+  t = t.replace(HEDGE, " ");
   // R10 WO-C (architect, 2026-11-09): region and area words are the place, never the role ("data analyst area u s", "us analytics").
   t = t.replace(/(?<![\p{L}\p{N}])(?:in\s+)?(?:the\s+)?(?:u\.\s?s\.?(?:a\.?)?|us|usa|united states|america)(?![\p{L}\p{N}])/gu, " ")
     .replace(/\b(?:the\s+)?(?:greater\s+)?(?:area|metro(?:politan)?|suburbs?|region|nationwide|anywhere)\b/g, " ");

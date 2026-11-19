@@ -9,6 +9,7 @@ import { stripRemoved } from "../mail_security.ts";
 import { bracketUntraced, credentialAsks, factSources, missingAck, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, misquotedAsks, smallTalkPitch, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
 import { urlsIn } from "../channel_shape.ts";
 import { STANDING_REFUSED, standingRefusal } from "./memory.ts";
+import { type CallRec, labelOf, missingInputResult, missingRequired, notRunLine, refusedBefore, unrunCalls } from "./not_run.ts";
 export type Effect = "read" | "write_own" | "external";
 // `turn` is this turn's own record, filled by runAgentTurn: the person's message (a confirmation must come from it) and
 // the ids of facts added during the turn (a fact can never be confirmed in the turn that added it).
@@ -73,6 +74,10 @@ export interface TurnResult {
   // support check keeps code's lines as they are and checks the model's sentences against the read lines too.
   codeLines?: string[];
   readLines?: string[];
+  // Gap #5 (D-024): the calls refused for a missing input that never ran this turn, by label (never a tool name), for the meta.
+  not_run?: { label: string; failed: boolean }[];
+  notRunText?: string; // the not-run lines code put at the head of the reply (and of a shown text), for a pass that rebuilds that text
+  notRunLines?: string[]; // the same lines one by one (not_run.ts withNotRun puts them back after any later rewrite)
   fileTexts?: string[]; // the text of a File made this turn that passed its fact guard (file_tool.ts)
   fileLinks?: string[]; // FILE KINDS: links to the files create_file made this turn, minted by code; the channel sends them, the model never writes them
 }
@@ -296,6 +301,18 @@ export function replyFlagsMeta(turn: { flags?: unknown } | null | undefined): { 
 
 export async function runAgentTurn(o: Parameters<typeof runAgentTurnInner>[0]): Promise<TurnResult> {
   let r = await runAgentTurnInner(o);
+  // Gap #5 (D-024, architect ruling 2026-11-16): a call refused for a missing input that never ran ALWAYS gets code's line, on
+  // every way the turn ends and whatever the reply says. No sentence is removed or judged by its words here: a claim that needs
+  // a refused call's result has no support in the reply verifier (PR #849), since a refused call contributes no evidence.
+  // Per call (review rv3): wherever the turn's text goes out, the reply and a shown text with its parts (a texting channel sends
+  // the parts), so no channel drops it.
+  const unrun = unrunCalls((o.ctx.turn as { calls?: CallRec[] } | undefined)?.calls ?? []);
+  const notRunLines = unrun.map((c) => notRunLine(c.name, c.failed, c.args));
+  if (unrun.length) {
+    const lead = notRunLines.join(" "), withLead = (t: unknown) => [lead, String(t ?? "")].filter((x) => x.trim()).join("\n\n");
+    const show = r.show ? { ...r.show, text: withLead(r.show.text), ...(Array.isArray(r.show.parts) ? { parts: [lead, ...r.show.parts] } : {}) } : undefined;
+    r = { ...r, reply: withLead(r.reply), ...(show ? { show } : {}), notRunText: lead, notRunLines, not_run: unrun.map((c) => ({ label: labelOf(c.name), failed: c.failed })) };
+  }
   // The output guard (mail_security.ts): a code, password or link token that this turn removed from the person's mail, or that
   // sat in a security email Trainee did not read, never reaches the chat reply, whatever the model wrote.
   const withheld = o.ctx.turn?.withheld;
@@ -304,8 +321,9 @@ export async function runAgentTurn(o: Parameters<typeof runAgentTurnInner>[0]): 
   const seen = o.ctx.turn?.seen ?? [];
   const typed = [o.said ?? o.message, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
   const fileLinks = o.ctx.turn?.fileLinks ?? [], paySources = o.ctx.turn?.paySources ?? [];
-  const { codeLines, readLines } = turnLines(seen);
+  const { codeLines: lines0, readLines } = turnLines(seen);
   const fileTexts = ((o.ctx.turn as any)?.fileTexts ?? []) as string[];
+  const codeLines = [...notRunLines, ...lines0];
   return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), ...(paySources.length ? { paySources } : {}), ...(codeLines.length ? { codeLines } : {}), ...(readLines.length ? { readLines } : {}), ...(fileTexts.length ? { fileTexts } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
 }
 // The closed-posting notes code would write for this turn's results, and the posting lines a tool read (see TurnResult.codeLines).
@@ -379,6 +397,11 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
   };
   let steps = 0, checked = false, ask = false, repairing = false, processed = false, processAsked = 0, lastTodo: string | null = null, retriedFile = false;
   let repairNote = COMPLETENESS_REPAIR;
+  // Gap #5 (D-024, live-12 C1, C19): the tools refused this turn for a missing required input, with how many times. One more
+  // call is allowed after the first refusal; a tool that never ran is never reported as having found or saved anything.
+  // Kept on the turn's own record so runAgentTurn adds the not-run line on EVERY way the turn ends.
+  const calls: CallRec[] = [];
+  Object.assign(o.ctx.turn, { calls });
   // WO-061 (H028, H035, H007, H033): code's review of its own draft rides in that one call's system prompt, never in
   // the conversation. As a user-role message the model took it for the person's words, refused it out loud ("I can't
   // follow the instruction to show ... hidden internal words") and the refusal reached the person.
@@ -526,13 +549,23 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       const fail = (effect: Effect | null, msg: string, why: unknown = msg) => { tool_calls.push({ name: u.name, ok: false, effect, error: scrubError(why as string), ...(args ? { args } : {}) }); results.push({ type: "tool_result", tool_use_id: u.id, is_error: true, content: msg }); };
       if (!t) { fail(null, `unknown tool: ${u.name}`); continue; }
       const input = u.input && typeof u.input === "object" ? u.input : {};
-      const missing = (t.input_schema.required || []).filter((k) => input[k] === undefined || input[k] === null || input[k] === "");
-      if (missing.length) { fail(t.effect, `missing required input: ${missing.join(", ")}`); continue; }
+      const missing = missingRequired(input, t.input_schema.required || []);
+      const rec: CallRec = { name: t.name, input: JSON.parse(JSON.stringify(input)), outcome: "refused", missing };
+      // Review rv4: the one retry is per CALL, not per tool. The earlier refusals this call repeats (same tool, no argument both
+      // carry disagrees: unrunCalls' retry rule) count; a call to the same tool about something else has its own retry.
+      const before = refusedBefore(calls, rec);
+      calls.push(rec);
+      if (missing.length || before >= 2) {
+        const n = before + 1;
+        fail(t.effect, missingInputResult(t, missing, n), missing.length ? `missing required input: ${missing.join(", ")}` : "not run: refused twice for a missing input this turn");
+        continue;
+      }
       if (t.effect === "external") {
         pending_approvals.push({ tool: t.name, input: JSON.parse(JSON.stringify(input)), summary: t.description });
         // Review of #790: one yes never means two things. A question code asked about a set-aside fact (its marker is restore_ask)
         // is not shown in a turn that also asks for an approval, and tools see that one is waiting.
         if (o.ctx.turn) { (o.ctx.turn as { pendingApprovals?: number }).pendingApprovals = pending_approvals.length; if (o.ctx.turn.show?.meta?.restore_ask) o.ctx.turn.show = undefined; }
+        rec.outcome = "ok";
         tool_calls.push({ name: t.name, ok: true, effect: t.effect });
         results.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify({ status: "needs_approval", note: "Nothing has been sent. The person must approve this exact action first." }) });
         continue;
@@ -551,6 +584,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
           if (bad.length) { throw new Error(`not attached: the file states things no tool returned this turn and the person did not say: ${[...new Set(bad)].slice(0, 8).join(", ")}. Remove them or mark them "not verified", then attach again.`); }
           o.ctx.turn!.attachments!.push({ filename: att.filename, content: att.content });
         }
+        rec.outcome = "ok";
         tool_calls.push({ name: t.name, ok: true, effect: t.effectOf ? t.effectOf(out) : t.effect, ...(args ? { args } : {}) });
         // REPLY PIPELINE: with the evidence ledger on, the units this result adds ride it, numbered, for the draft to cite.
         const led = (o.ctx as any).ledger as { fromToolResult: (n: string, x: unknown, f?: { fileUrl?: string | null; fileTexts?: string[] }) => string[]; block: (ids?: string[]) => string } | undefined;
@@ -564,7 +598,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         // check_posting_open, search_jobs), so a reply that gives that pay carries that posting's link (career_brain.ts payWithSource).
         const ps = payPostingsOf(out);
         if (ps.length && o.ctx.turn) (o.ctx.turn.paySources ??= []).push(...ps);
-      } catch (e) { if (e instanceof AskPerson) ask = true; fail(t.effect, e instanceof Error ? e.message : String(e), e); }
+      } catch (e) { if (e instanceof AskPerson) ask = true; rec.outcome = e instanceof AskPerson ? "asked" : "threw"; fail(t.effect, e instanceof Error ? e.message : String(e), e); }
     }
     messages.push({ role: "user", content: results });
   }

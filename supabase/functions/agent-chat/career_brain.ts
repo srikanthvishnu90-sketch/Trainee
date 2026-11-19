@@ -25,6 +25,7 @@ import { confirmedRow, factRows } from "../_shared/agent/memory.ts";
 import { evidenceTurn, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
 import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
 import { recordPrepAsked } from "./career_staged.ts";
+import { nextStepLine } from "../_shared/agent/next_step.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
@@ -585,6 +586,11 @@ export async function agentTurn(o: {
   const supportAll = supportTrace && supportTrace.refused.length ? supportTrace : researchTrace;
   const withSupport0 = supportAll ? { ...result, support: supportAll } : result;
   const withSupport = pipeline ? { ...withSupport0, pipeline, ...(piped ? { piped: { repaired: piped.repaired, calls: piped.calls, judgeCalls: piped.judgeCalls, judgeClaims: piped.judgeClaims, judgeCapped: piped.judgeCapped, fallback: piped.fallback, dropped: piped.dropped } } : {}) } : withSupport0;
+  // S3 r12 (architect ruling): an empty search whose kept reply asks and offers nothing gets code's one next-step line (next_step.ts),
+  // after the pipeline and the condense pass, never judged.
+  const nextStep = withSupport.reply && withSupport.stopped === "final" && !withSupport.show
+    ? nextStepLine(String(withSupport.reply), (ctx.turn as any)?.emptySearch ?? null, Array.isArray(withSupport.postings) && withSupport.postings.length > 0) : null;
+  if (nextStep) (withSupport as any).reply = `${String(withSupport.reply).trimEnd()}\n\n${nextStep}`;
   // S3 r12 (dev H010): the questions a practice session the brain answered asked, for code's next serve (career_staged.ts recordPrepAsked).
   if (withSupport.reply && withSupport.stopped === "final") recordPrepAsked(o.stores as Record<string, any>, o.toolPolicy?.intent ?? null, String(withSupport.reply));
   return know ? { ...withSupport, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : withSupport;

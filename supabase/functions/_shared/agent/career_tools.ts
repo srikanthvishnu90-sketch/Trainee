@@ -904,6 +904,8 @@ export function careerTools(deps: {
           // entry-route table holds, the roles people commonly start in there (entry_routes.ts): evidence the reply may cite for the
           // roles EMPTY_SEARCH_NOTE asks it to name. They are general career knowledge, never postings.
           const routes = entryRoutesFor(c.turn?.message ?? "", asked);
+          // (S3 r12: the turn remembers the empty search's words, for code's next-step line, agent/next_step.ts)
+          if (c.turn) c.turn.emptySearch = asked;
           return { postings: [], total: 0, source: "none", note: EMPTY_SEARCH_NOTE, searched: asked, ...notSearched,
             ...(routes.length ? { suggestions: routes, note_suggestions: "suggestions are code's general career knowledge of where people commonly start in the field they named, not postings: name roles from them (cite their unit) when the note asks for roles; never present one as an opening, an employer or a posting" } : {}) };
         }

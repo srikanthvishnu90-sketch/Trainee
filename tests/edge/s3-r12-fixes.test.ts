@@ -176,3 +176,51 @@ Deno.test("S3 r12 / H010: \"next question\" never serves a bank question the bra
   // (a different question with the same frame is not the same question)
   assert(/Tell me about yourself/.test(serve(["Question 1: Tell me about a time you failed."])), "an unrelated question leaves the bank's order");
 });
+
+// ---- S3 r12, architect ruling: code's next-step line after an empty search whose kept reply neither asks nor offers (next_step.ts)
+import { agentTurn } from "../../supabase/functions/agent-chat/career_brain.ts";
+import { emptySearchNextStep, nextStepLine, watchCommand, watchWords } from "../../supabase/functions/_shared/agent/next_step.ts";
+import { stagedDecision } from "../../supabase/functions/agent-chat/career_staged.ts";
+const H035 = "got anything for nurses near columbus who want days only?";
+const stub = (query: string, draft: string) => {
+  let n = 0;
+  return async (p: any) => {
+    if (!p.tools?.length) return { content: [{ type: "text", text: "" }], stop_reason: "end_turn" };
+    n++;
+    return n === 1 ? { content: [{ type: "tool_use", id: "s1", name: "search_jobs", input: { query } }], stop_reason: "tool_use" }
+      : { content: [{ type: "text", text: draft }], stop_reason: "end_turn" };
+  };
+};
+const turn = (query: string, draft: string, message = H035) => agentTurn({ message, history: [], stores: { profile: { facts: [] } }, userId: "u-ns", threadId: "t-ns", now: NOW,
+  model: stub(query, draft), postings: async () => [], supportJudge: yes } as any) as Promise<any>;
+
+Deno.test("S3 r12 / H035: an empty search whose kept reply asks and offers nothing ends with code's watch line", async () => {
+  const r = await turn("registered nurse day shift Columbus", "The search for registered nurse day shift Columbus returned 0 postings [E2]. Nothing has been sent or applied to.");
+  const line = emptySearchNextStep("registered nurse day shift Columbus")!;
+  eq(line, 'Say "watch for registered nurse day shift Columbus roles" and I\'ll save a watch for them on your list.');
+  assert(String(r.reply).endsWith(line), r.reply);
+  eq(String(r.reply).split(line).length, 2, "once");
+});
+
+Deno.test("S3 r12 / H035: no line when the brain's own question or offer stood, or when the search found postings", async () => {
+  const asked = await turn("registered nurse day shift Columbus", "The search for registered nurse day shift Columbus returned 0 postings [E2]. Which of those sounds closest to what you want?");
+  assert(!/save a watch/.test(asked.reply), asked.reply);
+  eq(nextStepLine("Nothing matched. I can look at named hospitals if you name them.", "nurse", false), null, "an offer");
+  eq(nextStepLine("Nothing matched.", "nurse", true), null, "a search found postings");
+  eq(nextStepLine("Nothing matched.", null, false), null, "no empty search");
+  assert(nextStepLine("Nothing matched.", "nurse", false), "otherwise, the line");
+});
+
+Deno.test("S3 r12 / H035: the line's command is code's watch, word for word", () => {
+  const host = CareerHost.createCareerHost({ CareerAccess, CareerOnboarding, CareerRouter, CareerDoorstep, CareerReply, CareerContainment });
+  for (const q of ["registered nurse day shift Columbus", "entry level help desk support", "nurse \"days\" Columbus, OH"]) {
+    const cmd = watchCommand(watchWords(q)!);
+    assert(emptySearchNextStep(q)!.includes(`"${cmd}"`), cmd);
+    const ctx: any = host.createTurnCtx({ userId: "u1", threadId: "t1", now: NOW, snapshot: null });
+    const d = stagedDecision({ env: { get: (k: string) => k === "CAREER_BRAIN" ? "staged" : undefined }, message: cmd, ctx, host, structured: false });
+    eq([d.brain, d.intent], [false, "career_watch_create"], cmd);
+    const r = host.runTurn(cmd, ctx);
+    eq(r.intent, "career_watch_create", cmd);
+    assert(/^Watch set: /.test(String(r.reply)), r.reply);
+  }
+});

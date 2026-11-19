@@ -60,11 +60,12 @@ Deno.test("2: on the thread's list, an employer to skip is left out by name; 'th
   eq([await only.companies(), none?.status], [[], "none"], none?.reply);
 });
 
+// rv-ma7 (1.): the wording of the fail-closed reply changed (eligibility is never decided on a "qualify" ask); still nothing queued.
 Deno.test("3: 'that I qualify for' with no confirmed facts: nothing queued, the filter could not be checked", async () => {
   const w = await world([posting("A", "Software Engineering Intern", "Chicago, IL", "Must be enrolled in a PhD program."), posting("B", "Software Engineering Intern", "Chicago, IL")]);
   const r = await w.turn("apply to every SWE internship in Chicago that I qualify for");
   eq([await w.companies(), r?.status], [[], "none"], r?.reply);
-  assert(/couldn't check "that I qualify for"/.test(r!.reply), r?.reply);
+  assert(/couldn't confirm you're eligible/.test(r!.reply), r?.reply);
 });
 
 Deno.test("4: a fact only stated in chat never rules a posting out and is never called confirmed", async () => {

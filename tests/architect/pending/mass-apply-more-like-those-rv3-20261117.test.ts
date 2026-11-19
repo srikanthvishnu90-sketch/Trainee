@@ -49,6 +49,7 @@ Deno.test("'…but not remote', then '20 more like those': the widened search le
   assert(/widened/.test(more!.reply), more?.reply);
 });
 
+// rv-ma7 (1.): replaces the earlier qualify-carry behaviour (architect ruling: a "qualify" ask never queues and never decides eligibility).
 Deno.test("a saved 'that I qualify for' with nothing confirmed to check against: 'more' queues nothing and says so", async () => {
   const db = memoryPostingsDb();
   await db.putMany([posting("A", "Data Analyst", "Chicago, IL"), posting("B", "Data Analyst", "Chicago, IL")]);
@@ -57,5 +58,5 @@ Deno.test("a saved 'that I qualify for' with nothing confirmed to check against:
   const r = await applyTurn({ message: "apply to 20 more like those", userId: "u1", now: T, wants, apps: async () => [], facts: [], shortlist: null,
     postings: { search: (words: string[], l: number) => db.search(words, l) }, resumeOnFile: async () => true, lastSearch: async () => saved });
   eq([(await wants.list("u1")).length, r?.status], [0, "none"], r?.reply);
-  assert(/couldn't check "that I qualify for"/.test(r!.reply), r?.reply);
+  assert(/couldn't confirm you're eligible/.test(r!.reply), r?.reply);
 });

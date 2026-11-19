@@ -45,13 +45,14 @@ Deno.test("'…remote, but skip Stripe', then '20 more like those' (twice): Stri
   eq(await w2.companies(), ["Umbra", "Vesta"]);
 });
 
-Deno.test("'…that I qualify for', then '20 more like those': the qualify filter rides on the saved search", async () => {
+// rv-ma7 (1.): replaces the earlier qualify-carry behaviour (architect ruling: a "qualify" ask never queues and never decides eligibility).
+Deno.test("'…that I qualify for', then '20 more like those': the qualify ask queues nothing and saves no search, so nothing is queued", async () => {
   const facts = [{ id: "F-1", text: "TEST University - B.S. Computer Science, graduating May 2028", status: "confirmed", needs_confirmation: false }];
   const rows = [posting("Northwind", "Software Engineering Intern", "Chicago, IL"), posting("Saltbox", "Software Engineer Intern, Research", "Chicago, IL", "Requirements: must be enrolled in a PhD program in Computer Science."),
     posting("Tidal", "Software Engineering Intern", "Chicago, IL")];
   const w = await thread(rows, facts);
   const first = await w.turn("apply to every SWE internship in Chicago that I qualify for");
-  eq(first?.search?.qualify, true, first?.reply);
+  eq([first?.status, first?.search], ["none", undefined], first?.reply);
   const more = await w.turn("apply to 20 more like those");
-  assert(!(await w.companies()).includes("Saltbox"), `${await w.companies()} / ${more?.reply}`);
+  eq(await w.companies(), [], more?.reply);
 });

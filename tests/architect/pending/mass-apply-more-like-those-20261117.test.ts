@@ -87,7 +87,8 @@ Deno.test("widening never re-adds a skipped employer either", async () => {
   eq(await w.companies(), ["Acme", "Northwind"], more?.reply);
 });
 
-Deno.test("a saved 'that I qualify for' search leaves out what their confirmed facts rule out on every 'more', and keeps qualify for the next", async () => {
+// rv-ma7 (1.): replaces the earlier qualify-carry behaviour (architect ruling: a "qualify" ask never queues and never decides eligibility).
+Deno.test("a saved 'that I qualify for' search queues nothing on 'more': each posting is shown with what it states, eligibility is not decided", async () => {
   const db = memoryPostingsDb();
   await db.putMany([posting("Fit Co", "Data Analyst", "Chicago, IL", "Data analyst. SQL, Excel, Tableau dashboards. Entry level."),
     posting("Nurse Co", "Registered Nurse", "Chicago, IL", "RN license required. BLS certification.")]);
@@ -98,8 +99,8 @@ Deno.test("a saved 'that I qualify for' search leaves out what their confirmed f
   const turn = (s: ManyWhat) => applyTurn({ message: "apply to 20 more like those", userId: "u1", now: T, wants, apps: async () => [], facts, shortlist: null,
     postings: { search: (w: string[], l: number) => db.search(w, l) }, resumeOnFile: async () => true, lastSearch: async () => s });
   const r = await turn(saved);
-  eq((await wants.list("u1")).map((x) => x.company), ["Fit Co"], r?.reply);
-  eq(r?.search?.qualify, true, "the qualify filter rides on the saved search");
+  eq([(await wants.list("u1")).length, r?.status], [0, "none"], r?.reply);
+  assert(/couldn't confirm you're eligible/.test(r!.reply) && /Nurse Co \(Chicago, IL\)/.test(r!.reply), r?.reply);
   // Without qualify on the saved search, nothing is ruled out on a guess: the nurse role is queued as any match is.
   const loose = memoryWantStore();
   await applyTurn({ message: "apply to 20 more like those", userId: "u1", now: T, wants: loose, apps: async () => [], facts, shortlist: null,

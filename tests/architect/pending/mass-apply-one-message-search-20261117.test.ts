@@ -37,7 +37,8 @@ const ROWS = () => [
 
 Deno.test("the ask is read: places each on their own, employers to skip, 'that I qualify for'", () => {
   eq(allSearchOf("apply to every SWE internship in Chicago or remote that I qualify for"), { search: { role: "swe internship", words: ["swe", "internship"], place: "chicago", places: ["chicago", "remote"] }, qualify: true });
-  eq(allSearchOf("apply to every data analyst role that's remote, but skip Stripe"), { search: { role: "data analyst", words: ["data", "analyst"], place: "remote" }, exclude: ["Stripe"] });
+  // rv-ma7: the parse also carries the clause it consumed (the guard reads every other word of the message).
+  eq(allSearchOf("apply to every data analyst role that's remote, but skip Stripe"), { search: { role: "data analyst", words: ["data", "analyst"], place: "remote" }, exclude: ["Stripe"], clause: ", but skip Stripe" });
   eq(allSearchOf("apply to all the data roles in NYC except Ramp and Plaid")?.exclude, ["Ramp", "Plaid"]);
   // A list referent, or no role words, is not a search: the thread's list, as before.
   for (const m of ["apply to every SWE intern role you found", "apply to all of them", "apply to all remote ones", "apply to all of those please"]) eq(allSearchOf(m), null, m);
@@ -76,23 +77,23 @@ Deno.test("with a list on the thread, 'all the remote internships' is still that
   eq(await b.companies(), ["Acme", "Brite"], "Chicago named: searched, not the list");
 });
 
-Deno.test("'that I qualify for': a degree the posting requires and their confirmed facts show they lack is left out, by name, with why", async () => {
+// Architect ruling rv-ma7 (1.) replaces this branch's earlier "that I qualify for" behaviour (left out by the confirmed degree;
+// rv-ma3 "couldn't check"): Trainee never decides eligibility here and never queues on a "qualify" ask by itself.
+Deno.test("'that I qualify for': nothing queued, each posting's stated requirement quoted as posted, one question", async () => {
   const rows = [posting("Northwind", "Software Engineering Intern", "Chicago, IL"), posting("Saltbox", "Software Engineer Intern, Research", "Chicago, IL", "Requirements: must be enrolled in a PhD program in Computer Science.")];
   const facts = [{ id: "F-1", text: "TEST University - B.S. Computer Science, GPA 3.7, graduating May 2028", status: "confirmed", needs_confirmation: false }];
-  const w = await world(rows, { facts });
-  const r = await w.turn("apply to every SWE internship in Chicago that I qualify for");
-  eq(await w.companies(), ["Northwind"]);
-  assert(/Left out: .*Saltbox \(the posting requires a PhD; your confirmed facts show a bachelor's\)/.test(r!.reply), r!.reply);
-  // Without "that I qualify for", or with no degree confirmed, nothing is ruled out on a guess.
+  for (const f of [facts, []]) {
+    const w = await world(rows, { facts: f });
+    const r = await w.turn("apply to every SWE internship in Chicago that I qualify for");
+    eq([await w.companies(), r?.status], [[], "none"], r?.reply);
+    assert(/Saltbox \(Chicago, IL\): the posting says "Requirements: must be enrolled in a PhD program in Computer Science\."/.test(r!.reply), r!.reply);
+    assert(/couldn't confirm you're eligible/.test(r!.reply) && !/your confirmed facts show/.test(r!.reply), r!.reply);
+    eq((r as any).listed?.length, 2, "the two found become the thread's list");
+  }
+  // Without "that I qualify for", nothing is ruled out on a guess.
   const all = await world(rows, { facts });
   await all.turn("apply to every SWE internship in Chicago");
   eq(await all.companies(), ["Northwind", "Saltbox"]);
-  // Review rv-ma3: with no confirmed fact to check against, "that I qualify for" is never every posting, silently: nothing is
-  // queued and the reply says the filter could not be checked.
-  const none = await world(rows);
-  const unchecked = await none.turn("apply to every SWE internship in Chicago that I qualify for");
-  eq(await none.companies(), []);
-  assert(/couldn't check "that I qualify for"/.test(unchecked!.reply), unchecked!.reply);
 });
 
 // A place ruled out is a location exclusion (fix, 2026-11-17): "not Remote" was read as an employer called Remote to skip, and

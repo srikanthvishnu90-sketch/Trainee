@@ -45,10 +45,11 @@ Deno.test("'…and don't apply to Stripe', 'not remote, skip Stripe': the resolv
   }
 });
 
-Deno.test("a saved 'that I qualify for': a new posting whose requirement no confirmed fact checks is never queued on 'more'", async () => {
+// rv-ma7 (1.): replaces the earlier qualify-carry behaviour (architect ruling: a "qualify" ask never queues and never decides eligibility).
+Deno.test("after 'that I qualify for' (nothing queued, no search saved), 'more' queues nothing", async () => {
   const w = await thread([posting("A", "Software Engineer Intern", "Chicago, IL")], [{ kind: "education", text: "B.S. Computer Science, 2027" }]);
   await w.turn("apply to every SWE internship in Chicago that I qualify for");
   await w.db.putMany([posting("Cit", "Software Engineer Intern", "Chicago, IL", "Must be a US citizen."), posting("B", "Software Engineer Intern", "Chicago, IL")]);
   const more = await w.turn("apply to 10 more like those");
-  eq(await w.companies(), ["A", "B"], more?.reply);
+  eq(await w.companies(), [], more?.reply);
 });

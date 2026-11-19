@@ -287,6 +287,11 @@ test("rpc store: pending/claim/finish speak the batch RPCs, and finish carries t
   assert.equal(finishCall[1].p_state, "completed");
 });
 
+// architect amendment (D-092, owner 2026-11-16; route only): "apply to 15 <role> roles" is now the chat's searched first-N
+// ask (career_apply_chat.ts applyManyAsk), not the router's batch delegation. The delegation is still what this suite tests, so
+// its ask is the same request with the count spelled ("fifteen"), which only the router's batch parser reads
+// (parseApplyAsk); the family, the count of 15 and every assertion after the ask are unchanged.
+const DELEGATED_ASK = "apply to fifteen software engineering intern roles";
 // ---------------- the full composition ------------------------------
 test("delegation: the exact owner message runs ask -> prepare -> card -> yes -> execute -> submitted end states", { timeout: 180000 }, async () => {
   const { child, baseUrl } = await spawnBoardService();
@@ -296,7 +301,7 @@ test("delegation: the exact owner message runs ask -> prepare -> card -> yes -> 
   try {
     // 1. THE ASK — one message; the seam delegates; the reply is an
     // honest queued claim and one prepare intent is committed.
-    const ask = await app.chat("apply to 15 software engineering intern roles", "dk-ask-1");
+    const ask = await app.chat(DELEGATED_ASK, "dk-ask-1");
     assert.equal(ask.status, 200, JSON.stringify(ask.body));
     assert.equal(ask.body.meta.intent, "career_batch_apply", ask.body.reply);
     assert.equal(ask.body.meta.result_status, "queued", ask.body.reply);
@@ -391,7 +396,7 @@ test("degradation: with no worker configured there is no delegation — the hone
   const db = freshDb();
   const app = await stagedApp(db, USER, false);
   try {
-    const ask = await app.chat("apply to 15 software engineering intern roles", "dk-unwired-1");
+    const ask = await app.chat(DELEGATED_ASK, "dk-unwired-1");
     assert.equal(ask.status, 200, JSON.stringify(ask.body));
     assert.equal(ask.body.meta.intent, "career_batch_apply", ask.body.reply);
     assert.ok(!ask.body.batch, "no batch intent is attached — nothing was delegated");
@@ -407,13 +412,13 @@ test("WO-106/F5 a worker URL without a deployed executor: no handoff claim, no i
   const db = freshDb();
   const app = await stagedApp(db, USER, true, false);
   try {
-    const ask = await app.chat("apply to 15 software engineering intern roles", "dk-noexec-1");
+    const ask = await app.chat(DELEGATED_ASK, "dk-noexec-1");
     assert.equal(ask.status, 200, JSON.stringify(ask.body));
     assert.doesNotMatch(ask.body.reply, /browser worker|handed/, ask.body.reply);
     assert.match(ask.body.reply, /nothing was searched, prepared or sent/, ask.body.reply);
     assert.ok(!ask.body.batch, "no batch intent rides the reply");
     assert.ok(!db.batchIntents || db.batchIntents.size === 0, "no intent was committed");
-    t.diagnostic(`person: apply to 15 software engineering intern roles  ->  Trainee: ${ask.body.reply}`);
+    t.diagnostic(`person: ${DELEGATED_ASK}  ->  Trainee: ${ask.body.reply}`);
     const status = await app.chat("what's my batch status", "dk-noexec-2");
     t.diagnostic(`person: what's my batch status  ->  Trainee: ${status.body.reply}`);
     assert.doesNotMatch(status.body.reply, /queued_prepare|browser worker|handed/, `no phantom batch reads back: ${status.body.reply}`);
@@ -429,7 +434,7 @@ test("degradation: worker configured but the board service is down — every sel
   const app = await stagedApp(db, USER, true);
   const provider = providerBoardFor(baseUrl, USER);
   try {
-    const ask = await app.chat("apply to 15 software engineering intern roles", "dk-down-1");
+    const ask = await app.chat(DELEGATED_ASK, "dk-down-1");
     assert.equal(ask.body.meta.result_status, "queued", ask.body.reply);
     const runId = ask.body.batch.id;
     const executor = makeExecutor(db, () => provider.boardFor);

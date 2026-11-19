@@ -241,6 +241,7 @@ const POSTING_CLAIM = /\b(?:openings?|postings?|posted|vacanc(?:y|ies)|hiring|hi
 const NO_POSTING = /\b(?:not|no|never|nor|zero|0)\s+(?:an?\s+|any\s+)?(?:[\p{L}-]+\s+){0,2}?(?:openings?|postings?|listings?|vacanc(?:y|ies))\b/giu;
 const forClaim = (us: EvidenceUnit[], text: string) => POSTING_CLAIM.test(String(text).replace(NO_POSTING, " ")) ? us.filter((u) => u.kind !== "suggestion") : us;
 const TAG_AFTER_STOP = /([.!?])(["'\u201d)\]]*)[ \t]*(\[E\d+(?:\s*,\s*E\d+)*\])/g;
+const SUGGESTION_UNSAFE = /\b(?:pay|pays|paid|paying|salar\w*|wages?|earn\w*|requir\w*|sponsor\w*|degrees?|certif\w*|licen[cs]\w*|guarantee\w*|always|never)\b|[$€£%]/i;
 const LIST_MARK = /^\s*(?:\(?\d{1,2}[.)]|[-•*]|[a-z][.)])\s*$/i;
 export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: SupportJudge | null; own?: string[]; onRecord?: (s: string) => boolean | null; ask?: string; carry?: string | null } = {}): Promise<Verified> {
   // (a question to the person may name only what their own record or their ask names)
@@ -445,6 +446,9 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (c.subject && (unitOwner ? unitOwner !== c.subject : !c.soft && !nameFoundIn(c.subject, f.unit.passage))) { failures.push({ sentence: c.claim, reason: `the unit that holds "${c.clause}" is not about ${c.subject}`, subject: c.subject }); bad.add(`${c.a}:${c.b}`); return; }
     // (an untagged sentence a unit supports keeps that unit's source link, as a tagged one does)
     if (c.untagged && held) citeAt.set(`${c.a}:${c.b}`, [...new Set([...(citeAt.get(`${c.a}:${c.b}`) ?? []), held.id])]);
+    // (S3 r12, architect ruling: a suggestion unit is code's own words, as code's lines are; a clause it holds by layer A, with no
+    // figure, no posting claim and no pay, requirement or credential claim of its own, stands on it without the judge)
+    if (held?.kind === "suggestion" && !figure && !POSTING_CLAIM.test(c.clause.replace(NO_POSTING, " ")) && !SUGGESTION_UNSAFE.test(c.clause)) return;
     asks.push({ k, claim: withSubject(c), source: f.unit.passage });
   });
   const got = await judgeAll(o.judge, asks.map((x) => ({ claim: x.claim, source: x.source })));

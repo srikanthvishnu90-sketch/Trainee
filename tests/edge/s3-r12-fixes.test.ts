@@ -75,6 +75,20 @@ Deno.test("S3 r12 / H034: an empty-search reply naming the suggested roles survi
   assert(v.text.includes("Which of those sounds closest to what you want?"), v.text);
 });
 
+Deno.test("S3 r12 / H034: a sentence a suggestion unit holds stands without the judge; pay, requirements and postings on it do not", async () => {
+  // (the eval harness gives the brain no support judge, so every judged claim fails closed there: probe-r12-ruling kept nothing)
+  const { l } = await emptySearch(H034, "entry level help desk IT support");
+  const sg = l.units.find((u) => u.kind === "suggestion")!;
+  const good = `People moving into computer and IT work commonly start as IT support or help desk technician, data entry or records clerk, or QA tester [${sg.id}].`;
+  const v = await verifyTagged(good, l, { ask: H034, judge: null });
+  assert(v.text.includes("help desk technician"), JSON.stringify(v));
+  for (const bad of ["IT support or help desk technician roles pay well and need no degree", "IT support or help desk technician roles require a certification",
+    "IT support or help desk technician openings are posted near you", "IT support or help desk technician jobs pay $20 an hour"]) {
+    const b = await verifyTagged(`${bad} [${sg.id}].`, l, { ask: H034, judge: null });
+    assert(!b.text, `kept: ${bad} -> ${b.text}`);
+  }
+});
+
 Deno.test("S3 r12 / H034: a tag written after the sentence's stop cites that sentence, not the next one", async () => {
   // (probe-r12-ruling: "…nothing to show yet. [E2] Cashiers commonly…" and the repair's "…not postings. [E3]" on its own line)
   const { l } = await emptySearch(H034, "entry level help desk support");

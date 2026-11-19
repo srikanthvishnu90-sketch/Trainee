@@ -37,6 +37,7 @@ import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.t
 import { styleBlock } from "../_shared/agent/style.ts";
 import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, historyAskOf, historyNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, shownPayNote, shownPayOf, shownPayPlaces, statesNothing, textLength } from "../_shared/agent/turn_notes.ts";
 import { severalAsks } from "../_shared/ask_language.ts";
+import { confirmClaimsDropped } from "../_shared/agent/reply_guards.ts"; // S3 r12b
 import { factCorrectionHints, factCorrectionNote, isOnePlace, plainAnswer, practiceAnswerNote, practiceAnswerOf, practiceAskIn, RESTORE_ASK_INTENT, restoreAnswerNote, staleFactNote, staleFactsOf } from "../_shared/agent/turn_notes.ts";
 import { answersFirst } from "../_shared/reply_rubric.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
@@ -569,6 +570,11 @@ export async function agentTurn(o: {
   if (typeof counted === "number" && result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: applicationCount(result.reply, counted) };
   // D-071 (live-8 C9: research ran, kept nothing, and the trace could not say why): what the research did with its pages and draft.
   const research = trace.m ? { kind: "kind" in trace.m ? "company" : "market", status: trace.m.status, ...((trace.m as any).audit ?? {}) } : null;
+  // S3 r12b (dev H005): a stated fact is never said to be waiting for their yes when no confirmation is open (reply_guards.ts).
+  if (result.reply && !result.show && !confirmationOpen({ stores: o.stores, cardPending: o.cardPending, restoreAsk: o.restoreAsk, pendingApprovals: result.pending_approvals?.length ?? 0 })) {
+    const plain = confirmClaimsDropped(result.reply);
+    if (plain !== result.reply) result = { ...result, reply: plain, flags: [...new Set([...(result.flags ?? []), "confirm_claim_dropped"])] };
+  }
   result = { ...result, reply: nonEmptyReply(result, trace.m), shorten, ...(research ? { research } : {}) } as typeof result;
   // Review rv4 (A1): whatever rewrote the reply or the shown text above, code's not-run lines lead it, once each.
   if (nrLines.length) {
@@ -1065,6 +1071,15 @@ const NOT_A_CLAIM = /^(?:so\s+|and\s+|ok(?:ay)?,?\s+)?(?:have|haven'?t|had|did|d
 // Also not a claim about their record: their own words given back, what cannot be confirmed, people in general, an employer's rule.
 const POLICY = /\bwithout\s+your\s+(?:yes|approval|ok|okay|say(?:-so)?|go-ahead|permission|confirmation)\b|\bon\s+(?:its|my)\s+own\b|\byou\s+(?:told|said)\b|\b(?:can't|cannot|couldn't|not)\s+(?:confirm|say|saying|tell|verify)\b|^(?:most|many|some)\s+(?:people|students|candidates)\b|\b(?:don't|doesn't|no)\s+need\b|\b(?:takes?|accepts?|accepting)\s+no\b|\bno\s+longer\s+(?:takes?|accepts?|accepting|taking)\b|\bresearch\s+only\b|\bread\s+only\b|\bsearch\s+only\b|\bnothing\s+more\s+was\b|\bwill\s+be\s+(?:prepared|sent|submitted)(?:\s+or\s+\w+)?\s+until\b|\bcan\s+be\s+submitted\s+from\b|^\W*nothing\s+submitted\W*$|\bno\s+account,\s+saved\s+application\b|\bno\s+application\s+was\s+(?:queued|sent|made)\b|\bnothing\s+(?:has\s+)?(?:gone|went|goes)\s+to\s+the\s+employer\b|\buntil\s+you\s+approve\b|\bstill\s+needs\s+its\s+own\s+review\b|\bnothing\s+to\s+apply\s+to\b|\bapproving\s+covers\b|\bnothing\s+prepares\b|\b(?:posting|role|job)\b[^.]{0,60}\bclosed\b|\bby\s+(?:me|trainee)\b|\banywhere\s+(?:new|else)\b|\bnone\s+of\s+your\s+applications\s+(?:were|was|got)\b|^(?:n?ever)\b[^?]*\?\s*$/;
 const APPLIED_A_THING = /\bappl(?:ied|y)\s+(?:the|your|my|any|those|these|that|this)\s+(?:\w+\s+){0,2}?(?:feedback|edits?|changes?|fix(?:es)?|advice|suggestions?|filters?|tips?|notes?)\b/g;
+// S3 r12b: a confirmation is open only when code asked for one: a card waiting for their answer, code's restore question, an
+// approval asked this turn, or the thread's last question was about a fact of theirs (a goal, a profile fact, a correction). A
+// search's or an offer's open question is not a confirmation of anything they said.
+const FACT_INTENT = /(?:goal|fact|profile|confirm|correct|preference|onboarding|intake)/i;
+export function confirmationOpen(o: { stores: unknown; cardPending?: boolean; restoreAsk?: unknown; pendingApprovals?: number }): boolean {
+  if (o.cardPending || o.restoreAsk || (o.pendingApprovals ?? 0) > 0) return true;
+  const d = (o.stores as any)?.trackStore?._careerThread?.lastDiscussion;
+  return !!d && d.pendingQuestion === true && FACT_INTENT.test(String(d.intent ?? ""));
+}
 export function saysNoApplications(reply: string): boolean { return noApplicationsIn(reply).length > 0; }
 function noApplicationsIn(reply: string): string[] {
   return String(reply ?? "").split(/(?<=[.!?])\s+|\n+/).filter((x) => {

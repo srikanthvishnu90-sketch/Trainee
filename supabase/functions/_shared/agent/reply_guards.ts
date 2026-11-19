@@ -618,3 +618,25 @@ export function misquotedAsks(reply: string, personSaid: string[]): { index: num
   });
   return out;
 }
+
+// S3 r12b (dev H005 on 8e80264f2: "It's on your record as your goal, and it's still waiting for your yes." when no confirmation had
+// been asked and nothing was waiting on them): a fact they stated is "not confirmed yet", which is true, but "waiting for your yes" says a
+// confirmation is open. The claim, as a clause of a sentence about their record (a fact, goal, school, anything on file), is dropped
+// when no confirmation is open (career_brain.ts confirmationOpen decides); the rest of the sentence stands. Applications, drafts,
+// messages and cards waiting for a yes are real approvals and are never touched here.
+const CONFIRM_CLAIM = /\s*(?:[,;]|\s[—–-])?\s*(?:(?:and|but|though)\s+)?(?:(?:it|that|this|which)(?:'s|\s+is)\s+|it\s+)?(?:still\s+)?(?:(?:waiting|pending|awaiting|waits)\s+(?:on\s+|for\s+)?(?:your|a|the)\s+(?:yes|confirmation|ok|okay|go-ahead|approval|sign-off)|needs?\s+your\s+(?:yes|confirmation|ok|okay|go-ahead|approval)|(?:needs|requires)\s+(?:a\s+)?(?:yes|confirmation)\s+from\s+you)\b[^.!?\n]*/i;
+const RECORD_TALK = /\b(?:record|recorded|goal|fact|facts|on file|saved|profile|noted|school|major|degree|location|city|preference)\b/i;
+const APPROVAL_TALK = /\b(?:applications?|apply|applying|submit\w*|drafts?|messages?|emails?|outreach|card|batch|queue\w*|send|sending|sent|cover letters?|resume|packet)\b/i;
+export function confirmClaimsDropped(reply: string): string {
+  const out = String(reply ?? "").split("\n").map((line) => line.split(/(?<=[.!?]["'”’)\]]*)\s+/).map((x, i, all) => {
+    // About their record: the sentence says so, or it is "it/that/this" right after a sentence that does.
+    const about = RECORD_TALK.test(x) || (/^\W*(?:it|that|this)\b/i.test(x) && i > 0 && RECORD_TALK.test(all[i - 1]));
+    if (!CONFIRM_CLAIM.test(x) || !about || APPROVAL_TALK.test(x)) return x;
+    const end = /[.!?]["')\]]*\s*$/.exec(x)?.[0]?.trim() ?? "";
+    const left = x.replace(CONFIRM_CLAIM, "").replace(/[\s,;:—–-]+$/, "").replace(/[.!?]["')\]]*$/, "").trim();
+    // Only the claim was the sentence ("It's still waiting for your yes."): it goes whole.
+    if (left.split(/\s+/).filter((w) => /\p{L}/u.test(w)).length < 3) return "";
+    return `${left}${/[?!]/.test(end) ? end : "."}`;
+  }).filter(Boolean).join(" ")).join("\n");
+  return out.trim() ? out : String(reply ?? "");
+}

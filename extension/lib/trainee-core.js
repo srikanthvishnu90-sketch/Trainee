@@ -4447,9 +4447,42 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       ...ids
     ] : void 0;
   }
+  var EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
+  var NAME = /^[\p{L}][\p{L}'’.-]*(?: [\p{L}][\p{L}'’.-]*){0,5}$/u;
+  var CONTACT2 = [
+    [
+      /^full name$/i,
+      "full_name",
+      (v) => NAME.test(v) ? v : null
+    ],
+    [
+      /^first name$/i,
+      "first_name",
+      (v) => NAME.test(v) && !v.includes(" ") ? v : null
+    ],
+    [
+      /^last name$/i,
+      "last_name",
+      (v) => NAME.test(v) && !v.includes(" ") ? v : null
+    ],
+    [
+      /^email$/i,
+      "email",
+      (v) => EMAIL.test(v) ? v : null
+    ]
+  ];
   function fieldOf(f) {
     const t = clean(f.text), name = clean(f.name || f.title);
     let m;
+    if (f.kind === "profile") {
+      for (const [re, key, ok] of CONTACT2) if (re.test(name)) {
+        const value = ok(String(f.value ?? "").trim());
+        return value ? {
+          key,
+          value
+        } : null;
+      }
+    }
     if (f.kind === "profile" && /^country$/i.test(name) || (m = t.match(/^my country(?: of residence)? is (.+)$/i))) {
       const value = countryValue(clean(f.kind === "profile" && /^country$/i.test(name) ? f.value : m[1]));
       return value ? {
@@ -7334,7 +7367,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   var ROLE = /^(Co-?founder|Founder|Owner|Intern|Engineer|Developer|Manager|Analyst|President|Vice-President|Director|Researcher|Assistant|Associate|Lead|Consultant|Designer|Scientist|Officer|CEO|CTO|COO|CFO|Teacher|Tutor|Volunteer|Coordinator|Specialist|Representative|Fellow|Treasurer|Secretary|TA)$/i;
   var SKILLS = new Set("python sql java javascript typescript c c++ c# go golang rust r matlab excel react node node.js html css aws gcp azure docker kubernetes tableau pandas numpy pytorch tensorflow git linux swift kotlin ruby php scala spark figma sas stata bash".split(" "));
   var RANGE = /^(.*?)[\s,]*\(?\b((?:19|20)\d{2})\s*(?:-|–|—|to)\s*((?:19|20)\d{2}|present|current|now)\)?$/i;
-  var NAME = /^[A-Z][a-zA-Z'’-]+(?: [A-Z][a-zA-Z'’-]+){1,3}$/;
+  var NAME2 = /^[A-Z][a-zA-Z'’-]+(?: [A-Z][a-zA-Z'’-]+){1,3}$/;
   var SINGLE = new Set(Object.keys(LABELS).filter((k) => k !== "work_history"));
   var draft = (field, value, span2) => ({
     field,
@@ -7399,7 +7432,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         facts.push(draft("location", `${m[1]}, ${m[2]}`, t), draft("city", m[1], m[1]), draft("state", m[2], m[2]));
         return;
       }
-      if ((m = /^(?:name\s*:\s*)?(.+)$/i.exec(t)) && (i === 0 || /^name\s*:/i.test(t)) && NAME.test(m[1]) && !m[1].split(" ").some((w) => SCHOOL_WORD.test(w) || ROLE.test(w))) {
+      if ((m = /^(?:name\s*:\s*)?(.+)$/i.exec(t)) && (i === 0 || /^name\s*:/i.test(t)) && NAME2.test(m[1]) && !m[1].split(" ").some((w) => SCHOOL_WORD.test(w) || ROLE.test(w))) {
         facts.push(draft("full_name", m[1], m[1]));
         const w = m[1].split(" ");
         if (w.length === 2) facts.push(draft("first_name", w[0], w[0]), draft("last_name", w[1], w[1]));

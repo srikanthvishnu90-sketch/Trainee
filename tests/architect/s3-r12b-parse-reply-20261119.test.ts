@@ -118,3 +118,23 @@ Deno.test("r12b-5 a stated fact is never said to wait for a yes unless a confirm
   // A search's open question is not a confirmation of a fact.
   eq(confirmationOpen({ stores: { trackStore: { _careerThread: { lastDiscussion: { intent: "career_discovery", pendingQuestion: true } } } } }), false);
 });
+
+// 6. (found on the r12b probes: dev H010 failed 2 of 3 fixed probes and 1 of 3 baseline probes) the brain's mock asked the bank's
+// first question with the mock's role and employer added ("... why this data analyst role at Northwind Ledger."); the r12 match
+// (prepSameQuestion) needed the asked wording not much longer, so "next question" served the same question again. A bank question
+// whose every content word was asked is the same question, whatever context the brain wrote around it.
+import { recordPrepAsked } from "../../supabase/functions/agent-chat/career_staged.ts";
+Deno.test("r12b-6 a bank question asked with the mock's context added is served, never asked again", () => {
+  const serve = (asked: string | null) => {
+    const ctx: any = fresh();
+    if (asked) recordPrepAsked(ctx, "prep_mock_start", asked);
+    return String(host.runTurn("keep going — next question", ctx).reply);
+  };
+  for (const said of ["Question 1: Tell me about yourself and why this data analyst role at Northwind Ledger.",
+    "Question 1: Tell me about yourself and why this product manager role at Acme Robotics matters to you."]) {
+    const next = serve(said);
+    ok(!/Tell me about yourself/.test(next) && /Here is your question: /.test(next), `repeated after ${said}: ${next}`);
+  }
+  // (a question with the same frame but other content is not the same question)
+  ok(/Tell me about yourself/.test(serve("Question 1: Tell me about a time you failed at Northwind Ledger.")));
+});

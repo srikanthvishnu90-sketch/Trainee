@@ -45198,7 +45198,10 @@ const CareerRouter = (() => {
     for (const w of x) if (y.has(w)) both += 1;
     // (the bank question's words nearly all asked, in a question not much longer: "... why this role" / "... why you want this
     // data analyst role")
-    return both / (x.size + y.size - both) >= 0.7 || (both / x.size >= 0.85 && both / y.size >= 0.6);
+    // S3 r12b (dev H010): every content word of a bank question of four or more is asked, whatever context the brain wrote
+    // around it ("... why this data analyst role at Northwind Ledger."): the same question. One word apart in a frame ("a time
+    // you failed" / "a time you led") is not.
+    return both / (x.size + y.size - both) >= 0.7 || (both / x.size >= 0.85 && both / y.size >= 0.6) || (x.size >= 4 && both === x.size);
   }
   function prepServedSet(thread, norm) {
     const base = new Set((Array.isArray(thread && thread.served) ? thread.served : []).map(norm));

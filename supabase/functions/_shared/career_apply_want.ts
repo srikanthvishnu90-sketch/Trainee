@@ -59,7 +59,8 @@ export function wantsFrom(picks: Pick[], now: number): { ok: Want[]; refused: Re
   return { ok, refused };
 }
 
-// The start of the person's day (UTC when the zone is unknown), for the daily limit.
+// The start of the person's day (UTC when the zone is unknown), for the daily limit. Review rv4 (architect ruling): an unknown
+// zone stays UTC here as before; a known zone gives the same day the prompt names (agent/person_day.ts personDay).
 export function dayStart(now: number, tz = "UTC"): string {
   try {
     const parts = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(new Date(now));

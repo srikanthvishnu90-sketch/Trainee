@@ -315,6 +315,7 @@ MIGRATIONS=(
   20261113120000_career_erase_approved_versions.sql
   20261113140000_career_apply_stop_stale_facts.sql
   20261113150000_career_outreach_adopt_skip_mail_reply.sql
+  20261116120000_career_apply_one_fact_set.sql
   20261116140000_career_apply_batch_file.sql
   20261117120000_career_apply_card_file_any_path.sql
 )
@@ -496,6 +497,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_file_versions_guard' and prosrc like '%career.erase_person%') and exists (select 1 from pg_proc where proname = 'career_erase_person' and prosrc like '%career.erase_person%')"
   "to_regprocedure('public.career_apply_stop_stale_facts(uuid,jsonb,text)') is not null and exists (select 1 from pg_trigger where tgname = 'career_apply_facts_claim_guard') and exists (select 1 from pg_trigger where tgname = 'career_apply_facts_write_record')"
   "exists (select 1 from pg_proc where proname = 'career_outreach_threads_adopt' and prosrc like '%mail_reply%')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_message_cloud_sources' and prosrc like '%career_apply_profile_for(p_user)%')"
   "to_regprocedure('public.career_apply_card_push_batch_for(uuid,uuid,uuid[],text,text,timestamptz)') is not null and exists (select 1 from pg_proc where proname = 'career_apply_card_answer_for' and prosrc like '%FILE_CHANGED%')"
   "to_regprocedure('public.career_apply_card_open_batch_as(uuid,uuid[],text)') is not null and exists (select 1 from pg_proc where proname = 'career_apply_card_confirm_for' and prosrc like '%FILE_CHANGED%')"
 )

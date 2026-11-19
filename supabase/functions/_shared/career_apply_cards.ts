@@ -33,6 +33,36 @@ export interface Prepared {
   // Architect ruling on #674 (a): the role, read from the posting row the application was prepared for (career_postings, by the
   // payload's job id), when its employer is this application's. Shown beside the employer; null when it cannot be read.
   role?: string | null;
+  // MASS APPLY CONVERSATIONS (2026-11-16): what the posting itself states, said under the employer and role so the person
+  // decides on the card alone: where, the pay and the deadline exactly as posted (postingDetailLines). Never the person's
+  // answers (those are card_lines), never a guess: a posting that states no pay shows none.
+  details?: string[];
+}
+// The pay and the deadline a posting states in its own words, or null for each when it states none. Only an amount with a
+// currency sign is pay; only a full date after "apply by" / "applications close" / "deadline" is a deadline.
+export function postedTerms(description: unknown): { pay: string | null; deadline: string | null } {
+  const d = String(description ?? "").replace(/\s+/g, " ");
+  const pay = /\b(?:pay(?:\s+range)?|salary(?:\s+range)?|compensation|base\s+pay|hourly\s+rate)\s*[:\-–]\s*([^.;]*?\$\s?\d[^.;]*?)(?:\.(?:\s|$)|;|$)/i.exec(d)?.[1]
+    ?? /(\$\s?\d[\d,]*(?:\.\d+)?(?:\s*(?:-|–|to)\s*\$?\s?\d[\d,]*(?:\.\d+)?)?\s*(?:per\s+hour|an\s+hour|\/\s*h(?:ou)?r|per\s+year|a\s+year|\/\s*year|annually))/i.exec(d)?.[1] ?? null;
+  const deadline = /\b(?:apply\s+by|applications?\s+(?:close|closes|are\s+due|due)(?:\s+on)?|deadline(?:\s+to\s+apply)?)\s*:?\s*((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2},?\s+\d{4})/i.exec(d)?.[1] ?? null;
+  return { pay: pay ? pay.trim().slice(0, 120) : null, deadline: deadline ? deadline.trim() : null };
+}
+// The lines a card shows under one application's employer and role, from the posting row it was prepared for.
+export function postingDetailLines(p: { location?: string | null; description?: string | null }, confirmed: string[] = []): string[] {
+  const { pay, deadline } = postedTerms(p.description);
+  const where = String(p.location ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+  const fit = fitLine(p.description, confirmed);
+  return [...(where ? [`Where: ${where}`] : []), ...(pay ? [`Pay (as posted): ${pay}`] : []), ...(deadline ? [`Apply by (as posted): ${deadline}`] : []), ...(fit ? [fit] : [])];
+}
+// "Why it fits": the posting's own requirements that a CONFIRMED fact of theirs names, word for word (case aside), and only
+// those; no confirmed fact, no requirements list, or nothing shared: no line (never a guess at fit).
+export function fitLine(description: unknown, confirmed: string[]): string | null {
+  const req = /\brequirements?\s*:\s*([^.]+)/i.exec(String(description ?? ""))?.[1];
+  if (!req || !confirmed.length) return null;
+  const said = ` ${confirmed.join(" \n ").toLowerCase()} `;
+  const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const hits = req.split(/\s*,\s*|\s+and\s+/).map((x) => x.trim()).filter((x) => x && x.length <= 40 && new RegExp(`(?:^|[^a-z0-9+#])${esc(x.toLowerCase())}(?:$|[^a-z0-9+#])`).test(said));
+  return hits.length ? `Why it fits: it asks for ${hits.slice(0, 4).join(", ")}, which your confirmed resume has` : null;
 }
 export interface Card {
   id: string;
@@ -306,7 +336,8 @@ const one = (p: Prepared, n: number) => {
   const [head, ...rest] = p.card_lines.map((l) => String(l).replace(/\s+/g, " ").trim()).filter(Boolean);
   const first = head ?? p.company, role = String(p.role ?? "").replace(/\s+/g, " ").trim().slice(0, 160);
   // The card line stays whole (the database checks the card carries every line); the role is said after it.
-  return [`${n}. ${role && first === p.company ? `${first} — ${role}` : first}`, ...rest.map((l) => `   ${l}`)].join("\n");
+  const details = (p.details ?? []).map((l) => String(l).replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 4);
+  return [`${n}. ${role && first === p.company ? `${first} — ${role}` : first}`, ...details.map((l) => `   ${l}`), ...rest.map((l) => `   ${l}`)].join("\n");
 };
 // Architect ruling on #674 (c): "Needs you: ..." names each question still open, in the form's words, with its employer, so
 // asking for one answer never hides the work waiting on it (C.24 Needs input; RESPONSE-RULES E4). At most 5, then a count.
@@ -936,7 +967,7 @@ export function supabaseCardStore(admin: any): CardStore {
 // (career_apply_prepare_attempts.prepared_id). Only a posting of the same employer gives the role; anything unreadable gives
 // none, and the card is shown as before. Never fails the card.
 // deno-lint-ignore no-explicit-any
-async function withRoles(admin: any, userId: string, rows: (Prepared & { job_id?: string | null })[]): Promise<Prepared[]> {
+export async function withRoles(admin: any, userId: string, rows: (Prepared & { job_id?: string | null })[]): Promise<Prepared[]> {
   const strip = ({ job_id: _j, ...p }: Prepared & { job_id?: string | null }): Prepared => p;
   if (!rows.length) return rows.map(strip);
   try {
@@ -946,11 +977,18 @@ async function withRoles(admin: any, userId: string, rows: (Prepared & { job_id?
     const att = await admin.from("career_apply_prepare_attempts").select("prepared_id,posting_job_id").eq("user_id", userId).in("prepared_id", rows.map((r) => r.id));
     const viaAttempt = new Map<string, string>((att?.data ?? []).map((a: any) => [String(a.prepared_id), String(a.posting_job_id)]));
     const jobs = [...new Set([...byPrepared.values(), ...viaAttempt.values()])].slice(0, 500);
-    const got = jobs.length ? await admin.from("career_postings").select("job_id,title,company").in("job_id", jobs) : { data: [] };
-    const posting = new Map<string, { title: string; company: string }>((got?.data ?? []).map((p: any) => [String(p.job_id), { title: String(p.title ?? ""), company: String(p.company ?? "") }]));
+    const got = jobs.length ? await admin.from("career_postings").select("job_id,title,company,location,description").in("job_id", jobs) : { data: [] };
+    const posting = new Map<string, { title: string; company: string; location: string | null; description: string | null }>((got?.data ?? []).map((p: any) => [String(p.job_id),
+      { title: String(p.title ?? ""), company: String(p.company ?? ""), location: p.location ?? null, description: p.description ?? null }]));
+    // Their confirmed facts' words, for "why it fits" (the profile the preparation reads, career_apply_profile_for: only facts
+    // the person confirmed with an event). Unreadable: no fit line, the card as before.
+    let prof: any = null;
+    try { prof = typeof admin.rpc === "function" ? await admin.rpc("career_apply_profile_for", { p_user: userId }) : null; } catch { prof = null; }
+    const confirmed = (Array.isArray(prof?.data?.facts) ? prof.data.facts : []).filter((f: any) => f && f.status === "confirmed" && f.needs_confirmation === false && f.confirmation_event_id)
+      .map((f: any) => [f.text, f.title, ...(Array.isArray(f.bullets) ? f.bullets : [])].filter((x) => typeof x === "string").join(" "));
     return rows.map((r) => {
       const hit = [byPrepared.get(r.id), viaAttempt.get(r.id)].map((j) => (j ? posting.get(j) : undefined)).find((p) => p && p.title && norm(p.company) === norm(r.company));
-      return { ...strip(r), role: hit ? hit.title : null };
+      return { ...strip(r), role: hit ? hit.title : null, ...(hit ? { details: postingDetailLines(hit, confirmed) } : {}) };
     });
   } catch {
     return rows.map(strip);

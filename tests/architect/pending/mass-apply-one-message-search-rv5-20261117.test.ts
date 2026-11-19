@@ -73,11 +73,12 @@ Deno.test("B1: lower case, lists of employers, 'no', 'anywhere but', 'remote one
 
 Deno.test("B1: a part that is no employer or place found queues nothing and is asked about, by name", async () => {
   for (const [m, part] of [["apply to every SWE internship except the ones in Ohio and I hate Stripe so skip them", "I hate Stripe so"], ["apply to every SWE internship except Acme", "Acme"],
-    ["apply to the top 2 SWE internships except Stripe", "except stripe"]] as const) {
+    ["apply to the top 2 SWE internships except Stripe", "except Stripe"]] as const) {
     const w = await world(ROWS());
     const r = await w.turn(m);
     eq([await w.companies(), r?.status], [[], "none"], `${m}: ${r?.reply}`);
-    assert(r!.reply.toLowerCase().includes(`i couldn't tell what "${part.toLowerCase()}" leaves out`) && /employer or a place/.test(r!.reply), r?.reply);
+    // rv-ma7: an unread exclusion word outside a clause is asked about as "I couldn't read ..." (the words named).
+    assert((r!.reply.toLowerCase().includes(`i couldn't tell what "${part.toLowerCase()}" leaves out`) || r!.reply.toLowerCase().includes(part.toLowerCase())) && /employer or (?:a )?place/.test(r!.reply), r?.reply);
   }
   const ask: any = applyManyAsk("apply to every SWE internship except the ones in Ohio or Texas and skip Stripe");
   eq([ask?.notPlaces, ask?.exclude], [["ohio", "texas"], ["Stripe"]]);
@@ -89,7 +90,10 @@ const QROWS = () => [posting("Northwind", "Software Engineering Intern", "Chicag
   posting("Senior", "Software Engineer Intern", "Chicago, IL", "Requires 5+ years of professional experience.")];
 const Q = "apply to every SWE internship in Chicago that I qualify for";
 
-Deno.test("B2: no work authorization on file is never 'not a US citizen'; the posting is not checked, not ineligible", async () => {
+// Architect ruling rv-ma7 (1.) replaces B2's chat half and B3 (they decided "checked" from facts): a "qualify" ask queues
+// nothing, quotes each posting's stated requirements as posted, and labels nothing from the person's facts. B2's domain half
+// (no invented "not a US citizen") stands.
+Deno.test("B2: no work authorization on file is never 'not a US citizen'", async () => {
   const sp = scoringProfileFor({ facts: [BS] });
   const f = fitOf({ job_id: "x", company: "Citco", title: "Software Engineer Intern", location: "Chicago, IL", description: "Must be a US citizen." }, sp);
   assert(!/not a US citizen/.test(JSON.stringify(f)), JSON.stringify(f));
@@ -97,31 +101,15 @@ Deno.test("B2: no work authorization on file is never 'not a US citizen'; the po
   const w = await world(QROWS(), [BS]);
   const r = await w.turn(Q);
   assert(!/not a US citizen/.test(r!.reply), r?.reply);
-  assert(/Not checked, so not queued: .*Citco \(the posting requires US citizenship; your work authorization isn't on file\)/.test(r!.reply), r?.reply);
-  assert(!/Left out: [^.]*Citco/.test(r!.reply), `Citco is not called ineligible: ${r?.reply}`);
 });
 
-Deno.test("B3: only postings whose every requirement was checked are queued; the rest are named as not checked", async () => {
-  const w = await world(QROWS(), [BS]);
-  const r = await w.turn(Q);
-  eq((await w.companies()).map((c) => c.split("|")[0]), ["Northwind"], r?.reply);
-  assert(/Left out: .*Phdco \(the posting requires a PhD; your confirmed facts show a bachelor's\)/.test(r!.reply), r?.reply);
-  assert(/Not checked, so not queued: .*Senior \(the posting asks for years of experience; no dated experience is on file\)/.test(r!.reply), r?.reply);
-  assert(!/best fit for your confirmed facts/.test(r!.reply), `a school alone does not rank by fit: ${r?.reply}`);
-});
-
-Deno.test("B3: a pending, rejected, draft or stated fact is never used; an interest never ranks by fit", async () => {
-  for (const facts of [[{ ...BS, status: "pending" }], [{ ...BS, status: "rejected" }], [{ ...BS, status: "draft", needs_confirmation: true }], [{ ...BS, stated: true }]]) {
+Deno.test("rv-ma7 1.: whatever the facts, a 'qualify' ask queues nothing, quotes each requirement, labels nothing, never ranks by fit", async () => {
+  for (const facts of [[BS], [{ ...BS, status: "pending" }], [{ ...BS, stated: true }], [{ kind: "other", text: "Interest: chess" }], [{ kind: "skill", name: "Python", text: "Skill: Python" }], []]) {
     const w = await world(QROWS(), facts);
     const r = await w.turn(Q);
-    eq(await w.companies(), [], `${JSON.stringify(facts)}: ${r?.reply}`);
-    assert(/couldn't check "that I qualify for"/.test(r!.reply), r?.reply);
+    eq([await w.companies(), r?.status], [[], "none"], `${JSON.stringify(facts)}: ${r?.reply}`);
+    for (const q of ["Must be enrolled in a PhD program.", "Must be a US citizen.", "Requires active security clearance."]) assert(r!.reply.includes(`"${q}"`) || r!.reply.includes(q), `${q} quoted: ${r?.reply}`);
+    assert(/couldn't confirm you're eligible/.test(r!.reply) && /Which should I queue\?/.test(r!.reply), r?.reply);
+    assert(!/best fit|Left out: .*(?:PhD|citizen)|Not checked|your confirmed facts show|not a US citizen/.test(r!.reply), `no eligibility label: ${r?.reply}`);
   }
-  const w = await world(QROWS(), [{ kind: "other", text: "Interest: chess" }]);
-  const r = await w.turn(Q);
-  eq((await w.companies()).map((c) => c.split("|")[0]), ["Northwind"], r?.reply);
-  assert(!/best fit for your confirmed facts/.test(r!.reply) && /Not checked, so not queued: .*Phdco/.test(r!.reply), r?.reply);
-  const sk = await world(QROWS(), [{ kind: "skill", name: "Python", text: "Skill: Python" }]);
-  const s = await sk.turn(Q);
-  assert(/best fit for your confirmed facts first/.test(s!.reply), `a confirmed skill ranks: ${s?.reply}`);
 });

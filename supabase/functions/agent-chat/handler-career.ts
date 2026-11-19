@@ -1413,6 +1413,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const asking = !!queued.ask?.length;
         out = { reply: queued.reply, intent: asking ? EMPLOYER_ASK_INTENT : queued.intent, resultStatus: queued.status, contained: false, handler: "apply_queue" };
         if (asking) agentMeta = { employer_question: queued.ask };
+        // MASS APPLY (rv-ma7): "…that I qualify for" shows the postings found with what each requires and queues nothing; they
+        // become this thread's list, so the next "all of them" or "1 and 3" queues exactly what was shown.
+        if (Array.isArray(queued.listed) && queued.listed.length) (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), lastShortlist: queued.listed, lastAskAt: Date.now() };
         // R9-G: the email half of the same message, drafted by the networking turn: both answers, the draft batch last, so
         // "send 1" answers it (OUTREACH_INTENT). The application keeps its own card and its own yes.
         if (reach && networking) {

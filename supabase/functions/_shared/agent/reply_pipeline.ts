@@ -20,20 +20,19 @@ import { ADVICE_CLAIM, bare, clausesOf, findSupport, hardParts, indexPages, judg
 // the tags, a scripted test) keeps the support check unchanged, its quote fallback included. The trace says which (`pipeline`).
 export const PIPELINE = { on: true };
 export const isTagged = (t: string) => /\[E\d+(?:\s*,\s*E\d+)*\]/.test(String(t ?? ""));
-export type EvidenceKind = "page" | "chat" | "record" | "absent";
-export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[]; posting?: boolean; dated?: string[]; empty?: boolean }
+// ("suggestion": code's general career knowledge a tool result gave, such as the roles people commonly start in for a field an empty
+// search names (S3 r12, entry_routes.ts); it may hold advice about roles, never a posting, an opening or an employer)
+export type EvidenceKind = "page" | "chat" | "record" | "absent" | "suggestion";
+export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[]; posting?: boolean; dated?: string[] }
 
 // Units a tool added this turn (pages, posting records, counts): the turn rests on evidence only when it has one. Lines carried from
 // earlier replies, the person's record and what it lacks do not make a turn an evidence turn.
-// (S3 r12: a search that returned no posting read nothing: its count alone does not make the turn an evidence turn. Before, an empty
-// search put the whole reply through the pipeline with one unit, "returned 0 postings", and every line of the advice its own result
-// asks for on an empty search, the roles to look at, failed as an unsupported fact; the reply left was "1. 2. 3." and the fallback)
-export const evidenceTurn = (l: Ledger | null) => !!l && l.units.some((u) => (u.kind === "page" || u.kind === "chat") && u.source !== "an earlier reply in this chat" && !u.empty);
+export const evidenceTurn = (l: Ledger | null) => !!l && l.units.some((u) => (u.kind === "page" || u.kind === "chat") && u.source !== "an earlier reply in this chat");
 export class Ledger {
   units: EvidenceUnit[] = [];
   // The turn's clock (PROCESS rule 6): a year in a posting's title names the role only when it is this year or later.
   constructor(readonly now: number = Date.now()) {}
-  add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[]; posting?: boolean; dated?: string[]; empty?: boolean } = {}): string {
+  add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[]; posting?: boolean; dated?: string[] } = {}): string {
     const t = String(text ?? "").replace(/\s+/g, " ").trim();
     if (!t) return "";
     const had = this.units.find((u) => u.kind === kind && u.text === t && (u.url ?? null) === (meta.url ?? null));
@@ -77,7 +76,15 @@ export class Ledger {
       const st = typeof p?.state === "string" ? p.state : null;
       if (st || dl) ids.push(this.add("chat", `${who}: the posting is ${st ?? "listed"}${dl ? `; it closes ${dl}` : ""}.`, { url, source: name, owner: company, named, posting: true, dated }));
     }
-    if (Array.isArray(o.postings)) ids.push(this.add("chat", `The search (${name}) returned ${o.postings.length} posting${o.postings.length === 1 ? "" : "s"}.`, { source: name, ...(o.postings.length === 0 && !postings.length ? { empty: true } : {}) }));
+    // (S3 r12, architect ruling: an empty search states what it searched, so "0 nurse postings near Columbus" rests on it, and its
+    // suggestions are units of their own kind)
+    const searched = Array.isArray(o.postings) && !o.postings.length && typeof o.searched === "string" && o.searched.trim() ? ` for "${o.searched.trim().slice(0, 120)}"` : "";
+    if (Array.isArray(o.postings)) ids.push(this.add("chat", `The search (${name})${searched} returned ${o.postings.length} posting${o.postings.length === 1 ? "" : "s"}.`, { source: name }));
+    for (const sg of Array.isArray(o.suggestions) ? o.suggestions : []) {
+      const roles = (Array.isArray(sg?.roles) ? sg.roles : []).filter((r: unknown): r is string => typeof r === "string" && !!r.trim());
+      if (typeof sg?.field === "string" && roles.length)
+        ids.push(this.add("suggestion", `General career knowledge, not postings: people moving into ${sg.field} commonly start as ${roles.length > 1 ? `${roles.slice(0, -1).join(", ")}, or ${roles.at(-1)}` : roles[0]}.`, { source: name, owner: null }));
+    }
     // Round 3 of #849: a requirement or a sign-in note belongs to its posting's employer, and says so in its text.
     const co: string | null = typeof o.company === "string" ? o.company : typeof o.posting?.company === "string" ? o.posting.company : postings.length === 1 && typeof postings[0]?.company === "string" ? postings[0].company :
       postings.length === 1 ? this.employerOf(postings[0], typeof postings[0]?.url === "string" ? postings[0].url : typeof o.url === "string" ? o.url : null) : null;
@@ -121,7 +128,7 @@ export class Ledger {
   }
   block(ids?: string[]): string {
     const us = ids ? this.units.filter((u) => ids.includes(u.id)) : this.units;
-    return us.map((u) => `[${u.id}] (${u.kind === "page" ? `page${u.host ? ` ${u.host}` : ""}${u.source ? `, ${u.source}` : ""}` : u.kind === "chat" ? "this chat's tool result" : u.kind === "absent" ? "the person's record lacks" : "the person's confirmed record"}) ${u.text}`).join("\n");
+    return us.map((u) => `[${u.id}] (${u.kind === "page" ? `page${u.host ? ` ${u.host}` : ""}${u.source ? `, ${u.source}` : ""}` : u.kind === "chat" ? "this chat's tool result" : u.kind === "absent" ? "the person's record lacks" : u.kind === "suggestion" ? "code's general career knowledge, not a posting" : "the person's confirmed record"}) ${u.text}`).join("\n");
   }
 }
 const SEASON_END: Record<string, [number, number]> = { summer: [7, 31], fall: [11, 31], autumn: [11, 31], spring: [5, 30], winter: [2, 31] };
@@ -228,6 +235,9 @@ export function missingSpecifics(clause: string, units: EvidenceUnit[], strict =
 }
 
 // Verify a tagged reply against its ledger: what stands (tags removed), and every failure with its reason.
+// (S3 r12: a clause that says something is open, posted or hiring is a posting claim; a suggestion unit never holds one)
+const POSTING_CLAIM = /\b(?:openings?|postings?|posted|vacanc(?:y|ies)|hiring|hires|listings?|listed|job ads?|positions? (?:open|available)|(?:is|are) open|apply (?:to|for|at)|now accepting)\b/i;
+const forClaim = (us: EvidenceUnit[], text: string) => POSTING_CLAIM.test(text) ? us.filter((u) => u.kind !== "suggestion") : us;
 const LIST_MARK = /^\s*(?:\(?\d{1,2}[.)]|[-•*]|[a-z][.)])\s*$/i;
 export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: SupportJudge | null; own?: string[]; onRecord?: (s: string) => boolean | null; ask?: string; carry?: string | null } = {}): Promise<Verified> {
   // (a question to the person may name only what their own record or their ask names)
@@ -315,7 +325,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (rec(text) === false) { failures.push({ sentence: text, reason: "it is not what the person's record holds" }); bad.add(`${a}:${b}`); return; }
     if (free(text)) {
       const subj = mentioned(text)[0] ?? unknownIn(text) ?? carried;
-      const pool0 = ids.length ? ids.map((id) => ledger.get(id)).filter((u): u is EvidenceUnit => !!u) : ledger.units;
+      const pool0 = forClaim(ids.length ? ids.map((id) => ledger.get(id)).filter((u): u is EvidenceUnit => !!u) : ledger.units, text);
       const pool = pool0.filter((u) => u.source !== "an earlier reply in this chat" && (subj ? mine(u, subj) || (!unknownSubject(subj) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
       if (ids.length) citeAt.set(`${a}:${b}`, ids);
       checks.push({ a, b, clause: text, units: pool, claim: text, subject: subj, advice: true, untagged: !ids.length });
@@ -354,7 +364,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
       // subject may rest on a unit that names no employer, and the judge is shown the subject)
       // (round 12: an unknown subject rests only on a unit that names it as its employer; a carried subject never rests on a posting
       // record whose employer code cannot tell, which is some other employer's posting)
-      const allowedUnits = units.filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") &&
+      const allowedUnits = forClaim(units, c).filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") &&
         (unknownSubject(subject) ? namesAsEmployer(u, subject!) :
           mine(u, subject) || (!!subject && !ownSubj && !u.owner && !u.posting && (anyNamed.get(u.id) ?? []).length === 0)));
       if (!allowedUnits.length) return fail(a, b, text, subject ? `no cited unit is about ${subject}` : "it names no employer, and every unit that could hold it is one employer's", subject);
@@ -364,7 +374,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   // Layer A: each clause against an index of the units it cites, a record unit read as one record (a fact per line).
   const asks: { k: number; claim: string; source: string }[] = [];
   // (round 12: a posting's state unit is read as one sentence, "… is open and closes …", so the role it names stays with its deadline)
-  const indexOf = (us: EvidenceUnit[]) => indexPages(us.map((u) => ({ text: u.posting ? u.text.replace(/; it closes /, " and closes ") : u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : "The person's confirmed record:", places: u.places ?? [], named: u.named ?? [], lend: u.kind === "chat" && u.owner && u.source !== "an earlier reply in this chat" ? u.owner : null, ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
+  const indexOf = (us: EvidenceUnit[]) => indexPages(us.map((u) => ({ text: u.posting ? u.text.replace(/; it closes /, " and closes ") : u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : u.kind === "suggestion" ? "General career knowledge" : "The person's confirmed record:", places: u.places ?? [], named: u.named ?? [], lend: u.kind === "chat" && u.owner && u.source !== "an earlier reply in this chat" ? u.owner : null, ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
   // Round 8 of #849: the judge always reads a clause with its subject, named or carried ("PayPal: It requires a clearance").
   const withSubject = (c: { clause: string; subject?: string | null }) => `${c.subject && !nameFoundIn(c.subject, c.clause) ? `${c.subject}: ` : ""}${c.clause}`;
   checks.forEach((c, k) => {

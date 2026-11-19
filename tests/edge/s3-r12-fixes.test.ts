@@ -1,6 +1,7 @@
 // S3 r12 (the subscription sitting for 66118fb7a: dev H010, H034, H035 failed in code). Each test names the transcript it comes from.
 // Run: deno test -A --no-check tests/edge/s3-r12-fixes.test.ts
 import { evidenceTurn, Ledger, verifyTagged } from "../../supabase/functions/_shared/agent/reply_pipeline.ts";
+import { careerTools, EMPTY_SEARCH_NOTE } from "../../supabase/functions/_shared/agent/career_tools.ts";
 import { prepQuestionsAsked, recordPrepAsked, STAGED_TOOL_POLICY, stagedToolPolicy } from "../../supabase/functions/agent-chat/career_staged.ts";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
 import { CareerAccess, CareerContainment, CareerDoorstep, CareerOnboarding, CareerReply, CareerRouter } from "../../supabase/functions/_shared/router_core.career.js";
@@ -38,20 +39,56 @@ Deno.test("S3 r12 / H034: a list item that is dropped takes its number with it (
   if (kept.text.includes("Riverside")) assert(/^1\. Riverside/.test(kept.text), kept.text);
 });
 
-Deno.test("S3 r12 / H034, H035: a search that returned no posting read nothing, so it alone does not make an evidence turn", () => {
-  const empty = new Ledger(NOW);
-  empty.fromToolResult("search_jobs", { postings: [], total: 0, source: "none" });
-  eq(empty.units.length, 1, "the count is still a unit (the reply may cite it)");
-  eq(evidenceTurn(empty), false, "an empty search alone");
-  eq(evidenceTurn(oneHit()), true, "a search that returned a posting");
-  const both = new Ledger(NOW);
-  both.fromToolResult("search_jobs", { postings: [] });
-  both.fromToolResult("research_company", { sources: [{ n: 1, url: "https://example.org/a" }], points: [{ text: "Riverside Health hires new graduate nurses.", cite: [1] }] });
-  eq(evidenceTurn(both), true, "an empty search with a page read this turn");
-  const two = new Ledger(NOW);
-  two.fromToolResult("search_jobs", { postings: [] });
-  two.fromToolResult("search_jobs", { postings: [{ company: "Riverside Health", title: "RN", url: "https://jobs.example.com/rn-1", state: "open" }] });
-  eq(evidenceTurn(two), true, "an empty search then one that found a posting");
+// (architect ruling on the empty-search fix: the pipeline stays on; the empty result gives units the reply can cite)
+const emptySearch = async (message: string, query: string) => {
+  const t = careerTools({ postings: async () => [] }).find((x) => x.name === "search_jobs")!;
+  const out: any = await t.run({ query }, { userId: "u", threadId: "t", now: NOW, state: {}, turn: { message } } as any);
+  const l = new Ledger(NOW);
+  l.fromToolResult("search_jobs", out);
+  return { out, l };
+};
+const H034 = "can u look at jobs for me im a cashier wanna do something w computers";
+
+Deno.test("S3 r12 / H034, H035: an empty search states what it searched and gives the field's entry roles as suggestion units", async () => {
+  const { out, l } = await emptySearch(H034, "entry level help desk support");
+  eq(out.note, EMPTY_SEARCH_NOTE, "the note is unchanged");
+  eq(out.searched, "entry level help desk support");
+  assert(out.suggestions?.[0]?.roles?.some((r: string) => /help desk/i.test(r)), JSON.stringify(out));
+  assert(l.units.some((u) => u.kind === "chat" && /for "entry level help desk support" returned 0 postings/.test(u.text)), l.block());
+  const sg = l.units.find((u) => u.kind === "suggestion");
+  assert(sg && /not postings/.test(sg.text) && /help desk/i.test(sg.text) && !sg.owner, l.block());
+  eq(evidenceTurn(l), true, "the pipeline still runs on an empty search");
+  // (no field the table holds: no suggestion is made up)
+  const nurse = await emptySearch("got anything for nurses near columbus who want days only?", "registered nurse day shift Columbus");
+  eq(nurse.out.suggestions, undefined);
+  assert(nurse.l.units.some((u) => /for "registered nurse day shift Columbus" returned 0 postings/.test(u.text)), nurse.l.block());
+});
+
+Deno.test("S3 r12 / H034: an empty-search reply naming the suggested roles survives the pipeline", async () => {
+  const { l } = await emptySearch(H034, "entry level help desk support");
+  const sg = l.units.find((u) => u.kind === "suggestion")!;
+  const asked: string[] = [];
+  const judge = async (cs: { claim: string; source: string }[]) => { for (const c of cs) asked.push(c.source); return cs.map(() => "yes" as const); };
+  const draft = `Nothing matched entry level help desk support right now [E1]. People moving into computer work commonly start as an IT support or help desk technician, a data entry or records clerk, or a QA tester [${sg.id}]. Which of those sounds closest to what you want?`;
+  const v = await verifyTagged(draft, l, { ask: H034, judge });
+  assert(v.text.includes("IT support or help desk technician"), JSON.stringify(v));
+  assert(v.text.includes("Which of those sounds closest to what you want?"), v.text);
+});
+
+Deno.test("S3 r12 / H034: an empty-search reply that invents a posting or an employer is still dropped", async () => {
+  const { l } = await emptySearch(H034, "entry level help desk support");
+  const sg = l.units.find((u) => u.kind === "suggestion")!;
+  const sources: string[] = [];
+  const judge = async (cs: { claim: string; source: string }[]) => { for (const c of cs) sources.push(c.source); return cs.map(() => "yes" as const); };
+  // (each cites the suggestion unit, as a reply would; the judge here says yes to everything, so code alone drops them)
+  for (const bad of ["Brightline Tech is hiring IT support technicians near you", "There is a help desk technician opening near you",
+    "Brightline Tech has a data entry clerk role open", "I found 3 help desk postings", "A QA tester position is open in your area"]) {
+    const v = await verifyTagged(`${bad} [${sg.id}]. Want me to keep looking?`, l, { ask: H034, judge });
+    assert(!v.text.includes(bad), `kept: ${bad} -> ${v.text}`);
+  }
+  // (an uncited one is checked against every unit but the suggestions: what the judge reads never includes them)
+  await verifyTagged("There is a help desk technician opening near you. Want me to keep looking?", l, { ask: H034, judge });
+  assert(!sources.some((x) => /General career knowledge/.test(x)), "a posting claim is never judged against a suggestion");
 });
 
 Deno.test("S3 r12 / H010: the questions a brain-run mock asked are kept on the thread, only for a prep turn", () => {

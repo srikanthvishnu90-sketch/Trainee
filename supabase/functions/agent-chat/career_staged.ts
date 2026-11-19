@@ -16,6 +16,8 @@
 // it does today, so what the router saves is exactly what it saved before.
 
 import { releaseFlagOn, servedBrain } from "./release_config.ts";
+import * as RCW from "../_shared/router_core.career.js"; // S3 r12: code's watch, run dry (routerWatchProbe)
+import { CareerHost as CareerHostForWatch } from "../_shared/career_host.js";
 import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
@@ -708,9 +710,42 @@ export function routerAnswerBlock(d: StagedDecision | null | undefined): string 
     blocks.map((b) => JSON.stringify({ intent: b.intent, reply: b.reply })).join("\n");
 }
 // The staged brain's tool policy for this turn: the withheld tools, the note, and the router's answer as data.
-export function stagedToolPolicy(d: StagedDecision | null | undefined): { withhold: readonly string[]; note: string } {
+// (S3 r12: and the router's intent for the turn, when it had one, so the brain's turn can leave what code's next step reads: the
+// questions a mock it started asked, recordPrepAsked)
+export function stagedToolPolicy(d: StagedDecision | null | undefined): { withhold: readonly string[]; note: string; intent?: string } {
   const block = routerAnswerBlock(d);
-  return block ? { withhold: STAGED_WITHHELD_TOOLS, note: `${STAGED_PROMPT_NOTE}\n\n${block}` } : STAGED_TOOL_POLICY;
+  const base = block ? { withhold: STAGED_WITHHELD_TOOLS, note: `${STAGED_PROMPT_NOTE}\n\n${block}` } : STAGED_TOOL_POLICY;
+  return d?.intent ? { ...base, intent: d.intent } : base;
+}
+// S3 r12 (dev H010): a practice session the brain answered (a prep_* intent: "mock me for a data analyst interview") asked its
+// questions in its own words, and code's next step ("keep going, next question": the bank serve, router handlePrepQuestion) knew
+// only what code itself had served, so it served the brain's first question again. The questions the reply asks are kept on the
+// thread (prep.asked, the newest few) where the router's serve reads them as served. Only the questions: what the reply quotes,
+// what follows "Question 1:", and what it asks with a question mark.
+export function prepQuestionsAsked(reply: string): string[] {
+  const t = String(reply ?? "").replace(/[\u2018\u2019]/g, "'");
+  const out: string[] = [];
+  for (const m of t.matchAll(/["\u201c]([^"\u201c\u201d\n]{12,240})["\u201d]/g)) out.push(m[1]);
+  for (const m of t.matchAll(/\bquestion(?:\s*(?:\d+|one|two|three|four|five))?\s*[:\u2014-]\s*(?![\s"\u201c])([^\n]{12,240}?[.?!])(?=\s|$)/gi)) out.push(m[1]);
+  for (const m of t.matchAll(/(?:^|[.!?]\s+|\n)([^.!?\n]{12,240}\?)/g)) out.push(m[1]);
+  return [...new Set(out.map((x) => x.replace(/\s+/g, " ").trim()).filter(Boolean))];
+}
+export function recordPrepAsked(ctx: Record<string, any> | null | undefined, intent: string | null | undefined, reply: string): void {
+  if (!ctx || typeof ctx !== "object" || !/^prep_/.test(String(intent ?? ""))) return;
+  const asked = prepQuestionsAsked(reply);
+  if (!asked.length) return;
+  // (the thread's store as the router finds it, router trackStoreOf: ctx.trackStore, else the profile's, else a new one)
+  const p = ctx.profile && typeof ctx.profile === "object" ? ctx.profile : null;
+  if (!ctx.trackStore || typeof ctx.trackStore !== "object") {
+    const store = p && p._careerTrackStore && typeof p._careerTrackStore === "object" ? p._careerTrackStore : { rows: (Array.isArray(ctx.applications) ? ctx.applications : []).map((r: unknown) => JSON.parse(JSON.stringify(r))) };
+    if (p && !p._careerTrackStore) p._careerTrackStore = store;
+    ctx.trackStore = store;
+  }
+  const store = ctx.trackStore;
+  if (!store._careerThread || typeof store._careerThread !== "object" || Array.isArray(store._careerThread)) store._careerThread = {};
+  const th = store._careerThread;
+  if (!th.prep || typeof th.prep !== "object" || Array.isArray(th.prep)) th.prep = {};
+  th.prep.asked = [...(Array.isArray(th.prep.asked) ? th.prep.asked : []), ...asked].slice(-12);
 }
 
 // Tool policy for the staged brain, at the boundary. No tool has an external effect (the loop never runs one). Withheld:
@@ -887,4 +922,32 @@ const EMAIL_REPLY = /\b(?:reply|respond|answer|write\s+back|get\s+back)\b[^?.!]{
 export function emailReplyAsk(env: Env, message: string, intent: string | null): boolean {
   if (!intent || PAYLOAD_INTENTS.has(intent) || /^(?:prep_mock|negotiation_roleplay|career_apply_email|career_followup|conversation_bare_reply|conversation_hold|intent_cancelled)/.test(intent) || !releaseFlagOn(env, "CAREER_MAIL_TRACKING")) return false;
   return EMAIL_REPLY.test(String(message ?? "").replace(/[’`]/g, "'"));
+}
+
+// Review of ac1e068aa: code's watch, run dry on a copy of the person's turn state (probeCtx), for next_step.ts watchVerified: what the
+// staged route does with the exact phrase, and what the router replies. Nothing is saved: the copy is thrown away.
+// (PR #870 CI: no dynamic import here; the .cjs suites load the handler in a vm realm with no dynamic-import callback. Static imports,
+// and the host is made on first use.)
+let watchHost: Host | null = null;
+function watchHostOf(): Host {
+  watchHost ??= CareerHostForWatch.createCareerHost({ CareerAccess: RCW.CareerAccess, CareerOnboarding: RCW.CareerOnboarding, CareerRouter: RCW.CareerRouter, CareerDoorstep: RCW.CareerDoorstep, CareerReply: RCW.CareerReply, CareerContainment: RCW.CareerContainment }) as unknown as Host;
+  return watchHost;
+}
+// (kept for callers that awaited the old async load; resolves at once)
+export const watchHostReady: Promise<void> = Promise.resolve();
+export function routerWatchProbe(ctx: Record<string, unknown> | null | undefined) {
+  return {
+    staged: (cmd: string) => {
+      if (!ctx) return { brain: true, intent: null };
+      const d = stagedDecision({ env: { get: (k: string) => (globalThis as any).Deno?.env?.get?.(k) }, message: cmd, ctx: probeCtx(ctx), host: watchHostOf(), structured: false });
+      return { brain: d.brain, intent: d.intent };
+    },
+    run: (cmd: string) => { if (!ctx) return { intent: null, reply: null }; try { const r: any = watchHostOf().runTurn(cmd, probeCtx(ctx) as any); return { intent: r?.intent ?? null, reply: r?.reply ?? null }; } catch { return { intent: null, reply: null }; } },
+  };
+}
+// The person has a profile on file (a fact or a basic of their own), as the watch needs.
+export function hasProfileOn(ctx: unknown): boolean {
+  const p = (ctx as any)?.profile;
+  if (!p || typeof p !== "object") return false;
+  return (Array.isArray(p.facts) && p.facts.length > 0) || Object.values(p.basics ?? {}).some((v) => typeof v === "string" && v.trim().length > 0);
 }

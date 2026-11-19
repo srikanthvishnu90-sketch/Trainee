@@ -20,7 +20,9 @@ import { ADVICE_CLAIM, bare, clausesOf, findSupport, hardParts, indexPages, judg
 // the tags, a scripted test) keeps the support check unchanged, its quote fallback included. The trace says which (`pipeline`).
 export const PIPELINE = { on: true };
 export const isTagged = (t: string) => /\[E\d+(?:\s*,\s*E\d+)*\]/.test(String(t ?? ""));
-export type EvidenceKind = "page" | "chat" | "record" | "absent";
+// ("suggestion": code's general career knowledge a tool result gave, such as the roles people commonly start in for a field an empty
+// search names (S3 r12, entry_routes.ts); it may hold advice about roles, never a posting, an opening or an employer)
+export type EvidenceKind = "page" | "chat" | "record" | "absent" | "suggestion";
 export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[]; posting?: boolean; dated?: string[] }
 
 // Units a tool added this turn (pages, posting records, counts): the turn rests on evidence only when it has one. Lines carried from
@@ -74,7 +76,15 @@ export class Ledger {
       const st = typeof p?.state === "string" ? p.state : null;
       if (st || dl) ids.push(this.add("chat", `${who}: the posting is ${st ?? "listed"}${dl ? `; it closes ${dl}` : ""}.`, { url, source: name, owner: company, named, posting: true, dated }));
     }
-    if (Array.isArray(o.postings)) ids.push(this.add("chat", `The search (${name}) returned ${o.postings.length} posting${o.postings.length === 1 ? "" : "s"}.`, { source: name }));
+    // (S3 r12, architect ruling: an empty search states what it searched, so "0 nurse postings near Columbus" rests on it, and its
+    // suggestions are units of their own kind)
+    const searched = Array.isArray(o.postings) && !o.postings.length && typeof o.searched === "string" && o.searched.trim() ? ` for "${o.searched.trim().slice(0, 120)}"` : "";
+    if (Array.isArray(o.postings)) ids.push(this.add("chat", `The search (${name})${searched} returned ${o.postings.length} posting${o.postings.length === 1 ? "" : "s"}.`, { source: name }));
+    for (const sg of Array.isArray(o.suggestions) ? o.suggestions : []) {
+      const roles = (Array.isArray(sg?.roles) ? sg.roles : []).filter((r: unknown): r is string => typeof r === "string" && !!r.trim());
+      if (typeof sg?.field === "string" && roles.length)
+        ids.push(this.add("suggestion", `General career knowledge, not postings: people moving into ${sg.field} commonly start as ${roles.length > 1 ? `${roles.slice(0, -1).join(", ")}, or ${roles.at(-1)}` : roles[0]}.`, { source: name, owner: null }));
+    }
     // Round 3 of #849: a requirement or a sign-in note belongs to its posting's employer, and says so in its text.
     const co: string | null = typeof o.company === "string" ? o.company : typeof o.posting?.company === "string" ? o.posting.company : postings.length === 1 && typeof postings[0]?.company === "string" ? postings[0].company :
       postings.length === 1 ? this.employerOf(postings[0], typeof postings[0]?.url === "string" ? postings[0].url : typeof o.url === "string" ? o.url : null) : null;
@@ -118,7 +128,7 @@ export class Ledger {
   }
   block(ids?: string[]): string {
     const us = ids ? this.units.filter((u) => ids.includes(u.id)) : this.units;
-    return us.map((u) => `[${u.id}] (${u.kind === "page" ? `page${u.host ? ` ${u.host}` : ""}${u.source ? `, ${u.source}` : ""}` : u.kind === "chat" ? "this chat's tool result" : u.kind === "absent" ? "the person's record lacks" : "the person's confirmed record"}) ${u.text}`).join("\n");
+    return us.map((u) => `[${u.id}] (${u.kind === "page" ? `page${u.host ? ` ${u.host}` : ""}${u.source ? `, ${u.source}` : ""}` : u.kind === "chat" ? "this chat's tool result" : u.kind === "absent" ? "the person's record lacks" : u.kind === "suggestion" ? "code's general career knowledge, not a posting" : "the person's confirmed record"}) ${u.text}`).join("\n");
   }
 }
 const SEASON_END: Record<string, [number, number]> = { summer: [7, 31], fall: [11, 31], autumn: [11, 31], spring: [5, 30], winter: [2, 31] };
@@ -207,7 +217,11 @@ export const adviceClaim = (sentence: string, subject: string | null) => `${ADVI
 // opener (OPENER), an imperative (DIRECTIVE), a common word (NOT_NAME), a negative contraction ("Don't", "Won't"), an adverb in -ly
 // ("Politely", "Ideally"), or a discourse adverb.
 const FUNCTION_OPENER = (w: string) => { const x = w.replace(/['’]s$/, ""); return OPENER.test(x) || DIRECTIVE.test(x) || NOT_NAME.test(x) || /n['’]t$/i.test(w) || /^\p{L}{3,}ly$/iu.test(x) ||
-  /^(?:never|always|just|maybe|perhaps|then|first|second|third|next|also|even|only|still|ever|soon|now|later|again|quick|tip|heads|honestly|anyway|besides|otherwise|instead|therefore|thus|hence|so|yet|once|here|there|now)$/i.test(x); };
+  /^(?:never|always|just|maybe|perhaps|then|first|second|third|next|also|even|only|still|ever|soon|now|later|again|quick|tip|heads|honestly|anyway|besides|otherwise|instead|therefore|thus|hence|so|yet|once|here|there|now)$/i.test(x) ||
+  // (round 12 follow-up, S3 r12: an indefinite pronoun names no one. "Nothing has been sent or applied to." read "Nothing" as an
+  // unknown employer, carried it, and dropped every later sentence of the reply as "no cited unit is about Nothing")
+  INDEFINITE.test(x); };
+const INDEFINITE = /^(?:nothing|nobody|none|noone|no-one|neither|either|everything|everyone|everybody|something|someone|somebody|anything|anyone|anybody|nowhere|everywhere|somewhere|anywhere)$/i;
 // (round 9: an imperative opener, never a quantifier, an auxiliary or a discourse word: "Apply early" is advice; "Most interns…",
 // "Also, interns…" are not)
 const DIRECTIVE = /^(?:apply|send|ask|check|look|focus|use|keep|try|start|let|let's|remember|please|aim|pick|choose|avoid|skip|write|mention|lead|tailor|follow|reach|prepare|practice|practise|review|read|bring|save|plan|consider|add|make|say|tell|put|show|list|drop|cut|open|be|do|don't|never|always)$/i;
@@ -221,11 +235,70 @@ export function missingSpecifics(clause: string, units: EvidenceUnit[], strict =
 }
 
 // Verify a tagged reply against its ledger: what stands (tags removed), and every failure with its reason.
+// (S3 r12: a clause that says something is open, posted or hiring is a posting claim; a suggestion unit never holds one)
+const POSTING_CLAIM = /\b(?:openings?|postings?|posted|vacanc(?:y|ies)|hiring|hires|listings?|listed|job ads?|positions? (?:open|available)|(?:is|are) open|apply (?:to|for|at)|apply you|now accepting|(?:send|submit) (?:your|my|the) (?:resume|application)s? to|available (?:near|in|around|now|right now)|(?:jobs?|roles?|positions?|work)\s+(?:\w+\s+){0,4}?(?:near|around|close to)\s+(?:you|your|me|here)|(?:near|around) (?:you|your|me)\b[^.?!]{0,40}\b(?:jobs?|roles?)|in your (?:city|area|town))\b/i;
+// (a posting denied, "not postings", "no openings", claims none)
+const NO_POSTING = /\b(?:not|no|never|nor|zero|0)\s+(?:an?\s+|any\s+)?(?:[\p{L}-]+\s+){0,2}?(?:openings?|postings?|listings?|vacanc(?:y|ies))\b/giu;
+const forClaim = (us: EvidenceUnit[], text: string) => POSTING_CLAIM.test(String(text).replace(NO_POSTING, " ")) ? us.filter((u) => u.kind !== "suggestion") : us;
+const TAG_AFTER_STOP = /([.!?])(["'\u201d)\]]*)[ \t]*(\[E\d+(?:\s*,\s*E\d+)*\])/g;
+// "those four", "these 3", "the two": a count referring back to items
+const COUNT_REF = /\b(those|these|the)\s+(two|three|four|five|six|seven|eight|nine|ten|[2-9]|10)\b/i;
+// An explicit back-reference to a list in this reply (review of cbea914e9: never a bare "all N" or "one of the N", which state true
+// counts, "I sent all 5 applications"): "those four", "these 3", "the four roles above", "the 3 I listed", "the two below".
+const N_WORD = "two|three|four|five|six|seven|eight|nine|ten|[2-9]|10";
+const BACK_REF = new RegExp(`\\b(?:those|these)\\s+(${N_WORD})\\b|\\bthe\\s+(${N_WORD})(?:\\s+[\\p{L}-]+){0,2}?\\s+(?:above|listed|below|I (?:named|listed))\\b`, "giu");
+const COUNT_WORDS: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+const countOf = (w: string) => COUNT_WORDS[w.toLowerCase()] ?? Number(w);
+// How many items the reply lists: its numbered or bulleted lines, or the longest series in one of its sentences ("A, B, C, or D"),
+// whichever is more.
+export function listCount(reply: string): number {
+  const marked = String(reply).split("\n").filter((l) => /^\s*(?:\d{1,2}[.)]|[-\u2022*])\s+\S/.test(l)).length;
+  const series = Math.max(0, ...String(reply).split("\n").flatMap((l) => splitSentences(l)).map((x) => {
+    const body = x.includes(":") ? x.slice(x.indexOf(":") + 1) : x;
+    const parts = body.replace(/[.!?]+$/, "").split(/,\s+(?:(?:and|or)\s+)?/).filter((p) => /\p{L}/u.test(p));
+    return parts.length >= 3 ? parts.length : 0;
+  }));
+  return Math.max(marked, series);
+}
+const LIST_MARK = /^\s*(?:\(?\d{1,2}[.)]|[-•*]|[a-z][.)])\s*$/i;
+// (S3 r12, architect ruling, narrowed after the review of cbea914e9) A sentence that refers back to a list in this reply ("which of
+// those four", "the four roles above") dangles only when the list it refers to was DROPPED: the sentences dropped this turn held a
+// list, and what is kept no longer shows that many items. Shown items: numbered or bulleted lines, a series in one sentence, a pair
+// ("A and B", "A or B") for a count of two, and a File link (the items are in the File). A reply is never emptied by this.
+export function danglingRef(sentence: string, kept: string, dropped: string): string | null {
+  const refs = [...String(sentence).matchAll(BACK_REF)].map((m) => ({ said: m[0], n: countOf(m[1] ?? m[2] ?? "") })).filter((r) => r.n >= 2);
+  if (!refs.length || !String(dropped ?? "").trim() || listCount(dropped) < 2 && !/(?:^|\n)\s*(?:\d{1,2}[.)]|[-\u2022*])\s/.test(dropped)) return null;
+  if (/https?:\/\/\S+/.test(kept)) return null;
+  const listed = listCount(kept), own = listCount(sentence);
+  const pair = /\p{L}[\p{L}\s/-]{1,60}\s(?:and|or)\s\p{L}/u.test(kept);
+  const off = refs.find((r) => r.n !== listed && r.n !== own && !(r.n === 2 && pair));
+  return off ? off.said : null;
+}
+// The rule on a finished reply, whichever path made it: `dropped` is what the turn's draft said that the reply no longer does.
+export function dropDanglingCounts(reply: string, dropped = ""): string {
+  if (!String(dropped ?? "").trim()) return String(reply ?? "");
+  const lines = String(reply ?? "").split("\n").map((l) => splitSentences(l));
+  const gone = new Set<string>();
+  lines.forEach((l, a) => l.forEach((x, b) => {
+    const rest = lines.map((l2, i) => l2.filter((_, j) => !(i === a && j === b) && !gone.has(`${i}:${j}`)).join(" ")).join("\n");
+    if (danglingRef(x, rest, dropped)) gone.add(`${a}:${b}`);
+  }));
+  if (!gone.size) return String(reply ?? "");
+  const out = lines.map((l, a) => l.filter((_, b) => !gone.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return /\p{L}/u.test(out) ? out : String(reply ?? "");
+}
 export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: SupportJudge | null; own?: string[]; onRecord?: (s: string) => boolean | null; ask?: string; carry?: string | null } = {}): Promise<Verified> {
   // (a question to the person may name only what their own record or their ask names)
   const allowed = [String(o.ask ?? ""), ...ledger.units.filter((u) => u.kind === "record").map((u) => u.text)].join("\n");
   const own = new Set((o.own ?? []).map((x) => x.trim()));
-  const lines = String(reply ?? "").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : splitSentences(l).filter((x) => x.trim()));
+  // (S3 r12: a tag written after the sentence's own stop, "nothing to show yet. [E2] Cashiers…", is that sentence's: the split put it
+  // on the next one, so the sentence it ended went uncited and the next one carried a unit that is not about it)
+  // (S3 r12, H034: "Which of those four sounds closest to what you want?" after a list of four roles: the count word counts what this
+  // reply shows, so it is no figure; the question is read as the plain question it is without it. Any other count still refuses it.)
+  const shown = listCount(stripTags(String(reply ?? "")));
+  // (never a posting claim: "Which of those four openings should I apply you to?" after an empty search is not a plain question)
+  const countedQuestion = (q: string) => { const m = COUNT_REF.exec(q); return !!m && countOf(m[2]) === shown && shown >= 2 && !POSTING_CLAIM.test(q.replace(NO_POSTING, " ")) && personQuestion(q.replace(m[0], m[1]), allowed); };
+  const lines = String(reply ?? "").replace(TAG_AFTER_STOP, " $3$1$2").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : splitSentences(l).filter((x) => x.trim()));
   const raw = lines.map((l) => [...l]);
   const failures: Failure[] = [], kept: string[] = [];
   // (`parts`: a clause naming two or more employers, one part per employer, each with that employer's units; round 8 of #849)
@@ -301,13 +374,13 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
     const { ids, text } = tagsOf(x);
     lines[a][b] = text;
-    if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || personQuestion(text, allowed)) return carryPast(text);
+    if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || personQuestion(text, allowed) || countedQuestion(text)) return carryPast(text);
     if (rec(text) === true) return carryPast(text);
     // The record's verdict comes before the plain-sentence rule: a sentence about the record that the record contradicts fails.
     if (rec(text) === false) { failures.push({ sentence: text, reason: "it is not what the person's record holds" }); bad.add(`${a}:${b}`); return; }
     if (free(text)) {
       const subj = mentioned(text)[0] ?? unknownIn(text) ?? carried;
-      const pool0 = ids.length ? ids.map((id) => ledger.get(id)).filter((u): u is EvidenceUnit => !!u) : ledger.units;
+      const pool0 = forClaim(ids.length ? ids.map((id) => ledger.get(id)).filter((u): u is EvidenceUnit => !!u) : ledger.units, text);
       const pool = pool0.filter((u) => u.source !== "an earlier reply in this chat" && (subj ? mine(u, subj) || (!unknownSubject(subj) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
       if (ids.length) citeAt.set(`${a}:${b}`, ids);
       checks.push({ a, b, clause: text, units: pool, claim: text, subject: subj, advice: true, untagged: !ids.length });
@@ -324,7 +397,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (!units.length) { failures.push({ sentence: text, reason: "it states a fact and no evidence unit holds it" }); bad.add(`${a}:${b}`); return; }
     citeAt.set(`${a}:${b}`, ids);
     for (const c of clausesOf(text)) {
-      if (noClaim(c) || personQuestion(c, allowed) || rec(c) === true) continue;
+      if (noClaim(c) || personQuestion(c, allowed) || countedQuestion(c) || rec(c) === true) continue;
       if (rec(c) === false) return fail(a, b, text, `"${c}" is not what the person's record holds`);
       // Round 3 of #849: every clause, not only one with a figure ("The posting is open", "It requires a clearance").
       const names = owners.length ? mentioned(c) : [];
@@ -346,7 +419,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
       // subject may rest on a unit that names no employer, and the judge is shown the subject)
       // (round 12: an unknown subject rests only on a unit that names it as its employer; a carried subject never rests on a posting
       // record whose employer code cannot tell, which is some other employer's posting)
-      const allowedUnits = units.filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") &&
+      const allowedUnits = forClaim(units, c).filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") &&
         (unknownSubject(subject) ? namesAsEmployer(u, subject!) :
           mine(u, subject) || (!!subject && !ownSubj && !u.owner && !u.posting && (anyNamed.get(u.id) ?? []).length === 0)));
       if (!allowedUnits.length) return fail(a, b, text, subject ? `no cited unit is about ${subject}` : "it names no employer, and every unit that could hold it is one employer's", subject);
@@ -356,7 +429,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   // Layer A: each clause against an index of the units it cites, a record unit read as one record (a fact per line).
   const asks: { k: number; claim: string; source: string }[] = [];
   // (round 12: a posting's state unit is read as one sentence, "… is open and closes …", so the role it names stays with its deadline)
-  const indexOf = (us: EvidenceUnit[]) => indexPages(us.map((u) => ({ text: u.posting ? u.text.replace(/; it closes /, " and closes ") : u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : "The person's confirmed record:", places: u.places ?? [], named: u.named ?? [], lend: u.kind === "chat" && u.owner && u.source !== "an earlier reply in this chat" ? u.owner : null, ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
+  const indexOf = (us: EvidenceUnit[]) => indexPages(us.map((u) => ({ text: u.posting ? u.text.replace(/; it closes /, " and closes ") : u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : u.kind === "suggestion" ? "General career knowledge" : "The person's confirmed record:", places: u.places ?? [], named: u.named ?? [], lend: u.kind === "chat" && u.owner && u.source !== "an earlier reply in this chat" ? u.owner : null, ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
   // Round 8 of #849: the judge always reads a clause with its subject, named or carried ("PayPal: It requires a clearance").
   const withSubject = (c: { clause: string; subject?: string | null }) => `${c.subject && !nameFoundIn(c.subject, c.clause) ? `${c.subject}: ` : ""}${c.clause}`;
   checks.forEach((c, k) => {
@@ -427,6 +500,20 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const got = await judgeAll(o.judge, asks.map((x) => ({ claim: x.claim, source: x.source })));
   const yesAt = new Set(asks.flatMap((x, j) => got[j] ? [x.k] : []));
   asks.forEach((x, j) => { const c = checks[x.k]; if (!yesAt.has(x.k) && asks.findIndex((y) => y.k === x.k) === j && !bad.has(`${c.a}:${c.b}`)) { failures.push({ sentence: c.claim, reason: c.untagged ? "it states a fact and cites no evidence unit, and no unit states it" : `the cited unit does not state "${x.claim}"`, subject: c.subject ?? null }); bad.add(`${c.a}:${c.b}`); } });
+  // (S3 r12: a list marker split off as its own piece, "1." of "1. Help desk …", goes with the item it numbers: an item dropped above
+  // left "1. 2. 3." standing as the reply)
+  // (a counted question stands only while what it counts still stands: its items checked above, it is checked again on what is kept)
+  // (S3 r12, architect ruling, narrowed after the review of cbea914e9: a kept sentence that refers back to a list goes when that list
+  // was among what this pass dropped, danglingRef; never the last thing standing)
+  const droppedText = lines.filter((l, i) => l.some((y, j) => y && bad.has(`${i}:${j}`))).map((l) => l.filter((y) => !!y).join(" ")).join("\n");
+  lines.forEach((l, a) => l.forEach((x, b) => {
+    const key = `${a}:${b}`;
+    if (!x || bad.has(key) || !droppedText.trim()) return;
+    const keptText = lines.map((l2, i) => l2.filter((y, j) => y && !bad.has(`${i}:${j}`) && `${i}:${j}` !== key).join(" ")).join("\n");
+    const off = danglingRef(x, keptText, droppedText);
+    if (off && /\p{L}/u.test(keptText.replace(/https?:\/\/\S+/g, ""))) { failures.push({ sentence: x, reason: `"${off}" counts items this reply no longer shows` }); bad.add(key); }
+  }));
+  lines.forEach((l, a) => l.forEach((x, b) => { if (LIST_MARK.test(x) && (b + 1 >= l.length || bad.has(`${a}:${b + 1}`) || LIST_MARK.test(l[b + 1] ?? ""))) bad.add(`${a}:${b}`); }));
   const text = lines.map((l, a) => l.filter((x, b) => x && !bad.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   const cites: string[] = [], citeOf: [string, string[]][] = [];
   lines.forEach((l, a) => l.forEach((x, b) => { if (x && !bad.has(`${a}:${b}`)) { kept.push(x); citeOf.push([x, citeAt.get(`${a}:${b}`) ?? []]); for (const id of citeAt.get(`${a}:${b}`) ?? []) if (!cites.includes(id)) cites.push(id); } }));

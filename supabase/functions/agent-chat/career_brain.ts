@@ -23,8 +23,11 @@ import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research
 import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed, type ResearchCheck } from "../_shared/agent/research/market.ts";
 import { bare, keepSupported, personQuestion, recordCheck, splitSentences } from "../_shared/agent/research/support.ts";
 import { confirmedRow, factRows } from "../_shared/agent/memory.ts";
-import { evidenceTurn, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
+import { dropDanglingCounts, evidenceTurn, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
 import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
+import { recordPrepAsked } from "./career_staged.ts";
+import { nextStepLine, watchVerified } from "../_shared/agent/next_step.ts";
+import { hasProfileOn, routerWatchProbe, watchHostReady } from "./career_staged.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
@@ -133,7 +136,10 @@ export async function agentTurn(o: {
   // WO-106 (F4): every job link checked just before it is shown.
   linkCheck?: LinkCheck | null;
   // FEATURE 13: the staged release's tool policy: tools withheld by name, and a note on what code does instead.
-  toolPolicy?: { withhold: readonly string[]; note: string } | null;
+  toolPolicy?: { withhold: readonly string[]; note: string; intent?: string } | null;
+  // D-098: the reply pipeline's support judge when no market research is wired (the reply-quality eval: evals/career/run.ts
+  // brainSupportJudge builds it as production does). Production passes it as market.judge.
+  supportJudge?: import("../_shared/agent/research/support.ts").SupportJudge | null;
   // Situation knowledge (CAREER_KNOWLEDGE=on, off by default): the Person Context Pack and the 1 to 3 playbooks that fit it
   // go in the system prompt (_shared/agent/knowledge). Off, the prompt is exactly what it was.
   knowledge?: boolean;
@@ -254,6 +260,8 @@ export async function agentTurn(o: {
     model: o.model,
     ctx,
   });
+  // (S3 r12: the model's own draft, for what the pipeline and the condense pass dropped from it: dropDanglingCounts below)
+  const draft0 = String(result.reply ?? "");
   // Rounds 2 and 3 (owner must-fix; D-024): a turn that asks about, or whose reply speaks of, the status of their applications
   // stands on a lookup. When the model made none, code reads the record itself (the same read-only tool), on any turn, whatever
   // else it did; what is then said about their applications is code's (applicationsEnforced, at the end of the turn).
@@ -309,7 +317,7 @@ export async function agentTurn(o: {
     const l0 = replyLength(o.message, o.history);
     const repair = async (x: { system: string; user: string }) => { const res = await o.model({ system: x.system, messages: [{ role: "user", content: [{ type: "text", text: x.user }] }], tools: [], max_tokens: 500, tool_choice: { type: "none" } } as any); return ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim(); };
     const names = [...new Set((o.history ?? []).filter((m: any) => typeof m?.content === "string").flatMap((m: any) => (m.content as string).match(/(?<![\p{L}])\p{Lu}[\p{L}&'-]{2,}/gu) ?? []))];
-    piped = await runReplyPipeline(result.reply, ledger!, { judge: o.market?.judge ?? null, repair, own: [...(result.codeLines ?? [])], onRecord, ask: o.message, contracts: pipelineContracts((ctx.turn as any)?.contracts), names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
+    piped = await runReplyPipeline(result.reply, ledger!, { judge: (o.market?.judge ?? o.supportJudge ?? null), repair, own: [...(result.codeLines ?? [])], onRecord, ask: o.message, contracts: pipelineContracts((ctx.turn as any)?.contracts), names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
     // Live-12 review (item 2): a link stays only when a ledger unit, a tool result or a File made this turn gave it (after the draft and
     // after the repair alike: this runs on what the pipeline returns).
     result = { ...result, reply: stripUnseenLinks(piped.text, [...(result.linksSeen ?? []), ...(result.fileLinks ?? []), ...shownBefore(o.history), ...ledger!.units.map((u) => u.url).filter((u): u is string => !!u)]) };
@@ -325,7 +333,7 @@ export async function agentTurn(o: {
     ...(hypo ? [] : shownPayOf("what is the pay", o.history)).map((l) => ({ text: l.text, title: "A posting line shown earlier in this chat", url: l.url })),
   ];
   if (piped) { /* the reply pipeline checked it */ }
-  else if (FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: o.market?.judge ?? null, ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: o.market?.judge ?? null, ask: o.message, chat: chatUnits(), trace: (rows) => { researchRows = rows; } }) };
+  else if (FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: (o.market?.judge ?? o.supportJudge ?? null), ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: (o.market?.judge ?? o.supportJudge ?? null), ask: o.message, chat: chatUnits(), trace: (rows) => { researchRows = rows; } }) };
   else if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
   // D-073 review 2: research read pages and none supported an answer, and the model's reply did not stand (the loop removed its
   // unsourced claim, asked once more and stopped: "incomplete_reply"). The person is told what research found, in code's words: that
@@ -437,7 +445,7 @@ export async function agentTurn(o: {
   const supportTrace: { draft: string; refused: { sentence: string; why: string }[] } | null = FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show ? { draft: String(result.reply), refused: [] } : null;
   const keepSupportedT: typeof keepSupported = async (r0, src, opts) => { const k = await keepSupported(r0, src, { onRecord, ...(opts ?? {}) }); supportTrace?.refused.push(...((k as any).why ?? [])); return k; };
   if (FAIL_CLOSED.support && !piped && !trace.m && result.reply && result.stopped === "final" && !result.show) {
-    const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);
+    const judge = (o.market?.judge ?? o.supportJudge ?? null), pure = (s: string) => pureUnconfirmed(s, o.message);
     // Live-11 C11: a question to the person ("Which email should go on the resume?") is never judged, when it states no figure.
     const askOnly = (s: string) => personQuestion(s, [o.message, ...(hypo ? [] : factRows((o.stores as any)?.profile).filter(confirmedRow).map((f: any) => String(f.text ?? "")))].join("\n"));
     const recs = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].filter((p: any) => numbersIn(String(p?.pay ?? "")).length);
@@ -594,6 +602,23 @@ export async function agentTurn(o: {
   const supportAll = supportTrace && supportTrace.refused.length ? supportTrace : researchTrace;
   const withSupport0 = supportAll ? { ...result, support: supportAll } : result;
   const withSupport = pipeline ? { ...withSupport0, pipeline, ...(piped ? { piped: { repaired: piped.repaired, calls: piped.calls, judgeCalls: piped.judgeCalls, judgeClaims: piped.judgeClaims, judgeCapped: piped.judgeCapped, fallback: piped.fallback, dropped: piped.dropped } } : {}) } : withSupport0;
+  // S3 r12 (architect ruling): an empty search whose kept reply asks and offers nothing gets code's one next-step line (next_step.ts),
+  // after the pipeline and the condense pass, never judged.
+  // (and, first, a sentence counting back to a list the delivered reply no longer shows goes: reply_pipeline.ts dropDanglingCounts;
+  // probe-r12-nextstep-5, "Pick whichever of the four roles above…" after the condense pass dropped the roles)
+  if (withSupport.reply && withSupport.stopped === "final" && !withSupport.show) {
+    const finalText = String(withSupport.reply).replace(/\s+/g, " ");
+    const droppedLines = stripTags(draft0).split("\n").filter((l) => /\p{L}/u.test(l) && !finalText.includes(l.replace(/^\s*(?:\d{1,2}[.)]|[-\u2022*])\s+/, "").replace(/\s+/g, " ").trim()));
+    // (D-097 with S3 r12: code's not-run lines are never the count-back rule's to drop: put back at the head, once each)
+    (withSupport as any).reply = withNotRun(dropDanglingCounts(String(withSupport.reply), droppedLines.join("\n")), nrLines);
+  }
+  if ((ctx.turn as any)?.emptySearch) await watchHostReady.catch(() => null);
+  const nextStep = withSupport.reply && withSupport.stopped === "final" && !withSupport.show
+    ? nextStepLine(String(withSupport.reply), (ctx.turn as any)?.emptySearch ?? null, Array.isArray(withSupport.postings) && withSupport.postings.length > 0,
+      (q) => watchVerified(q, { hasProfile: hasProfileOn(o.stores), probe: routerWatchProbe(o.stores as Record<string, unknown>) })) : null;
+  if (nextStep) (withSupport as any).reply = `${String(withSupport.reply).trimEnd()}\n\n${nextStep}`;
+  // S3 r12 (dev H010): the questions a practice session the brain answered asked, for code's next serve (career_staged.ts recordPrepAsked).
+  if (withSupport.reply && withSupport.stopped === "final") recordPrepAsked(o.stores as Record<string, any>, o.toolPolicy?.intent ?? null, String(withSupport.reply));
   return know ? { ...withSupport, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : withSupport;
 }
 

@@ -17677,7 +17677,7 @@ const CareerRouter = (() => {
     if (!qs.length && !fam) return null;
     const textOf = (x) => s(x && (x.q || x.question || x.text));
     const norm = (x) => lc(x).replace(/[^a-z0-9]+/g, " ").trim();
-    const served = new Set((Array.isArray(thread.served) ? thread.served : []).map(norm));
+    const served = prepServedSet(thread, norm);
     const dcfQ = /\bdcf\b/.test(t) ? qs.find((x) => /dcf/i.test(textOf(x))) : null;
     const ordered = [...new Set([...(fam ? fam.questions : []), ...qs.filter((x) => x && (x.round === "technical" || /technical/i.test(s(x.round)))).map(textOf), ...qs.map(textOf)].filter(Boolean))];
     const weakM = t.match(/\b(?:weakest on|weak on|focus on|struggle with)\s+([a-z]{4,})/);
@@ -17792,7 +17792,7 @@ const CareerRouter = (() => {
     const qs = (bank && bank.questions) || [];
     if (!qs.length) return null;
     const norm = (x) => lc(x).replace(/[^a-z0-9]+/g, " ").trim();
-    const served = new Set((Array.isArray(thread.served) ? thread.served : []).map(norm));
+    const served = prepServedSet(thread, norm);
     const inSector = (row) => {
       const ty = s(row && row.source && row.source.type);
       if (ty.startsWith(`interview_bank_${sector}`)) return true;
@@ -19133,6 +19133,20 @@ const CareerRouter = (() => {
     const m = threadMirrorForWrite(c);
     if (m) m.path = rec;
     return rec;
+  }
+  const PREP_STOP = new Set(["the", "and", "you", "your", "for", "with", "are", "was", "that", "this", "what", "how", "would", "did", "can", "will", "have", "has"]);
+  function prepWords(x) { return new Set(String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter((w) => w.length >= 3 && !PREP_STOP.has(w))); }
+  function prepSameQuestion(a, b) {
+    const x = prepWords(a), y = prepWords(b);
+    if (!x.size || !y.size) return false;
+    let both = 0;
+    for (const w of x) if (y.has(w)) both += 1;
+    return both / (x.size + y.size - both) >= 0.7 || (both / x.size >= 0.85 && both / y.size >= 0.6);
+  }
+  function prepServedSet(thread, norm) {
+    const base = new Set((Array.isArray(thread && thread.served) ? thread.served : []).map(norm));
+    const asked = (Array.isArray(thread && thread.asked) ? thread.asked : []).filter((x) => typeof x === "string" && x.trim());
+    return { has: (k) => base.has(k) || asked.some((a) => prepSameQuestion(k, a)) };
   }
   function prepThreadOf(ctx) {
     const c = ctx || {};

@@ -32,6 +32,8 @@ import { isClaude, JUDGE_A_MAX_TOKENS, JUDGE_A_MODEL, JUDGE_A_SYSTEM, JUDGE_B_MA
 import { attribute, attributionLines } from "./attribution.ts";
 import * as RC from "../../supabase/functions/agent-chat/release_config.ts";
 import { inCi } from "../subscription/claude_cli.ts";
+import { researchReplyOn } from "../../supabase/functions/_shared/research_reply.ts";
+import { type SupportJudge, supportJudgeVia } from "../../supabase/functions/_shared/agent/research/support.ts";
 import { budgetTargets, claudeSpentUsd, ledgerSpentUsd, openGate, preflight, quoteRun, spendLine } from "./eval_budget.ts";
 // stop: asked before each item; a reason ends the run there (the spend cap), and the items not run are not scored.
 export async function runEval(items: EvalItem[], brain: Brain, judge: Judge, stop?: () => string | null): Promise<EvalResult> {
@@ -149,6 +151,13 @@ export function makeJudge(o: { cfgA: any; cfgB: any; call: JudgeCall }): Judge {
 // The brains, as agent-chat runs them, over in-memory stores for one synthetic person (see harness.ts for what is and is
 // not production parity).
 const arr = (x: unknown): any[] => Array.isArray(x) ? x : [];
+// D-098: the reply pipeline's support judge, built as production builds it (agent-chat handler-career.ts: supportJudgeVia over the
+// career model's call, on when CAREER_RESEARCH_REPLY is), from the brain's own call: under --subscription that call goes to the
+// claude CLI (D-089), otherwise through the gateway. Before D-098 the brain had none here, so every claim the judge decides failed
+// closed and the eval measured a stricter product than production. Not the eval's judges (judges.ts): those grade the reply.
+export function brainSupportJudge(env: { get(k: string): string | undefined }, model: ModelFn | null): SupportJudge | null {
+  return model && researchReplyOn(env) ? supportJudgeVia((payload) => model(payload as any)) : null;
+}
 // D-038 measurement: wall time of every brain turn (the agent loop: model calls and tools), for p50/p95 latency per turn.
 export const BRAIN_TURN_MS: number[] = [];
 export async function makeBrain(o: { name: BrainName; model: ModelFn | null; env: { get(k: string): string | undefined } }) {
@@ -168,6 +177,7 @@ export async function makeBrain(o: { name: BrainName; model: ModelFn | null; env
   const usesModel = o.name === "agent" || o.name === "staged";
   if (usesModel && !o.model) throw new Error(`the ${o.name} brain needs a model`);
   const T0 = Date.UTC(2026, 9, 19, 15);
+  const supportJudge = brainSupportJudge(o.env, o.model);
   return async (turns: string[], item?: Pick<EvalItem, "world">): Promise<{ replies: string[]; state: unknown; trace?: Trace }> => {
     const store = memoryStore();
     const alerts = memoryAlertStore();
@@ -211,6 +221,7 @@ export async function makeBrain(o: { name: BrainName; model: ModelFn | null; env
         const t = await agentTurn({ message: a.message, history: a.history, stores: ctx, userId: a.userId, threadId: a.userId, now, alerts, interviews, model,
           memory, wants, posting: (id: string) => board.get(id), postings: (q: string) => board.search(searchWords(q), 150),
           outreach: { store: outreach, model } as any,
+          supportJudge,  // D-098: as production (market.judge there)
           known: { standing: await memory.standing(a.userId), alerts: row ? { prefs: row.prefs, tz: row.tz } : null, pipeline: null, situation },
           ...(stagedPick ? { toolPolicy: stagedToolPolicy(stagedPick) } : {}) });  // as the handler: the router's answer rides as data
         BRAIN_TURN_MS.push(Math.round(performance.now() - t0));

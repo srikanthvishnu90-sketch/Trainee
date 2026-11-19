@@ -729,6 +729,11 @@ export function parseVerdicts(text: string): ("yes" | "no")[] {
   try { const v = JSON.parse(String(text ?? "").trim()); return Array.isArray(v) ? v.map((x) => x === "yes" ? "yes" : "no") : []; } catch { return []; }
 }
 export const modelSupportJudge = (call: (payload: ReturnType<typeof supportJudgePayload>) => Promise<string>): SupportJudge => async (claims) => parseVerdicts(await call(supportJudgePayload(claims)));
+// D-098: the support judge the product builds (agent-chat handler-career.ts, under CAREER_RESEARCH_REPLY), from a Messages-API call:
+// the payload above, sent as the request's one user message, and the reply's text read back. The reply-quality eval builds the same
+// judge from its own call (evals/career/run.ts brainSupportJudge), so the eval measures the pipeline production runs.
+export const supportJudgeVia = (call: (payload: { system: string; messages: { role: "user"; content: { type: "text"; text: string }[] }[]; max_tokens: number; temperature: number }) => Promise<any>): SupportJudge =>
+  modelSupportJudge(async (p) => { const r = await call({ system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: p.max_tokens, temperature: p.temperature }); return (r?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); });
 // One batched call, fail closed: true only for an exact "yes" in an answer of the right length that came back in time.
 // `failed` on the answer: the judge could not answer (absent, threw, timed out, the budget refused it, a count that does not match);
 // every claim is then no, and the caller knows the no is an outage, not a refusal.

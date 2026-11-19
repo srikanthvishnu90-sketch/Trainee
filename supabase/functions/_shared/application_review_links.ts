@@ -4,9 +4,10 @@
 // prepare-ahead card (career_prepare_ahead.ts) and the scheduled card push (career-proactive). Each review File is built by
 // code from the prepared payload, the posting's own title and the posting's still-open required questions
 // (application_review.ts reviewOf, file_service.ts createReview). A review that cannot be made never changes the card.
-import { openQuestionsFor, reviewLinksFor, type ReviewDeps, withLinks } from "./application_review.ts";
+import { batchItemsFor, openQuestionsFor, reviewLinksFor, type ReviewDeps, withLinks } from "./application_review.ts";
 import { VERSIONS_KEY } from "./career_resume_outcomes.ts";
 import { createFileService, supabaseFileKindStore } from "./file_service.ts";
+import { feedUrlsFor } from "./file_link.ts";
 
 export type ReviewLinks = (userId: string, preparedIds: string[]) => Promise<string | null>;
 // deno-lint-ignore no-explicit-any
@@ -33,6 +34,28 @@ export function supabaseReviewLinks(admin: any, env: { get(k: string): string | 
     console.error("review links:", e instanceof Error ? e.message : String(e));
     return null;
   });
+}
+// D-094: the File of one batch (cloud_prepare.ts finish: the batch's one card is a summary plus this File). Every application in
+// the card's order, each with its exact payload; null when any of them cannot be read or the File cannot be made.
+export type BatchFile = (userId: string, rows: { id: string }[]) => Promise<{ id: string; url: string } | null>;
+// deno-lint-ignore no-explicit-any
+export function supabaseBatchFile(admin: any, env: { get(k: string): string | undefined }): BatchFile {
+  return async (userId, rows) => {
+    try {
+      // No File links configured: no File can be made, so nothing is read for one (the card is shown as before, at its cost).
+      const probe = await feedUrlsFor(env, userId, "0000000000", Date.now());
+      if (!probe.url && !probe.webApp) return null;
+      const deps = supabaseReviewDeps(admin, userId, env), items = await batchItemsFor(rows, deps);
+      if (!items) { console.error("batch file: an application of the batch could not be read; no File"); return null; }
+      const made = await createFileService({ store: supabaseFileKindStore(admin), env, now: Date.now }).createBatch!(userId, items);
+      if (!made.ok) console.error("batch file:", made.error);
+      const url = made.ok ? made.url ?? made.webApp : null;
+      return made.ok && url ? { id: made.id, url } : null;
+    } catch (e) {
+      console.error("batch file:", e instanceof Error ? e.message : String(e));
+      return null;
+    }
+  };
 }
 // The scheduled and prepare-ahead card push (career_apply_card_push_as), the card text followed by its review links while it
 // stays one text. The database still checks that the text carries every card line.

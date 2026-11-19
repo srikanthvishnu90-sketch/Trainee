@@ -79,6 +79,7 @@ export function sandboxHostOptions(env: (k: string) => string, f: typeof fetch):
 export function createRunnerHandler(o: {
   env: RunnerEnv; fetch?: typeof fetch; host?: SandboxHost; waitUntil?: (p: Promise<unknown>) => void; now?: () => number;
   review?: (user: string, preparedIds: string[]) => Promise<string | null>; // WO-G: review links on the pushed card
+  batchFile?: (user: string, rows: any[]) => Promise<{ id: string; url: string } | null>; // D-094: a batch's File (summary card)
   describe?: (user: string, rows: any[]) => Promise<any[]>; // the role and the posting's own terms on the pushed card
 }): (req: Request) => Promise<Response> {
   const f = o.fetch ?? fetch;
@@ -151,7 +152,7 @@ export function createRunnerHandler(o: {
         if (!r.ok) throw Error(`read ${r.status}`);
         return ((await r.json()) as PrepareRequestRow[])[0] ?? null;
       };
-      const out = await handlePrepareBridge(p[1], body, { rpc, readRequest, secret, stop, now: o.now, review: o.review, describe: o.describe });
+      const out = await handlePrepareBridge(p[1], body, { rpc, readRequest, secret, stop, now: o.now, review: o.review, batchFile: o.batchFile, describe: o.describe });
       return json(out.status, out.body);
     }
     const m = /\/job\/([a-z]+)$/.exec(path);

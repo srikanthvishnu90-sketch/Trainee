@@ -58,6 +58,7 @@ import { modelDerive } from "../_shared/agent/research/derive.ts";
 import { RESEARCH_DRAFT_MAX_TOKENS } from "../_shared/agent/research/draft_json.ts";
 import { SUPPORT_JUDGE_TIMEOUT_MS, supportJudgeVia } from "../_shared/agent/research/support.ts";
 import { replyFlagsMeta } from "../_shared/agent/loop.ts"; // flag-only reply checks saved with the turn (Greptile on #566)
+import { withNotRun } from "../_shared/agent/not_run.ts"; // Gap #5: code's not-run lines lead the reply after every rewrite
 import { gatewayGroundSearch, memoryGroundCache } from "../_shared/agent/research/ground.ts";
 const researchCache = memoryGroundCache();
 const webResearchCache = memoryWebCache(); // D-060: per instance, like researchCache
@@ -81,6 +82,7 @@ import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
 import { CODE_IN_CHAT_INTENT, CODE_IN_CHAT_REPLY, codeInChat, noteForCodeTurn } from "../_shared/career_code_in_chat.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { CARD_ANSWER_INTENT, CARD_NEEDS_REPLY_STATUS, cardIntent, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
+import { supabaseSendRoutes } from "../_shared/career_apply_send_route.ts";
 import { billingTurn, PAY_BY_CHECKOUT, stripeFromEnv, supabaseBillingStore } from "../_shared/career_billing.ts";
 import { mockPassNote, mockTurn, supabaseMockStore as supabaseMockStoreUncapped } from "../_shared/career_mock.ts";
 import { hiredSourceFromEnv } from "../_shared/career_hired.ts";
@@ -733,7 +735,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const card0 = handoffAns ? ({ reply: handoffAns.reply, status: "handoff", handoff: handoffAns } as any) : !cardHold && !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
         ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id),
-          review: (shown) => supabaseReviewLinks(admin, Deno.env)(user.id, shown.map((p) => p.id)), store: supabaseCardStore(admin), events })
+          review: (shown) => supabaseReviewLinks(admin, Deno.env)(user.id, shown.map((p) => p.id)),
+          // The yes says what happens to EACH approved application (career_apply_send_route.ts): the cloud's switches are the
+          // release flags and the database's rows, read as the submission claim reads them (chat_switches.ts liveSwitches).
+          routes: (ids) => supabaseSendRoutes(admin, user.id, ids, { now: Date.now(),
+            cloudOn: async () => liveSwitches(Deno.env, { settings: await readSubmitSettings(admin), cloudOptIn: "on", gmailSend: null }).employerSubmit }),
+          store: supabaseCardStore(admin), events })
         : null;
       const card = card0 && offerLastWord && card0.status === CARD_NEEDS_REPLY_STATUS ? null : card0;
       // WO-025: the text mock interview, code's like the card: "mock me for <role> at <company>", "end mock", and the answers
@@ -1614,9 +1621,13 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           if (peopleTrace && !turn.show && turn.stopped === "final") turn.reply = enforcePeopleReply(turn.reply, peopleTrace);
           // D-067 (D-024): the brain's reply is never sent blank, after every check code ran on it.
           turn.reply = nonEmptyReply(turn);
+          // Gap #5, review rv4 (A1): a rewrite here (the people caveat above) never drops code's not-run lines (not_run.ts).
+          // (Review rv5: the search judge's rewrite, FEATURE 5 below, is on the other branch of this if, the router's turn: it never
+          // rewrites a brain turn's reply, and a router turn has no brain tool calls, so no not-run lines to keep.)
+          turn.reply = withNotRun(turn.reply, turn.notRunLines);
           out = { reply: turn.reply, intent: turn.show?.intent ?? (turn.tool_calls.some((c: any) => c.name === "draft_followup") ? FOLLOWUP_INTENT : "agent"), resultStatus: turn.stopped, contained: false, handler: "agent", ...(turn.show?.parts ? { parts: turn.show.parts } : {}),
             ...(turnDocuments.length ? { result: { documents: turnDocuments } } : {}) };
-          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, ...((turn as any).shorten ? { shorten: (turn as any).shorten } : {}), ...((turn as any).set_aside ? { set_aside: (turn as any).set_aside } : {}), ...((turn as any).research ? { research: (turn as any).research } : {}), ...((turn as any).support ? { support: (turn as any).support } : {}), ...((turn as any).pipeline ? { pipeline: (turn as any).pipeline, ...((turn as any).piped ? { piped: (turn as any).piped } : {}) } : {}), pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
+          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, ...(turn.not_run?.length ? { not_run: turn.not_run } : {}), ...((turn as any).shorten ? { shorten: (turn as any).shorten } : {}), ...((turn as any).set_aside ? { set_aside: (turn as any).set_aside } : {}), ...((turn as any).research ? { research: (turn as any).research } : {}), ...((turn as any).support ? { support: (turn as any).support } : {}), ...((turn as any).pipeline ? { pipeline: (turn as any).pipeline, ...((turn as any).piped ? { piped: (turn as any).piped } : {}) } : {}), pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
             // flag-only reply checks (loop.ts): saved with the turn so remaining reply problems can be counted (Greptile on #566)
             ...replyFlagsMeta(turn as { flags?: unknown }), ...(turn.show?.meta ?? {}) };
         }

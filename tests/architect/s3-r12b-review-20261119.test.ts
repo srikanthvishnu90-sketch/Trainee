@@ -1,10 +1,13 @@
 // S3 r12b review (2026-11-19, PR #871 at 2789d3090 rejected): what the r12b parse and reply guards got wrong, pinned as classes.
 //   1. a place written with its state, country or district after it ("in Austin TX", "in Chicago downtown") and the words after a
 //      place ("to Dallas", "i guess") are never role words;
+//   2. dropping a "waiting for your yes" claim about a stated fact leaves whole sentences, never a dangling "which" or "I'm", and
+//      never touches a claim that names its own other object ("your yes on the interview slot");
 // No model, no network.
 //   deno test -A --no-check tests/architect/s3-r12b-review-20261119.test.ts
 import assertNode from "node:assert/strict";
 import { searchTextOf } from "../../supabase/functions/_shared/posting_constraints.ts";
+import { confirmClaimsDropped } from "../../supabase/functions/_shared/agent/reply_guards.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -48,4 +51,31 @@ Deno.test("r12b-review-1 a place's state, country or district, and what follows 
   eq(searchTextOf("data analyst roles in Austin or Dallas").role, "data analyst");
   // A role written after the city stays the role.
   ok(/\bdata science\b/.test(searchTextOf("internships in Chicago data science").role));
+});
+
+Deno.test("r12b-review-2 a dropped confirmation claim leaves whole sentences and never another object's claim", () => {
+  const cases: [string, string][] = [
+    ["Got it. Your location is Chicago, which still needs your yes.", "Got it. Your location is Chicago."],
+    ["Your goal is saved, that still needs your confirmation.", "Your goal is saved."],
+    ["Your major is saved, and I'm still waiting for your yes.", "Your major is saved."],
+    ["Your major is saved, and I’m still waiting for your yes.", "Your major is saved."],
+    ["Your goal is noted and we're still waiting on your confirmation.", "Your goal is noted."],
+    ["Your city is noted as the one I search in, but I am still waiting for your yes.", "Your city is noted as the one I search in."],
+    // the claim on the next line, after a sentence about their record
+    ["Your goal is saved.\nIt still needs your confirmation.", "Your goal is saved."],
+    // in brackets, only the brackets go: the rest of the sentence is another claim and stands
+    ["The fact is recorded (still waiting for your yes) and used in search.", "The fact is recorded and used in search."],
+  ];
+  for (const [r, want] of cases) eq(confirmClaimsDropped(r), want, r);
+  // A claim that names its own other object is not a claim about the fact, and the sentence stays whole.
+  for (const r of [
+    "Your major is saved, and I'm still waiting for your yes on the interview slot at 3pm Tuesday.",
+    "Your location is on file, and it still needs your approval for the referral to Dana.",
+  ]) eq(confirmClaimsDropped(r), r);
+  // No output ends in a function word, and none is empty.
+  for (const r of [...cases.map((c) => c[0]), "It's waiting for your yes.", "Your goal is saved."]) {
+    const out = confirmClaimsDropped(r);
+    ok(out.trim().length > 0, r);
+    ok(!/\b(?:which|that|and|but|so|i'm|i’m|i am|we're|we are|is|to|the|a|of|for|when|while)\W*$/i.test(out), `${r} => ${out}`);
+  }
 });

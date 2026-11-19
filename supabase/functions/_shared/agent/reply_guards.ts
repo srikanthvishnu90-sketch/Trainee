@@ -624,19 +624,36 @@ export function misquotedAsks(reply: string, personSaid: string[]): { index: num
 // confirmation is open. The claim, as a clause of a sentence about their record (a fact, goal, school, anything on file), is dropped
 // when no confirmation is open (career_brain.ts confirmationOpen decides); the rest of the sentence stands. Applications, drafts,
 // messages and cards waiting for a yes are real approvals and are never touched here.
-const CONFIRM_CLAIM = /\s*(?:[,;]|\s[—–-])?\s*(?:(?:and|but|though)\s+)?(?:(?:it|that|this|which)(?:'s|\s+is)\s+|it\s+)?(?:still\s+)?(?:(?:waiting|pending|awaiting|waits)\s+(?:on\s+|for\s+)?(?:your|a|the)\s+(?:yes|confirmation|ok|okay|go-ahead|approval|sign-off)|needs?\s+your\s+(?:yes|confirmation|ok|okay|go-ahead|approval)|(?:needs|requires)\s+(?:a\s+)?(?:yes|confirmation)\s+from\s+you)\b[^.!?\n]*/i;
+// S3 r12b review (PR #871): the claim's subject is also "which"/"that" alone and "I'm"/"we're" ("Chicago, which still needs your
+// yes" left "Chicago, which."; "saved, and I'm still waiting for your yes" left "saved, and I'm.").
+const CONFIRM_HEAD = /\s*(?:[,;]|\s[—–-])?\s*(?:(?:and|but|though)\s+)?(?:(?:it|that|this|which)(?:['’]s|\s+is)\s+|(?:it|that|which)\s+|(?:i['’]m|i\s+am|we['’]re|we\s+are)\s+)?(?:still\s+)?(?:(?:waiting|pending|awaiting|waits)\s+(?:on\s+|for\s+)?(?:your|a|the)\s+(?:yes|confirmation|ok|okay|go-ahead|approval|sign-off)|needs?\s+your\s+(?:yes|confirmation|ok|okay|go-ahead|approval)|(?:needs|requires)\s+(?:a\s+)?(?:yes|confirmation)\s+from\s+you)\b/i;
+const CONFIRM_CLAIM = new RegExp(CONFIRM_HEAD.source + String.raw`[^.!?\n]*`, "i");
+// The yes is asked for another thing, named right after it ("your yes on the interview slot", "your approval for the referral"):
+// a real question about that thing, never a claim about the fact, so the sentence stays whole.
+const OTHER_OBJECT = /^\s+(?:on|for|of|about|regarding|to)\s+(?:the|your|a|an|my|our|their|his|her)\s+\p{L}/iu;
+// What a cut sentence must not end on: it would not be a whole sentence ("..., which.", "... and I'm.").
+const DANGLING = /(?:[\s,;:—–(-]+(?:which|who|and|but|or|so|though|because|while|when|if|i['’]m|i\s+am|we['’]re|we\s+are|it['’]s|is|are|was|the|a|an))+[\s,;:—–(-]*$/i;
 const RECORD_TALK = /\b(?:record|recorded|goal|fact|facts|on file|saved|profile|noted|school|major|degree|location|city|preference)\b/i;
 const APPROVAL_TALK = /\b(?:applications?|apply|applying|submit\w*|drafts?|messages?|emails?|outreach|card|batch|queue\w*|send|sending|sent|cover letters?|resume|packet)\b/i;
 export function confirmClaimsDropped(reply: string): string {
-  const out = String(reply ?? "").split("\n").map((line) => line.split(/(?<=[.!?]["'”’)\]]*)\s+/).map((x, i, all) => {
+  // The sentence before, across lines too ("Your goal is saved.\nIt still needs your confirmation.").
+  let prev = "";
+  const out = String(reply ?? "").split("\n").map((line) => line.split(/(?<=[.!?]["'”’)\]]*)\s+/).map((x) => {
     // About their record: the sentence says so, or it is "it/that/this" right after a sentence that does.
-    const about = RECORD_TALK.test(x) || (/^\W*(?:it|that|this)\b/i.test(x) && i > 0 && RECORD_TALK.test(all[i - 1]));
-    if (!CONFIRM_CLAIM.test(x) || !about || APPROVAL_TALK.test(x)) return x;
+    const before = prev;
+    if (x.trim()) prev = x;
+    const about = RECORD_TALK.test(x) || (/^\W*(?:it|that|this)\b/i.test(x) && RECORD_TALK.test(before));
+    const head = CONFIRM_HEAD.exec(x);
+    if (!head || !about || APPROVAL_TALK.test(x) || OTHER_OBJECT.test(x.slice(head.index + head[0].length))) return x;
+    // The claim alone in brackets goes with its brackets, and what follows them stands ("recorded (still waiting for your yes)
+    // and used in search" keeps "and used in search").
+    const unbracketed = x.replace(/\s*\(([^()]*)\)/g, (m, inner) => CONFIRM_HEAD.test(inner) && !OTHER_OBJECT.test(inner.slice((CONFIRM_HEAD.exec(inner)?.index ?? 0) + (CONFIRM_HEAD.exec(inner)?.[0].length ?? 0))) ? "" : m);
+    if (unbracketed !== x && !CONFIRM_HEAD.test(unbracketed)) return unbracketed.replace(/\s+([.,;:!?])/g, "$1").trim();
     const end = /[.!?]["')\]]*\s*$/.exec(x)?.[0]?.trim() ?? "";
-    const left = x.replace(CONFIRM_CLAIM, "").replace(/[.!?]["')\]]*\s*$/, "").replace(/[\s,;:—–(-]+$/, "").trim();
+    const left = x.replace(CONFIRM_CLAIM, "").replace(/[.!?]["')\]]*\s*$/, "").replace(/[\s,;:—–(-]+$/, "").replace(DANGLING, "").trim();
     // Only the claim was the sentence ("It's still waiting for your yes."): it goes whole.
     if (left.split(/\s+/).filter((w) => /\p{L}/u.test(w)).length < 3) return "";
     return `${left}${/[?!]/.test(end) ? end : "."}`;
-  }).filter(Boolean).join(" ")).join("\n");
+  }).filter(Boolean).join(" ")).join("\n").replace(/\n+$/, "");
   return out.trim() ? out : String(reply ?? "");
 }

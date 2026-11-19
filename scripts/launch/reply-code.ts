@@ -74,6 +74,8 @@ export const SHARED_REPLY_MODULES = [
   // D-072 (files writers, 2026-11-12): the writers the turn runs (the search plan after a search or watch, a material version for each
   // delivered tailored file or cover letter, a path comparison from compare_paths) and the path-compare ask the staged route reads.
   "career_search_plan_writer.ts", "career_material_writer.ts", "career_path_comparisons.ts",
+  // Mass apply (2026-11-17): the route each approved application takes, said on the card's yes (career_apply_cards.ts).
+  "career_apply_send_route.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that

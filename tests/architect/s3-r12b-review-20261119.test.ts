@@ -79,3 +79,23 @@ Deno.test("r12b-review-2 a dropped confirmation claim leaves whole sentences and
     ok(!/\b(?:which|that|and|but|so|i'm|i’m|i am|we're|we are|is|to|the|a|of|for|when|while)\W*$/i.test(out), `${r} => ${out}`);
   }
 });
+
+import { lengthNote, replyKind, replyLength } from "../../supabase/functions/_shared/agent/turn_notes.ts";
+Deno.test("r12b-review-3 'ok' after Trainee's own question accepts it, and is not a bare acknowledgement", () => {
+  const offer = [{ role: "user", content: "find me data analyst roles" }, { role: "assistant", content: "I found 3. Want me to also search Chicago for data analyst roles?" }];
+  const restore = [{ role: "assistant", content: "You set aside \"I live in Denver\" last week. Is it right again?" }];
+  for (const h0 of [offer, restore, null]) {
+    for (const m of ["ok", "sounds good", "perfect", "great", "cool", "okay"]) {
+      // (null: the history ends with this very message, after the offer)
+      const h = h0 ?? [...offer, { role: "user", content: m }];
+      const l = replyLength(m, h);
+      ok(l.kind !== "ack", `${m} after ${JSON.stringify(h.at(-1))}: ${l.kind}`);
+      ok(!/do not recap/.test(lengthNote(l)), m);
+    }
+  }
+  // A thanks after the question is still a thanks; and after a statement, "ok" is an acknowledgement as before.
+  eq(replyKind("ok thanks", offer), "ack");
+  eq(replyKind("thank you", offer), "ack");
+  eq(replyKind("ok", [{ role: "assistant", content: "I found 3 data analyst roles in Chicago." }]), "ack");
+  eq(replyKind("ok"), "ack");
+});

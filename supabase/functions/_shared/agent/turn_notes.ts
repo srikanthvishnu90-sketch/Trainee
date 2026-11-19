@@ -82,6 +82,17 @@ export type ReplyKind = "draft" | "question" | "recall" | "everything" | "answer
 const ACK_WORD = String.raw`(?:ok(?:ay)?|k|kk|cool|great|perfect|awesome|nice|sweet|good|alright|all right|got it|gotcha|understood|noted|sounds good|sounds great|will do|fair enough|makes sense|amazing|lovely|wonderful|excellent|thanks?|thank you|thx|ty|tysm|cheers|appreciate it|much appreciated|that helps|that's helpful|helpful)`;
 const ACK = new RegExp(String.raw`^(?:${ACK_WORD}(?:\s+(?:so much|a lot|a ton|very much|you|again|man|then|for that|for this|for the help|for your help))*[\s,.!]*)+$`);
 export const ackOnly = (message: string): boolean => String(message ?? "").length <= 80 && ACK.test(lc(message).replace(/[’]/g, "'").replace(/[\p{Emoji_Presentation}]/gu, " ").trim());
+// S3 r12b review (PR #871): "ok", "sounds good", "perfect" after Trainee's own question ("Want me to also search Chicago?", code's
+// restore question) answer it: they accept, and are not only acknowledging. A thanks in it ("ok thanks") is still a thanks.
+const THANKS = /\b(?:thanks?|thank you|thx|ty|tysm|cheers|appreciate it|much appreciated)\b/;
+function acceptsAsked(t: string, history?: Msg[]): boolean {
+  if (!history?.length || THANKS.test(t)) return false;
+  // The message just before this one (history may end with this message itself).
+  const h = history.filter((m) => (m?.role === "user" || m?.role === "assistant") && typeof m.content === "string");
+  if (h.length && h[h.length - 1].role === "user" && lc(h[h.length - 1].content).trim() === t.trim()) h.pop();
+  const last = h[h.length - 1];
+  return !!last && last.role === "assistant" && /\?["'”’)\]]*\s*$/.test(String(last.content).trim());
+}
 const DRAFT = /\b(?:draft|write|rewrite|redo|make|shorten|tighten)\b[^.?!]{0,60}\b(?:message|email|e-mail|note|dm|text|reply|letter|intro(?:duction)?|follow[- ]?up|thank[- ]you|ask|draft|it|that|one)\b|\b(?:cold|referral|outreach|follow[- ]?up|thank[- ]you)\s+(?:message|email|note|dm|draft)\b|\b(?:shorter|less formal|more casual)\b/;
 const SHORTER = /\b(?:shorter|way short|less formal|more casual|keep it (?:casual|short|brief)|brief(?:er)?|one[- ]liner)\b/;
 const QUESTION_ASK = /\b(?:quiz|drill)\s+me\b|\bask me\b[^.?!]{0,80}\b(?:question|about a time)\b|\b(?:mock|behavioral|technical|coding)\s+(?:round|question|interview)\b[^.?!]{0,40}\bask\b/;
@@ -94,7 +105,7 @@ export function replyKind(message: string, history?: Msg[]): ReplyKind {
   const t = lc(message);
   if (history && (practiceAnswerOf(message, history) || roastOf(message, history))) return "answer";
   if (history && practiceNextOf(message, history)) return "question";
-  if (ackOnly(t)) return "ack";
+  if (ackOnly(t) && !acceptsAsked(t, history)) return "ack";
   if (EVERYTHING.test(t)) return "everything";
   if (QUESTION_ASK.test(t) || practiceAskOf(t)) return "question"; // D-070: a practice question said any way
   if (DRAFT.test(t)) return "draft";

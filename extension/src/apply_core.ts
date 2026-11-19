@@ -724,6 +724,10 @@ export function trustedManifest(o: { owner: string; file: any; rows: { id: strin
       ...(Array.isArray(r.job_ids) ? { job_ids: r.job_ids.map(String).slice(0, 200) } : {}) };
     const prior = kept.get(t + "\n" + key);
     if (!prior) kept.set(t + "\n" + key, tf);
+    // D-095 (owner, 2026-11-17): a resume header value is a confirmed fact, but the person's own answer to that field's question
+    // is their own later word on it: it replaces the header value instead of conflicting with it (a conflict dropped both and
+    // asked the question they had just answered again). Any other confirmed source still conflicts as before.
+    else if (n(prior.value) !== n(tf.value) && prior.factId.startsWith("resume-header:")) kept.set(t + "\n" + key, tf);
     else if (n(prior.value) !== n(tf.value)) {
       kept.delete(t + "\n" + key);
       conflicts.push({ key, factIds: [prior.factId, tf.factId] });

@@ -208,7 +208,9 @@ Deno.test({
         await useAll(["First name", "Last name", "Email"]);
         assertEquals(outcomes(await prepareAhead(deps)), [[JOB2, "asked"], [JOB, "asked"]].sort((a, b) => a[0].localeCompare(b[0])));
         const keys = await openKeys();
-        assertEquals(keys.filter((k) => !k.startsWith("job:")), ["fact:phone", "fact:sponsorship", "fact:work_authorization"]);
+        // architect amendment (D-095, owner 2026-11-17): the phone is the confirmed resume header's, so it is not asked (the
+        // application uses that value, asserted where the payload is read).
+        assertEquals(keys.filter((k) => !k.startsWith("job:")), ["fact:sponsorship", "fact:work_authorization"]);
         assertEquals(keys.filter((k) => k.startsWith("job:")).length, 2, `the essay is one question per posting: ${keys.join(",")}`);
         assertEquals(await pg.sql(`select count(*) from public.career_apply_prepare_attempts where user_id = '${PERSON}' and posting_job_id in ('${JOB3}', '${JOB4}')`), "0", "the refused postings were never drawn");
       });
@@ -217,7 +219,7 @@ Deno.test({
       const SIBLING_WHY = "TEST Sibling ships weekly and I want to learn that pace.";
       let preparedId = "", preparedId2 = "";
       await t.step("their words (SERIAL-1441: a posting-bound answer never crosses postings in a batch): the first employer's essay readies the first only; the sibling waits for its own, then is ready with that text alone", async () => {
-        await useAll(["Phone", SPONSOR, AUTH]);
+        await useAll([SPONSOR, AUTH]); // D-095: phone is not asked
         await untilShown(WHY, COMPANY);
         await say(FIRST_WHY);
         let done = await prepareAhead(deps);
@@ -231,6 +233,9 @@ Deno.test({
         preparedId2 = done[0].prepared_id!;
         const why = async (id: string) => JSON.parse(await pg.sql(`select row_to_json(p) from public.career_apply_prepared p where id = '${id}'`)).payload.fields.find((f: any) => f.name === "why")?.value;
         assertEquals([await why(preparedId), await why(preparedId2)], [FIRST_WHY, SIBLING_WHY]);
+        // architect amendment (D-095): the phone never asked is the confirmed resume header's, on both applications.
+        const phone = async (id: string) => JSON.parse(await pg.sql(`select row_to_json(p) from public.career_apply_prepared p where id = '${id}'`)).payload.fields.find((f: any) => f.name === "phone")?.value;
+        assertEquals([await phone(preparedId), await phone(preparedId2)], ["+1 555-0100", "+1 555-0100"]);
       });
 
       await t.step("their one yes (SERIAL-1451/1461/1462): the card shown in thread A is closed by the card shown in thread B; a bare yes says how; a yes in reply to A's card message approves nothing, a replay nothing; a yes in reply to B's card message approves exactly the two payloads", async () => {

@@ -165,8 +165,11 @@ Deno.test({
         assertEquals(unshown.length, 0, `the router's own reply shows every entry (${unshown.length} of ${drafts.length} not): ${pasted.reply.slice(0, 300)}`);
         const yes = await chat.say("yes, that's my resume");
         assertEquals([yes.status, yes.intent, yes.resultStatus], [200, "career_resume_ingest", "completed"], yes.reply);
-        assertEquals(await pg.sql(`select count(*) from public.career_events where user_id = '${PERSON}' and kind = 'fact_confirmed'`), String(drafts.length),
-          "agent-chat's evidence step: one persisted event per entry");
+        // architect amendment (D-095, owner 2026-11-17): resume entries + header facts. The confirmed resume's header values are
+        // confirmed facts with their own events (ids resume-header:*); only the expected count and its derivation changed.
+        const header = Number(await pg.sql(`select count(*) from public.career_events where user_id = '${PERSON}' and kind = 'fact_confirmed' and detail->>'id' like 'resume-header:%'`));
+        assertEquals(await pg.sql(`select count(*) from public.career_events where user_id = '${PERSON}' and kind = 'fact_confirmed'`), String(drafts.length + header),
+          "agent-chat's evidence step: one persisted event per entry (and per header fact, D-095)");
         // What they say about themselves, in their own words, on later days (the router's replies to these are Muse's).
         for (const t of ["my name is Jordan Rivera", "my email is jordan.rivera@example.test", "my phone number is 312-555-0142",
           "I'm a US citizen and I don't need visa sponsorship", "I'm authorized to work in the US"]) {
@@ -208,15 +211,18 @@ Deno.test({
         const done = await prepareAhead(deps);
         assertEquals(outcomeFor(done, PERSON), ["asked"], JSON.stringify(done));
         assertEquals(await pg.sql(`select string_agg(key, ',' order by key) from public.career_apply_questions where user_id = '${PERSON}' and state = 'open'`),
-          "fact:phone,fact:sponsorship,fact:work_authorization");
+          // architect amendment (D-095, owner 2026-11-17): the phone is the confirmed resume header's (+1 555-0100), so it is not
+          // asked; the application uses that known value (asserted below).
+          "fact:sponsorship,fact:work_authorization");
         assertEquals(site.posts.length, 0, "a dry run sends nothing");
       });
 
       await t.step("their words again: phone, sponsorship and work authorization, each from their own message, each used by them", async () => {
-        const text = await useAll(["Phone", SPONSOR, AUTH]);
-        assert(text.includes(`"my phone number is 312-555-0142"`) && text.includes(`"I'm authorized to work in the US"`) && text.includes(day()), text);
+        // architect amendment (D-095): phone is not asked (the header gave it); sponsorship and work authorization as before.
+        const text = await useAll([SPONSOR, AUTH]);
+        assert(text.includes(`"I'm authorized to work in the US"`) && text.includes(day()), text);
         assertEquals(await pg.sql(`select string_agg(key || '=' || answer, ',' order by key) from public.career_apply_questions where user_id = '${PERSON}' and key in ('fact:phone','fact:sponsorship','fact:work_authorization')`),
-          "fact:phone=312-555-0142,fact:sponsorship=No,fact:work_authorization=Yes");
+          "fact:sponsorship=No,fact:work_authorization=Yes");
       });
 
       let preparedId = "", tailored = "";
@@ -229,9 +235,10 @@ Deno.test({
         tailored = row.payload.resume_sha256;
         assertEquals(row.payload.resume_tailored, true);
         const values = Object.fromEntries(row.payload.fields.filter((f: any) => f.name !== "resume").map((f: any) => [f.name, f.value]));
-        assertEquals(values, { first_name: "Jordan", last_name: "Rivera", email: "jordan.rivera@example.test", phone: "312-555-0142", sponsorship: "no", work_auth: "yes" });
+        // architect amendment (D-095): the phone is the known header value, used without asking.
+        assertEquals(values, { first_name: "Jordan", last_name: "Rivera", email: "jordan.rivera@example.test", phone: "+1 555-0100", sponsorship: "no", work_auth: "yes" });
         const lines = row.card_lines.join("\n");
-        for (const v of ["Jordan", "Rivera", "jordan.rivera@example.test", "312-555-0142"]) assert(lines.includes(v), `the card shows ${v}: ${lines}`);
+        for (const v of ["Jordan", "Rivera", "jordan.rivera@example.test", "+1 555-0100"]) assert(lines.includes(v), `the card shows ${v}: ${lines}`);
       });
 
       // Their status questions, through agent-chat (its read-back from career_apply_jobs answers before the router).
@@ -268,7 +275,7 @@ Deno.test({
         assertEquals(site.posts.length, 1, "exactly one POST");
         const got = site.posts[0];
         assertEquals([got.first_name, got.last_name, got.email, got.phone, got.sponsorship, got.work_auth],
-          ["Jordan", "Rivera", "jordan.rivera@example.test", "312-555-0142", "no", "yes"]);
+          ["Jordan", "Rivera", "jordan.rivera@example.test", "+1 555-0100", "no", "yes"]); // D-095: the header's phone
         assertEquals(site.upload(), tailored, "the tailored resume, byte for byte");
         const row = JSON.parse(await pg.sql(`select row_to_json(j) from public.career_apply_jobs j where user_id = '${PERSON}'`));
         assertEquals([row.state, row.confirmation_id], ["submitted_unconfirmed", "REAL-7001"]);

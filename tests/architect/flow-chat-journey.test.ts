@@ -174,7 +174,11 @@ Deno.test({
 
       await t.step("2. recall: what they know is the confirmed resume; what was never said is not on record", async () => {
         const all = await say("what do you know about me?");
-        assert(/15 confirmed/.test(all.reply) && all.reply.includes("TEST University"), `recall reads the confirmed facts: ${all.reply}`);
+        // architect amendment (D-095, owner 2026-11-17): resume entries + header facts. The confirmed resume's header values are
+        // confirmed facts bound to that resume (ids resume-header:*), so the confirmed count is the 15 entries plus them; only the
+        // expected count and its derivation changed.
+        const header = await n(`select count(*) from public.career_events where user_id = '${PERSON}' and kind = 'fact_confirmed' and detail->>'id' like 'resume-header:%'`);
+        assert(header > 0 && new RegExp(`\\b${15 + header} confirmed`).test(all.reply) && all.reply.includes("TEST University"), `recall reads the confirmed facts: ${all.reply}`);
         const auth = await say("am I authorized to work in the US?");
         assert(/not on your record/i.test(auth.reply), `work authorization was never said: not on record, never guessed: ${auth.reply}`);
         assert(!/\b(yes|you are authorized|you're authorized)\b/i.test(auth.reply.split("\n")[0]), `no invented yes: ${auth.reply}`);

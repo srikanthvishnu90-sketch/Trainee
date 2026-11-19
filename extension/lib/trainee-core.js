@@ -5478,6 +5478,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       };
       const prior = kept.get(t + "\n" + key);
       if (!prior) kept.set(t + "\n" + key, tf);
+      else if (n(prior.value) !== n(tf.value) && prior.factId.startsWith("resume-header:")) kept.set(t + "\n" + key, tf);
       else if (n(prior.value) !== n(tf.value)) {
         kept.delete(t + "\n" + key);
         conflicts.push({

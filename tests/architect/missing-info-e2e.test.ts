@@ -315,7 +315,9 @@ Deno.test({
       await step("5. phone, sponsorship, work authorization and Globex's own question are asked once, one at a time; an ID question is never asked", async () => {
         const all = await openQs();
         const keys = all.map((q: any) => q.key);
-        eq(all.filter((q: any) => !q.key.startsWith("job:")).map((q: any) => q.label).sort(), [AUTH, "Phone", SPONSOR].sort(), `each shared question once, not once per role: ${keys.join(",")}`);
+        // architect amendment (D-095, owner 2026-11-17): the confirmed resume's header gave the phone (+1 555-0100), so it is a
+        // confirmed fact and is not asked; the known value is what the application uses (asserted below).
+        eq(all.filter((q: any) => !q.key.startsWith("job:")).map((q: any) => q.label).sort(), [AUTH, SPONSOR].sort(), `each shared question once, not once per role: ${keys.join(",")}`);
         const own = all.filter((q: any) => q.key.startsWith("job:"));
         eq(own.map((q: any) => [q.label, q.company]), [[WHY, GLOBEX.company]], "the employer's own question is bound to that employer alone");
         assert(!all.some((q: any) => /Social Security/i.test(q.label)), "an ID number is never a stored question");
@@ -323,7 +325,7 @@ Deno.test({
         // refused, the question stays); work authorization and Globex's own question are left for later ("skip": they stay open).
         let now = (await shownQuestion()).reply;
         const done = new Set<string>();
-        for (let n = 0; n < 8 && done.size < 2; n++) {
+        for (let n = 0; n < 8 && done.size < 1; n++) {
           const line = questionLine(now);
           if (/Phone/i.test(line)) {
             for (const bad of ["my password is hunter2!", "my SSN is 123-45-6789", "the verification code is 482913"]) {
@@ -335,6 +337,13 @@ Deno.test({
             assert(/Saved/.test(now), now);
             done.add("phone");
           } else if (line.includes(SPONSOR)) {
+            // architect amendment (D-095): the phone question is no longer asked (the header gave it), so the refusals it carried
+            // (a password, an ID number, a code are never taken as an answer and never echoed) are made on this question instead.
+            for (const bad of ["my password is hunter2!", "my SSN is 123-45-6789", "the verification code is 482913"]) {
+              const r = await say(bad);
+              assert(/Nothing was saved|Still open/.test(r.reply) && !/hunter2|123-45-6789|482913/.test(r.reply), `refused, not echoed: ${r.reply}`);
+            }
+            eq((await json(`select 1 x from public.career_apply_questions where user_id = '${PERSON}' and state = 'answered' and label = '${SPONSOR}'`)).length, 0, "nothing saved from a refused answer");
             const maybe = await say("maybe");
             assert(/Nothing was saved|Still open/.test(maybe.reply) && /yes or a no|one of/i.test(maybe.reply), `never guessed: ${maybe.reply}`);
             now = (await say("no")).reply;
@@ -347,9 +356,11 @@ Deno.test({
             now = skipped.reply;
           }
           if (/\nNext: /.test(now)) eq((now.match(ONE) ?? []).length, 1, `one question per message: ${now}`);
-          else if (done.size < 2) now = (await shownQuestion()).reply;
+          else if (done.size < 1) now = (await shownQuestion()).reply;
         }
-        eq([...done].sort(), ["phone", "sponsorship"]);
+        // architect amendment (D-095): sponsorship only (the phone is the header's confirmed fact).
+        eq([...done].sort(), ["sponsorship"]);
+        eq((await json(`select 1 x from public.career_apply_questions where user_id = '${PERSON}' and label = 'Phone'`)).length, 0, "the phone was never asked");
         await nothingSent("phone and sponsorship answered");
       });
 
@@ -373,7 +384,8 @@ Deno.test({
         const card = await cardHtml(ACME);
         const said = plain(card);
         assert(/What will be sent/.test(said), `the card shows what will be sent: ${said.slice(0, 700)}`);
-        for (const x of ["First name Alex", "Last name Testcase", "Email alex.testcase@example.test", "Phone 312-555-0142"]) assert(said.includes(x), `${x}: ${said}`);
+        // architect amendment (D-095): the phone the application sends is the confirmed resume header's (+1 555-0100), never asked.
+        for (const x of ["First name Alex", "Last name Testcase", "Email alex.testcase@example.test", "Phone +1 555-0100"]) assert(said.includes(x), `${x}: ${said}`);
         assert(/class="apply"/.test(card), "a black Apply is on the card");
         await nothingSent("Acme ready");
       });

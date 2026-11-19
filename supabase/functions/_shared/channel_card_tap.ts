@@ -41,6 +41,8 @@ export const TAP_CHANGED = "That card changed after it was shown, so nothing was
 export const TAP_ANSWERED = "That card was already answered. Nothing more was sent.";
 export const TAP_STALE = "That card was shown more than 10 minutes ago, so nothing was approved. Say \"show my applications\" for a fresh card.";
 export const TAP_EXPIRED = "That card is more than a day old, so nothing was approved. Say \"show my applications\" to see it again.";
+// D-094: the card's File changed after it was shown (20261116140000, career_apply_card_answer_for): the button approves nothing.
+export const TAP_FILE_CHANGED = "The File listing these applications changed after it was shown, so nothing was approved. Say \"show my applications\" for the current list.";
 export const TAP_FAILED = "Nothing was approved: the card could not be answered just now. Try the button again in a minute.";
 
 // toast: the short line on the button (answerCallbackQuery); reply: the message in the chat, when there is one.
@@ -65,6 +67,7 @@ export async function tapCard(o: { userId: string; data: string; now: number; st
     if (/card_stale/.test(msg)) return { toast: "Nothing was approved.", reply: TAP_STALE, status: "stale_card" };
     if (/card_expired/.test(msg)) return { toast: "Nothing was approved.", reply: TAP_EXPIRED, status: "expired" };
     if (/card_answered/.test(msg)) return { toast: "Already answered.", reply: TAP_ANSWERED, status: "answered_before" };
+    if (/FILE_CHANGED/.test(msg)) return { toast: "Nothing was approved.", reply: TAP_FILE_CHANGED, status: "file_changed" };
     console.error("card tap:", msg.slice(0, 200));
     return { toast: "Nothing was approved.", reply: TAP_FAILED, status: "failed" };
   }

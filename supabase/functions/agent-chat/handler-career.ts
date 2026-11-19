@@ -195,7 +195,7 @@ import { fileCard, fileCardOn, rolesCardSource } from "../_shared/file_card.ts";
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 import { reminderTurn, supabaseReminderStore } from "../_shared/career_reminders.ts"; // REQS DOC 2: reminders
 import { overviewTurn } from "../_shared/career_overview.ts"; // REQS DOC 2: "any update?", "what's waiting on me?"
-import { supabaseReviewLinks } from "../_shared/application_review_links.ts"; // WO-G: the review File of each application on a card
+import { supabaseBatchFile, supabaseReviewLinks } from "../_shared/application_review_links.ts"; // WO-G: the review File of each application on a card
 
 // WO-033: whether the person's career Google grant carries a scope (gmail.send for outreach). Read failures say "no".
 // D-072 (files writers): after the person's watch changed, their search plan carries the watch as it is now saved (a new version only
@@ -736,6 +736,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
         ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id),
           review: (shown) => supabaseReviewLinks(admin, Deno.env)(user.id, shown.map((p) => p.id)),
+          // D-094: "show my applications" of a batch that would page: a summary plus the File of every application.
+          batchFile: (shown) => supabaseBatchFile(admin, Deno.env)(user.id, shown),
           // The yes says what happens to EACH approved application (career_apply_send_route.ts): the cloud's switches are the
           // release flags and the database's rows, read as the submission claim reads them (chat_switches.ts liveSwitches).
           routes: (ids) => supabaseSendRoutes(admin, user.id, ids, { now: Date.now(),

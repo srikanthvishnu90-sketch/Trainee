@@ -45183,7 +45183,7 @@ const CareerRouter = (() => {
   // by agent-chat career_brain.ts recordPrepAsked). A bank question the brain already asked counts as served, so "next question"
   // never serves it again: "Tell me about yourself and why you want this role." asked by the brain, then "Here is your question: Tell
   // me about yourself and why this role." from the bank. Close wording counts (the content words, nearly all shared); a different
-  // question with the same frame ("Tell me about a time you failed" / "... you led") does not.
+  // question with the same frame ("Tell me about a time you failed" / "... you led") does not. prepSameQuestion(bank question, asked).
   const PREP_STOP = new Set(["the", "and", "you", "your", "for", "with", "are", "was", "that", "this", "what", "how", "would", "did", "can", "will", "have", "has"]);
   function prepWords(x) { return new Set(String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter((w) => w.length >= 3 && !PREP_STOP.has(w))); }
   function prepSameQuestion(a, b) {
@@ -45191,7 +45191,9 @@ const CareerRouter = (() => {
     if (!x.size || !y.size) return false;
     let both = 0;
     for (const w of x) if (y.has(w)) both += 1;
-    return both / (x.size + y.size - both) >= 0.7;
+    // (the bank question's words nearly all asked, in a question not much longer: "... why this role" / "... why you want this
+    // data analyst role")
+    return both / (x.size + y.size - both) >= 0.7 || (both / x.size >= 0.85 && both / y.size >= 0.6);
   }
   function prepServedSet(thread, norm) {
     const base = new Set((Array.isArray(thread && thread.served) ? thread.served : []).map(norm));

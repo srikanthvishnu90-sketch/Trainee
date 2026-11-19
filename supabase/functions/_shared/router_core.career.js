@@ -19141,7 +19141,7 @@ const CareerRouter = (() => {
     if (!x.size || !y.size) return false;
     let both = 0;
     for (const w of x) if (y.has(w)) both += 1;
-    return both / (x.size + y.size - both) >= 0.7;
+    return both / (x.size + y.size - both) >= 0.7 || (both / x.size >= 0.85 && both / y.size >= 0.6);
   }
   function prepServedSet(thread, norm) {
     const base = new Set((Array.isArray(thread && thread.served) ? thread.served : []).map(norm));

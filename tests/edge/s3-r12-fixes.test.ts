@@ -83,7 +83,9 @@ Deno.test("S3 r12 / H010: \"next question\" never serves a bank question the bra
   };
   const first = serve(null);
   assert(/Tell me about yourself/.test(first), first);
-  for (const said of ["Question 1: Tell me about yourself and why this role.", "Your first question: “Tell me about yourself and why you want this role.”"]) {
+  for (const said of ["Question 1: Tell me about yourself and why this role.", "Your first question: “Tell me about yourself and why you want this role.”",
+    // (probe-r12-after-3: the brain's own longer wording)
+    "Question 1: Tell me about yourself and why you want this data analyst role."]) {
     const next = serve([said]);
     assert(!/Tell me about yourself/.test(next), `repeated after ${said}: ${next}`);
     assert(/Here is your question: /.test(next), next);

@@ -359,7 +359,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // 2026-11-17: past the cap only an apply ask made of known posting links (career_apply_link.ts linkListAsk), and only
     // while the link read is on; such a turn is code's alone (every model call below refuses it: OverCapText).
     const input = chatInput(rawMessage, images, MAX_MESSAGE_LEN, { codePending: codePending(situation),
-      ...(Deno.env.get("CAREER_APPLY_LINK") === "off" ? {} : { overCapOk: linkListAsk }) });
+      ...(Deno.env.get("CAREER_APPLY_LINK") === "off" ? {} : { overCapOk: (t: string) => linkListAsk(t, { crisis: crisisReply }) }) });
     if (!input.ok) return json(cors, { error: input.error }, 400);
     let { message, userContent } = input;
     const { imageBlocks } = input;
@@ -533,7 +533,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // R10 WO-D: the first real limit a model call met this turn (the global budget, its pause or window, the provider's rate
     // limit), so a turn the AI could not finish says what stopped and keeps the task instead of falling to a template (limit_stop.ts).
     let limitStop: LimitStop | null = null, limitRetryAt: number | null = null;
-    const overCap = input.overCap === true;
+    // Review of ag/ma-09 (2026-11-17): crisis words beside an over-cap link list (overCapRoute gives them as the message and
+    // reads no link) are a message like any under the cap, on every brain path: the crisis reply, the router's or the
+    // brain's, is never pre-empted by the over-cap refusal below.
+    const overCap = input.overCap === true && overCapLinks !== null;
     const callModel: typeof spend.call = async (...a) => {
       if (overCap) throw new OverCapText();
       try { return await spend.call(...a); } catch (e) { if (!limitStop) { limitStop = stopOfError(e); limitRetryAt = retryAtOf(e, Date.now()); } throw e; }

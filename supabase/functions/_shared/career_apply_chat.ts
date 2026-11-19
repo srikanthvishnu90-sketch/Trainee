@@ -16,7 +16,7 @@ import { type EmployerAnswer, employerQuestion, type Pick, queueWants, screenPic
 import type { AppRow } from "./career_apply_status.ts";
 import { type FetchFeed, type PostingsDb, searchWords } from "./career_ingest.ts";
 import { careerAskCanon } from "./career_ask_canon.ts";
-import { applyText, linkAsk, type LinkAsk, linkOf, type LinkPendingStore, linksAsk, possessiveAsk, postingForLink, postingsForRole } from "./career_apply_link.ts";
+import { applyText, linkAsk, type LinkAsk, linkOf, LINK_PENDING_MAX, type LinkPendingStore, linksAsk, possessiveAsk, postingForLink, postingsForRole } from "./career_apply_link.ts";
 import { sameCompany, type TrackedApp } from "./career_mail.ts";
 import { fitOf, scoringProfileFor } from "./career_search.ts";
 // FEATURE 1 (2026-10-25): positions in the list, the listed postings checked on file, no resume on file, the server
@@ -454,12 +454,16 @@ export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | nul
   if (o.link) {
     // "keep going": the links an earlier turn did not read in time (linksApplyTurn), read now; none kept, as before.
     if (o.link.pending && continueLinksAsk(o.message)) {
-      const urls = await o.link.pending.get(o.userId).catch(() => null);
-      if (urls === null) return { reply: "I couldn't open the list of links I'm still reading just now, so none were read on this message; they are still kept. Say \"keep going\" again in a minute.", status: "unreadable", intent: APPLY_QUEUE_INTENT };
-      if (urls.length) {
+      const kept = await o.link.pending.read(o.userId, o.now).catch(() => null);
+      if (kept === null) return { reply: "I couldn't open the list of links I'm still reading just now, so none were read on this message; they are still kept. Say \"keep going\" again in a minute.", status: "unreadable", intent: APPLY_QUEUE_INTENT };
+      if (kept.expired) {
+        const cleared = await o.link.pending.update(o.userId, o.now, () => []).then(() => true, () => false);
+        return { reply: `The ${kept.expired} link${kept.expired === 1 ? "" : "s"} I was still reading ${kept.expired === 1 ? "was" : "were"} kept more than 24 hours ago, so that list expired${cleared ? "" : " (I couldn't clear it just now)"}; none of ${kept.expired === 1 ? "it" : "them"} ${kept.expired === 1 ? "was" : "were"} read on this message and nothing was queued. Paste the links again and I'll read them.`, status: "none", intent: APPLY_QUEUE_INTENT };
+      }
+      if (kept.urls.length) {
         const asks: LinkAsk[] = [], unread: string[] = [];
-        for (const u of urls) { const a = linkOf(u); if (a) asks.push(a); else unread.push(u); }
-        return await linksApplyTurn(o, { asks, unread }, true);
+        for (const u of kept.urls) { const a = linkOf(u); if (a) asks.push(a); else unread.push(u); }
+        return await linksApplyTurn(o, { asks, unread }, kept.urls);
       }
     }
     const many = linksAsk(o.message);
@@ -972,7 +976,7 @@ export function continueLinksAsk(message: string): boolean {
   return /^(?:(?:ok(?:ay)?|yes|sure)[,.!]?\s+)?(?:please\s+)?(?:keep\s+going|continue|go\s+on|carry\s+on|keep\s+reading|read\s+the\s+rest(?:\s+of\s+(?:the|my)\s+links)?|finish\s+(?:reading\s+)?the\s+(?:rest|links))(?:\s+please)?\s*[.!]*$/i.test(String(message ?? "").trim());
 }
 type LinkFound = Awaited<ReturnType<typeof postingForLink>> | { kind: "unreadable"; why: string } | { kind: "late" };
-async function linksApplyTurn(o: ApplyChatDeps, many: { asks: LinkAsk[]; unread: string[] }, continuing = false): Promise<ApplyChatResult> {
+async function linksApplyTurn(o: ApplyChatDeps, many: { asks: LinkAsk[]; unread: string[] }, took: string[] | null = null): Promise<ApplyChatResult> {
   const take = many.asks;
   const missing: Missing[] = many.unread.map((u) => ({ job_id: null, company: "", title: u, reason: "not a posting link I can read (Greenhouse, Lever or Ashby)" }));
   const fetchFeed = feedOncePerBoard(o.link!.fetchFeed);
@@ -990,16 +994,32 @@ async function linksApplyTurn(o: ApplyChatDeps, many: { asks: LinkAsk[]; unread:
       list.push({ id: f.posting.job_id, title: f.posting.title, company: f.posting.company, location: f.posting.location ?? null, url: f.posting.url ?? url });
     }
   });
-  // The links not read in time: kept for this person (with any kept before), or, when they cannot be kept, each named as
-  // not read, never dropped. A continuing turn's own links replace what it took (setPending of what is still late).
-  let note = "";
+  // The links not read in time: kept for this person, added to what is kept, in ONE atomic change of the stored list
+  // (LinkPendingStore.update); a continuing turn also removes what it took. At most LINK_PENDING_MAX are kept in all; past
+  // that, and whenever the list cannot be read or written, each link of this turn not read is named as not read ("paste it
+  // again"), never dropped silently, and nothing is overwritten.
+  let note = "", kept = true;
   const pending = o.link!.pending ?? null;
-  const before = continuing ? [] : await (pending ? pending.get(o.userId).catch(() => null) : Promise.resolve(null)) ?? [];
-  const keep = [...new Set([...before, ...later])];
-  const kept = later.length || continuing ? (pending ? await pending.set(o.userId, keep).then(() => true, () => false) : false) : true;
-  if (later.length) {
-    if (kept) note = `I read ${take.length - later.length} of the ${take.length} links in time; the other ${later.length} are still being read and are kept for you (nothing is dropped). Say "keep going" and I'll read the next of them. `;
-    else for (const u of later) missing.push({ job_id: null, company: "", title: u, reason: "not read in time just now, and I couldn't keep it to read later; paste it again" });
+  const notRead = (urls: string[], why: string) => { for (const u of urls) missing.push({ job_id: null, company: "", title: u, reason: why }); };
+  if (later.length || took) {
+    let overflow: string[] = [], expired = 0;
+    const res = pending ? await pending.update(o.userId, o.now, (cur) => {
+      const rest = took ? cur.filter((u) => !took.includes(u)) : cur;
+      const room = Math.max(0, LINK_PENDING_MAX - rest.length);
+      const add = later.filter((u) => !rest.includes(u));
+      overflow = add.slice(room);
+      return [...rest, ...add.slice(0, room)];
+    }).catch(() => null) : null;
+    if (res) expired = res.before.expired;
+    kept = !!res;
+    const keptNow = later.filter((u) => !overflow.includes(u));
+    if (!res) notRead(later, "not read in time just now, and I couldn't keep it to read later; paste it again");
+    else {
+      if (overflow.length) notRead(overflow, `not read in time just now, and I keep at most ${LINK_PENDING_MAX} links to read later; paste it again once these are read`);
+      if (keptNow.length) note = `I read ${take.length - later.length} of the ${take.length} links in time; the other ${keptNow.length} are still being read and are kept for you${overflow.length ? `, and ${overflow.length} more could not be kept (named below)` : ""}. Say "keep going" and I'll read the next of them. `;
+      if (expired) note = `${note}The ${expired} link${expired === 1 ? "" : "s"} kept from more than 24 hours ago expired and ${expired === 1 ? "was" : "were"} not read; paste ${expired === 1 ? "it" : "them"} again if you still want ${expired === 1 ? "it" : "them"}. `;
+    }
+    kept = !!res && keptNow.length > 0;
   }
   if (!list.length && later.length && kept) {
     return { reply: `${note}Nothing is queued yet from the ones I read${missing.length ? `: ${missing.length} could not be queued (${missing.slice(0, 3).map((m) => `${m.title}: ${m.reason}`).join("; ")}${missing.length > 3 ? "; ..." : ""})` : ""}.`.trim(),

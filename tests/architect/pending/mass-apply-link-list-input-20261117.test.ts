@@ -16,7 +16,7 @@
 //       the 64,000 characters (crisis words beside the links excepted, for safety).
 import assertNode from "node:assert/strict";
 import { chatInput, OverCapText } from "../../../supabase/functions/agent-chat/_shared/chat_input.ts";
-import { LINK_LIST_MAX_CHARS, LINK_LIST_MAX_LINKS, linkListAsk, linksAsk, memoryLinkPending, OVER_CAP_ROUTE_TEXT, overCapRoute } from "../../../supabase/functions/_shared/career_apply_link.ts";
+import { LINK_LIST_MAX_CHARS, LINK_LIST_MAX_LINKS, LINK_PENDING_KEY, LINK_PENDING_MAX, LINK_PENDING_TTL_MS, linkListAsk, linksAsk, memoryLinkPending, OVER_CAP_ROUTE_TEXT, overCapRoute, supabaseLinkPending } from "../../../supabase/functions/_shared/career_apply_link.ts";
 import { crisisReply } from "../../../supabase/functions/agent-chat/crisis.ts";
 import { applyManyAsk, applyTurn, boundedAll, continueLinksAsk, feedOncePerBoard, LINK_READ_BUDGET_MS, LINK_READS_AT_ONCE, LINK_READS_PER_HOST } from "../../../supabase/functions/_shared/career_apply_chat.ts";
 import { HISTORY_USER_MAX, historyWindow } from "../../../supabase/functions/agent-chat/career_brain.ts";
@@ -65,7 +65,8 @@ Deno.test("an over-cap text is code's alone: the turn's model door refuses it; l
   const handler = await Deno.readTextFile(new URL("../../../supabase/functions/agent-chat/handler-career.ts", import.meta.url));
   // The one door every model call of the turn goes through (callModel shadows the gateway's) refuses an over-cap text.
   ok(/const callModel: typeof spend\.call = async \(\.\.\.a\) => \{\s*if \(overCap\) throw new OverCapText\(\);/.test(handler), "callModel refuses an over-cap turn");
-  ok(/overCapOk: linkListAsk/.test(handler));
+  ok(handler.includes("overCapOk: (t: string) => linkListAsk(t, { crisis: crisisReply })"));
+  ok(handler.includes("const overCap = input.overCap === true && overCapLinks !== null;"), "crisis words beside the links are an ordinary message on every brain path");
   const plain = await Deno.readTextFile(new URL("../../../supabase/functions/agent-chat/handler.ts", import.meta.url));
   ok(!/overCapOk/.test(plain), "handler.ts lets nothing past the cap");
   const big = `apply to all of these:\n${gh(122).join("\n")}`;
@@ -140,7 +141,7 @@ Deno.test("ruling (3): 1,000 slow links: the turn ends within its budget, the re
   const t0 = performance.now();
   const r = await turn(`apply to these:\n${links.map((l) => `https://boards.greenhouse.io/${l.board}/jobs/${l.id}`).join("\n")}`);
   const took = performance.now() - t0;
-  const first = (await wants.list("u1")).length, kept = (pending.rows.get("u1") ?? []).length;
+  const first = (await wants.list("u1")).length, kept = (pending.rows.get("u1")?.urls ?? []).length;
   ok(took < BUDGET + 1500, `the turn took ${Math.round(took)} ms (budget ${BUDGET})`);
   ok(first > 0 && first < 1000, `${first} queued on the first turn`);
   eq(first + kept, 1000, "every link is either read (and queued) or kept; none dropped");
@@ -148,11 +149,11 @@ Deno.test("ruling (3): 1,000 slow links: the turn ends within its budget, the re
   ok(r!.coverage!.total <= 1000 - kept, `the kept links are not counted as read: ${JSON.stringify(r!.coverage)}`);
   ok(continueLinksAsk("keep going") && continueLinksAsk("ok, keep going please") && !continueLinksAsk("keep going with my resume"));
   let turns = 1;
-  while ((pending.rows.get("u1") ?? []).length && turns < 60) {
-    const before = (pending.rows.get("u1") ?? []).length;
+  while ((pending.rows.get("u1")?.urls ?? []).length && turns < 60) {
+    const before = (pending.rows.get("u1")?.urls ?? []).length;
     const k = await turn("keep going");
     turns++;
-    ok((pending.rows.get("u1") ?? []).length < before, `turn ${turns} read some: ${k!.reply.slice(0, 160)}`);
+    ok((pending.rows.get("u1")?.urls ?? []).length < before, `turn ${turns} read some: ${k!.reply.slice(0, 160)}`);
   }
   eq(pending.rows.has("u1"), false, "nothing left to read");
   eq(new Set((await wants.list("u1")).map((w) => w.posting_key)).size, 1000, `all 1,000 read and queued in ${turns} turns`);
@@ -194,4 +195,110 @@ Deno.test("ruling (4): a 64,000-character link list reaches only the link turn; 
   for (const first of ["connectorAsk(message)", "siteRefusedTurn({ message", "cardTurn({ message", "applyTurn({"]) ok(h.indexOf(first) > swap, `${first} reads the message after the swap`);
   ok(h.includes("message: overCapLinks ?? reach?.apply ?? tailorApply?.apply ?? message"), "the link turn is given the text itself");
   ok(/\(overCapLinks !== null && !siteNo && !planned\) \|\|/.test(h), "the link turn runs on it whatever the other routes' guards");
+});
+
+
+// Review of ag/ma-09 (2026-11-17, finding 1 and the architect's ruling 2): the kept list is never overwritten from a read that
+// failed, changes are atomic, at most LINK_PENDING_MAX links are kept, and a list expires 24 hours after it was last written.
+const slowWorld = (o: { failRead?: () => boolean; failWrite?: () => boolean } = {}) => {
+  const NOW = Date.parse("2026-11-17T16:00:00Z");
+  const feed = (board: string, id: number) => [{ job_id: `greenhouse:${board}:${id}`, ats_id: String(id), company: `Co ${board}`, title: `Analyst ${id}`, location: "Remote",
+    url: `https://boards.greenhouse.io/${board}/jobs/${id}`, description: "TEST posting." }];
+  const fetchFeed = async (b: { board: string }) => { await new Promise((r) => setTimeout(r, 40)); return feed(b.board, Number(b.board.slice(1))); };
+  const wants = memoryWantStore(), pending = memoryLinkPending(o), db = memoryPostingsDb();
+  let now = NOW;
+  const turn = (message: string, budgetMs = 60) => applyTurn({ message, userId: "u1", now, postings: { search: async () => [] }, wants, apps: async () => [], facts: [],
+    link: { db, fetchFeed: fetchFeed as never, budgetMs, pending } } as never);
+  const paste = (from: number, n: number) => `apply to these:\n${Array.from({ length: n }, (_, i) => `https://boards.greenhouse.io/b${from + i}/jobs/${from + i}`).join("\n")}`;
+  return { turn, paste, pending, wants, later: (ms: number) => { now += ms; }, kept: () => pending.rows.get("u1")?.urls ?? [] };
+};
+
+Deno.test("review 1: a read of the kept list that fails writes nothing; this turn's unread links are named, never 'kept'", async () => {
+  let down = false;
+  const w = slowWorld({ failRead: () => down });
+  await w.turn(w.paste(0, 300));
+  const before = w.kept().length;
+  ok(before > 200, `kept ${before}`);
+  down = true;
+  const r = await w.turn(w.paste(1000, 300));
+  down = false;
+  eq(w.kept().length, before, "the stored list is exactly as it was");
+  ok(/not read in time just now, and I couldn't keep it to read later; paste it again/.test(r!.reply), r!.reply.slice(0, 400));
+  ok(!/kept for you|nothing is dropped/.test(r!.reply), r!.reply.slice(0, 400));
+});
+
+Deno.test("ruling 2: at most LINK_PENDING_MAX links are kept in all; the overflow is named as not read", async () => {
+  eq(LINK_PENDING_MAX, 1000);
+  const w = slowWorld();
+  for (let k = 0; k < 4; k++) await w.turn(w.paste(k * 1000, 1000), 30);
+  eq(w.kept().length, LINK_PENDING_MAX, "never more than the cap");
+  const r = await w.turn(w.paste(9000, 400), 30);
+  eq(w.kept().length, LINK_PENDING_MAX);
+  ok(/I keep at most 1000 links to read later; paste it again once these are read/.test(r!.reply), r!.reply.slice(0, 400));
+});
+
+Deno.test("ruling 2: a kept list expires 24 hours after it was last written: 'keep going' then says so and reads nothing", async () => {
+  const w = slowWorld();
+  await w.turn(w.paste(0, 300));
+  const n = w.kept().length, queued = (await w.wants.list("u1")).length;
+  ok(n > 0);
+  w.later(LINK_PENDING_TTL_MS + 60_000);
+  const r = await w.turn("keep going");
+  ok(new RegExp(`The ${n} links I was still reading were kept more than 24 hours ago, so that list expired`).test(r!.reply), r!.reply);
+  eq((await w.wants.list("u1")).length, queued, "nothing read or queued");
+  eq(w.pending.rows.has("u1"), false, "the expired list is cleared");
+  // A new paste after an expired list says the old links expired and keeps only the new ones.
+  await w.turn(w.paste(0, 300));
+  w.later(LINK_PENDING_TTL_MS + 60_000);
+  const p = await w.turn(w.paste(5000, 300));
+  ok(/kept from more than 24 hours ago expired and were not read/.test(p!.reply), p!.reply.slice(0, 500));
+  ok(w.kept().every((u) => /\/b(5\d{3})\//.test(u)), "only this paste's links are kept");
+});
+
+// The service-role store against a career_watch_kv double that honours the filters PostgREST applies: the compare-and-set
+// write never overwrites a list another turn wrote in between.
+function kvDouble() {
+  const rows = new Map<string, any>();
+  const k = (u: string, key: string) => `${u}|${key}`;
+  let beforeWrite: (() => void) | null = null;
+  const q = (filters: [string, string][] = []) => ({
+    filters,
+    eq(c: string, v: string) { return q([...filters, [c, v]]); },
+    match(r: any) { return filters.every(([c, v]) => c === "value->>version" ? String(r.value?.version ?? "") === v : String(r[c]) === v); },
+  });
+  return {
+    rows, onBeforeWrite: (f: (() => void) | null) => { beforeWrite = f; },
+    from: (_t: string) => ({
+      select: (_c: string) => { const b: any = q(); const wrap = (x: any): any => ({ eq: (c: string, v: string) => wrap(x.eq(c, v)), maybeSingle: async () => ({ data: [...rows.values()].find((r) => x.match(r)) ?? null, error: null }) }); return wrap(b); },
+      insert: (row: any) => ({ select: async () => { beforeWrite?.(); if (rows.has(k(row.user_id, row.key))) return { data: null, error: { code: "23505", message: "duplicate key" } }; rows.set(k(row.user_id, row.key), structuredClone(row)); return { data: [{ key: row.key }], error: null }; } }),
+      update: (patch: any) => { const wrap = (x: any): any => ({ eq: (c: string, v: string) => wrap(x.eq(c, v)), select: async () => { beforeWrite?.(); const hit = [...rows.entries()].filter(([, r]) => x.match(r)); for (const [id, r] of hit) rows.set(id, { ...r, ...structuredClone(patch) }); return { data: hit.map(() => ({ key: "k" })), error: null }; } }); return wrap(q()); },
+      delete: () => { const wrap = (x: any): any => ({ eq: (c: string, v: string) => wrap(x.eq(c, v)), select: async () => { beforeWrite?.(); const hit = [...rows.entries()].filter(([, r]) => x.match(r)); for (const [id] of hit) rows.delete(id); return { data: hit.map(() => ({ key: "k" })), error: null }; } }); return wrap(q()); },
+    }),
+  };
+}
+
+Deno.test("review 1: the service-role store's write is a compare-and-set: a list written in between is merged, never overwritten", async () => {
+  const kv = kvDouble(), NOW = Date.parse("2026-11-17T16:00:00Z");
+  kv.rows.set("u1|career:account", { user_id: "u1", key: "career:account", value: { epoch: 0 } });
+  const store = supabaseLinkPending(kv as never);
+  await store.update("u1", NOW, (cur) => [...cur, "https://boards.greenhouse.io/a/jobs/1"]);
+  // Another turn appends between this turn's read and its write: the first write attempt finds the version moved, reads
+  // again, and applies its change on top.
+  let once = true;
+  kv.onBeforeWrite(() => {
+    if (!once) return; once = false;
+    const r = kv.rows.get(`u1|${LINK_PENDING_KEY}`);
+    kv.rows.set(`u1|${LINK_PENDING_KEY}`, { ...r, value: { ...r.value, urls: [...r.value.urls, "https://boards.greenhouse.io/b/jobs/2"], version: r.value.version + 1 } });
+  });
+  const res = await store.update("u1", NOW, (cur) => [...cur, "https://boards.greenhouse.io/c/jobs/3"]);
+  kv.onBeforeWrite(null);
+  eq(res.after, ["https://boards.greenhouse.io/a/jobs/1", "https://boards.greenhouse.io/b/jobs/2", "https://boards.greenhouse.io/c/jobs/3"]);
+  eq((await store.read("u1", NOW)).urls.length, 3);
+  // Expiry and the privacy epoch: a list older than 24 hours reads as expired; after an erase it reads as none.
+  eq((await store.read("u1", NOW + LINK_PENDING_TTL_MS + 1)).expired, 3);
+  kv.rows.set("u1|career:account", { user_id: "u1", key: "career:account", value: { epoch: 1 } });
+  eq(await store.read("u1", NOW), { urls: [], expired: 0 });
+  // A write that keeps conflicting gives up and throws: nothing is written.
+  kv.onBeforeWrite(() => { const r = kv.rows.get(`u1|${LINK_PENDING_KEY}`); if (r) kv.rows.set(`u1|${LINK_PENDING_KEY}`, { ...r, value: { ...r.value, version: r.value.version + 1 } }); });
+  await assertNode.rejects(() => store.update("u1", NOW, (cur) => [...cur, "https://boards.greenhouse.io/d/jobs/4"]));
 });

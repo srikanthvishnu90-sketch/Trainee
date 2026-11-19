@@ -525,6 +525,12 @@ async function compareStep(state: OfferChatState, picked: OnFile[], postings: Po
 // offer whose ask was not answered by this message is dropped, so the ask is only ever the last word).
 // `lastReply`: the reply sent just before this message, when the caller has it; a yes confirms a reading only when that
 // reply showed it.
+const PAY_FIGURE = /(?:\$\s?)?\b\d{2,3}(?:[.,]\d+)?\s*(?:k\b|\/\s?(?:hr|hour)\b|an?\s+(?:hour|hr)\b|per\s+(?:hour|hr)\b|an?\s+year\b|a\s+month\b|\/\s?(?:yr|year|mo)\b|bucks\b)|\$\s?\d[\d,]*(?:\.\d+)?|\b\d{2,3}(?=\s+(?:and|but|,|$))/gi;
+const PICK = /\bwhich\s+(?:one|should|is\s+better|do\s+i|would\s+you)\b|\bwhich\b[^.?!]{0,20}\b(?:take|pick|choose|go\s+with)\b|\b(?:pick|choose)\s+(?:one|between)\b|\bor\s+the\s+other\b/i;
+export function twoStatedOffersPick(message: string): boolean {
+  const m = String(message ?? "");
+  return PICK.test(m) && (m.match(PAY_FIGURE) ?? []).length >= 2;
+}
 export async function offerChatTurn(o: { message: string; state: OfferChatState | null; now: number; postings?: PostingsReader | null; lastReply?: string | null }): Promise<OfferTurnResult> {
   const message = norm(String(o.message ?? "")).trim();
   const data = offerData.get();
@@ -551,6 +557,11 @@ export async function offerChatTurn(o: { message: string; state: OfferChatState 
   // in nyc, how would you think about it" was taken as a real offer ("Got it: Chicago metro, $120,000") and the job title
   // asked for. An offer the person says is hypothetical is not theirs: nothing is kept, and the turn goes on (the brain answers it).
   if (HYPOTHETICAL.test(message)) return { answer: null, state: unchanged };
+  // Word-vomit benchmark (2026-11-18, WV34): two offers told in one breath and a choice asked ("bluestem said 30 an hour but
+  // harborlight offered 27 and its remote which one lol") were read as ONE offer ("Got it: remote, 62,400") and the job title
+  // asked for. Two pay figures with a pick asked is a comparison of what they just said: nothing is kept, and the brain
+  // answers it from their own figures. "compare my two offers" (the offers on file) stays code's below.
+  if (!prior?.offers?.length && twoStatedOffersPick(message)) return { answer: null, state: unchanged };
   const negotiate = NEGOTIATE.test(message);
 
   // 1. The answer to the one question asked about a half-told offer.

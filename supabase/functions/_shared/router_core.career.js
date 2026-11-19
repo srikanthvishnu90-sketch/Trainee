@@ -13942,7 +13942,9 @@ const CareerRouter = (() => {
       const prevP = (ctx.discovery && ctx.discovery.lastParams) || null;
       const cleanedAsk = s(text).replace(/^\s*(wait|actually|ok|okay|so|eh|and)[ ,]+/i, "").replace(/^.*?\bi meant\s+/i, "")
         .replace(/^([a-z]+)(\s+up)?(\s+me)?\s+/i, (m, v) => ["find", "show", "get", "give", "search", "list", "look"].some((x) => oneSlip(v.toLowerCase(), x, 3)) ? "" : m);
-      const roleM = cleanedAsk.match(/([A-Za-z][A-Za-z /&-]{2,34}?)\s+(roles|internships|jobs|openings)\b/);
+      const roleRaw = cleanedAsk.match(/\b([A-Za-z][A-Za-z /&-]{2,34}?)\s+(roles|internships|jobs|openings)\b/);
+      const roleHead = roleRaw ? roleRaw[1].replace(/^.*\b(?:for|looking|seeking|searching|hunting|hoping|trying|want|wants|wanting|need|needs|needing|into|in|as|about|find|get|show)\s+/i, "").trim() : "";
+      const roleM = roleRaw && roleHead.length >= 2 ? [roleRaw[0], roleHead, roleRaw[2]] : roleRaw;
       const whereM = s(text).match(/\bin\s+([A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+){0,2}|NYC|SF|LA)\b/) || s(text).match(/\b(NYC|New York|Chicago|Boston|San Francisco|Los Angeles|Houston|Dallas|London|Illinois|Midwest)\b/);
       ctx.discovery = Object.assign({}, ctx.discovery || {}, { lastParams: {
         families: (fams || []).slice(),

@@ -69,10 +69,18 @@ function companyOf(message: string): string | null {
   return US_CITIES.has(lc(name)) || new RegExp(`^(?:${ABROAD.source})$`, "i").test(name) ? null : name; // "for Chicago" is a place
 }
 const ALIAS: Record<string, string> = { nyc: "new york", sf: "san francisco", "new york city": "new york", "bay area": "san francisco" };
+// S3 r12b (dev H002 on 8e80264f2: "I'm a data analyst in Chicago looking for analyst roles" was searched in the place "chicago
+// looking"): a place ends where the sentence goes on, at a verb of looking or wanting, a connector or a pronoun, whatever the
+// place. And a known city or country written first is that place, whatever words follow it ("in Portland currently ...").
+const PLACE_END = "for|with|paying|that|who|where|at|over|under|above|or|and|starting|summer|fall|spring|winter|autumn|sponsorship|please|right|now|only|also|posted|hybrid|remote|but|so|then|just|today|this|next|"
+  + "looking|seeking|searching|hunting|hoping|trying|wanting|want|wants|need|needs|needing|interested|aiming|applying|open|willing|ready|currently|still|since|because|as|to|i|i'm|im|my|and|who's|is|am|are|was|were|working|work|living|live|based";
+const PLACE_RE = new RegExp(`\\b(?:in|near|around|based in|located in)\\s+([a-z][a-z .'-]{1,30}?)(?=\\s+(?:${PLACE_END})\\b|[,.;?!]|\\s+[—–-]\\s|$)`);
 function placeOf(t: string): string | null {
-  const m = /\b(?:in|near|around|based in|located in)\s+([a-z][a-z .'-]{1,30}?)(?=\s+(?:for|with|paying|that|who|where|at|over|under|above|or|and|starting|summer|fall|spring|winter|autumn|sponsorship|please|right|now|only|also|posted|hybrid|remote|but|so|then|just|today|this|next)\b|[,.;?!]|\s+[—–-]\s|$)/.exec(t);
-  const cand = m ? m[1].trim() : "";
+  const m = PLACE_RE.exec(t);
   const known = (x: string) => US_CITIES.has(x) || new RegExp(`^(?:${ABROAD.source})$`, "i").test(x);
+  let cand = m ? m[1].trim() : "";
+  // The longest run of the candidate's first words that is a known place ("chicago" of "chicago metro hiring").
+  if (cand && !known(cand)) { const w = cand.split(" "); for (let k = w.length - 1; k >= 1; k--) if (known(w.slice(0, k).join(" "))) { cand = w.slice(0, k).join(" "); break; } }
   // MIRROR-1000: an industry ("in gaming") or a month ("starting in December") is not a place.
   if (cand && !INDUSTRY.test(cand) && !NOT_A_PLACE.test(cand) && !/^(the|a|an|my|your|this|that|person|general|case)\b/.test(cand) && cand.split(" ").length <= 3 && (known(cand) || !/\b(remote|intern|engineer|analyst)\b/.test(cand))) return ALIAS[cand] ?? cand;
   // No "in": a city or country named anywhere ("SWE internship Chicago summer 2027"), longest name first.
@@ -90,7 +98,10 @@ const ROLE_NOISE = new Set(["me", "some", "any", "a", "an", "the", "jobs", "job"
   "what", "which", "where", "open", "also", "just", "only", "yet", "now", "right", "someone", "like", "them", "it", "has", "does", "do", "don", "t", "ll", "m", "s", "d", "ve", "re", "so", "then", "use", "using", "uses", "skill", "skills", "exactly", "give", "top", "must", "something", "anything", "things", "companies", "company", "there", "any", "find", "search", "show", "look", "up", "list", "check", "have", "can", "could", "you", "together", "onsite", "on-site", "hybrid", "in-person", "wfh",
   // MIRROR WA-1 (2026-11-11, benchmark C3): "find me 5 swe internships i could actually apply to right now" was searched as the
   // role "software engineer could actually right now". Hedges and time words are how the person talks, never a title.
-  "could", "can", "should", "would", "actually", "really", "realistically", "just", "right", "now", "rn", "asap", "today", "currently"]);
+  "could", "can", "should", "would", "actually", "really", "realistically", "just", "right", "now", "rn", "asap", "today", "currently",
+  // S3 r12b: the verbs of looking and wanting, and the connectors around a place, are how the person talks, never a title ("data
+  // analyst in Chicago looking for analyst roles" reads the role "data analyst", not "data analyst looking").
+  "looking", "seeking", "searching", "hunting", "hoping", "trying", "want", "wants", "wanting", "but", "live", "living", "based", "move", "moving", "into"]);
 
 // What a search message states: the role (level, pay, place, term and sponsorship words taken out), the place, remote,
 // and the limits. The role is empty when the message names none ("find me something remote").
@@ -153,12 +164,17 @@ export function roleTextOf(text: string): string {
   const ind = INDUSTRY.source.slice(4, -2);
   return kept.map((c) => c.replace(new RegExp(`\\b(?:i )?only want (?:${ind})\\b|\\b(?:in|at) (?:the )?(?:${ind})(?: (?:companies|firms|startups|industry|sector))?\\b|\\b(?:${ind}) (?:companies|firms|startups|industry|sector)\\b`, "g"), " ").replace(LIMIT_PHRASE, " ").replace(ASK_PHRASE, " ").replace(/\b(?:companies|firms) for\b/g, " ").replace(/\bfor (\w+(?: \w+)?) (?:students|majors)\b/g, " $1 ").replace(/\b(?:students|majors)\b/g, " ")).join(", ");
 }
+// A workplace the person rules out ("nothing in an office", "no office", "not onsite", "I don't want to work in an office", "never in
+// person"): remote only. Not one: "not fully onsite" (hybrid is fine) and "no more than 2 office days" (a count of days).
+export const NO_OFFICE = /\b(?:nothing|no|not|never|without|(?:i\s+)?(?:don'?t|do not|won'?t|will not)\s+(?:want|work|go)(?:\s+to\s+(?:work|be|go))?)\s+(?:(?:in|at|from|into|to)\s+)?(?:(?:an?|the|any)\s+)?(?:offices?|on[- ]?site|in[- ]office|in[- ]person|commut(?:e|es|ing))\b(?![- ]days?\b)(?:\s+(?:jobs?|roles?|work|positions?))?/;
 export function searchTextOf(message: string): SearchText {
   const raw = String(message ?? "").replace(/\s+/g, " ").trim();
   let t = lc(raw);
   const limits: Limits = { bands: bandsOf(t), pay: payOf(raw.replace(/,(?=\d{3})/g, ",")), company: companyOf(raw), term: termOf(t), needsSponsor: sponsorOf(t) };
   const place = placeOf(t);
-  const remote = /\bremote(?:ly)?\b|\bwork from home\b|\bwfh\b/.test(t);
+  // S3 r12b (dev H005 on 8e80264f2: "I want remote data analyst roles, nothing in an office" was searched as the role "data analyst
+  // nothing office"): a negated workplace is the remote-only limit, and its words are never the role's.
+  const remote = /\bremote(?:ly)?\b|\bwork from home\b|\bwfh\b/.test(t) || NO_OFFICE.test(t);
   // The role: what is left when everything that is a parameter is taken out.
   // R10 WO-C (2026-11-09, production S1): in a message of several sentences the role is read from the one that asks for the
   // roles. "Let's leave the resume for now. Find me 5 data analyst internships in Chicago that are actually open. Show the
@@ -166,7 +182,7 @@ export function searchTextOf(message: string): SearchText {
   // actually open show company location application link don t yet", which no title holds, so nothing was ever found.
   t = lc(searchSentence(raw));
   // MIRROR-1000: the guard, how to answer and the limits read elsewhere are not role words (roleTextOf, above).
-  t = roleTextOf(t);
+  t = roleTextOf(t.replace(new RegExp(NO_OFFICE.source, "g"), " "));
   // What the roles must be ("that are actually open", "verified open") is how to check them, not words of the role.
   t = t.replace(/\b(?:that|which)\s+(?:are|is|were|was)\b[^,.;]*/g, " ").replace(/\b(?:(?:actually|currently|still|verified|real)\s+)+(?:open|live|available)\b|\bverified\b/g, " ");
   // TELEGRAM LOOP (2026-11-10, item 14): a greeting before the ask is not the role. "hello, I need a job" was searched as the

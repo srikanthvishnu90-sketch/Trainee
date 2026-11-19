@@ -609,7 +609,8 @@ export async function agentTurn(o: {
   if (withSupport.reply && withSupport.stopped === "final" && !withSupport.show) {
     const finalText = String(withSupport.reply).replace(/\s+/g, " ");
     const droppedLines = stripTags(draft0).split("\n").filter((l) => /\p{L}/u.test(l) && !finalText.includes(l.replace(/^\s*(?:\d{1,2}[.)]|[-\u2022*])\s+/, "").replace(/\s+/g, " ").trim()));
-    (withSupport as any).reply = dropDanglingCounts(String(withSupport.reply), droppedLines.join("\n"));
+    // (D-097 with S3 r12: code's not-run lines are never the count-back rule's to drop: put back at the head, once each)
+    (withSupport as any).reply = withNotRun(dropDanglingCounts(String(withSupport.reply), droppedLines.join("\n")), nrLines);
   }
   if ((ctx.turn as any)?.emptySearch) await watchHostReady.catch(() => null);
   const nextStep = withSupport.reply && withSupport.stopped === "final" && !withSupport.show

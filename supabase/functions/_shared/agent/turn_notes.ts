@@ -85,13 +85,19 @@ export const ackOnly = (message: string): boolean => String(message ?? "").lengt
 // S3 r12b review (PR #871): "ok", "sounds good", "perfect" after Trainee's own question ("Want me to also search Chicago?", code's
 // restore question) answer it: they accept, and are not only acknowledging. A thanks in it ("ok thanks") is still a thanks.
 const THANKS = /\b(?:thanks?|thank you|thx|ty|tysm|cheers|appreciate it|much appreciated)\b/;
+// Delta review of 91bc41ca6: a question ends the message when only a short tail follows it ("Want me to apply? (reply yes)", "Sound
+// good? 🙂"), and an ask to reply yes or no is a question however it ends (code's restoreQuestion ends "... or no to leave it set aside.").
+const ASKED_LAST = /\?[^?\n]{0,60}$/;
+const REPLY_YES = /\breply\s+(?:with\s+)?["“'‘]?(?:yes|no)\b/i;
 function acceptsAsked(t: string, history?: Msg[]): boolean {
   if (!history?.length || THANKS.test(t)) return false;
   // The message just before this one (history may end with this message itself).
   const h = history.filter((m) => (m?.role === "user" || m?.role === "assistant") && typeof m.content === "string");
   if (h.length && h[h.length - 1].role === "user" && lc(h[h.length - 1].content).trim() === t.trim()) h.pop();
   const last = h[h.length - 1];
-  return !!last && last.role === "assistant" && /\?["'”’)\]]*\s*$/.test(String(last.content).trim());
+  if (!last || last.role !== "assistant") return false;
+  const para = String(last.content).trim().split(/\n\s*\n/).pop() ?? "";
+  return ASKED_LAST.test(para) || REPLY_YES.test(para);
 }
 const DRAFT = /\b(?:draft|write|rewrite|redo|make|shorten|tighten)\b[^.?!]{0,60}\b(?:message|email|e-mail|note|dm|text|reply|letter|intro(?:duction)?|follow[- ]?up|thank[- ]you|ask|draft|it|that|one)\b|\b(?:cold|referral|outreach|follow[- ]?up|thank[- ]you)\s+(?:message|email|note|dm|draft)\b|\b(?:shorter|less formal|more casual)\b/;
 const SHORTER = /\b(?:shorter|way short|less formal|more casual|keep it (?:casual|short|brief)|brief(?:er)?|one[- ]liner)\b/;
@@ -101,11 +107,13 @@ const EVERYTHING = /\b(?:everything|all you (?:know|remember)|like everything|fu
 // D-072 (item 11): `history` (optional) is this conversation: inside a practice session, an answer to the question Trainee asked is
 // reviewed in one paragraph (the "answer" kind) whatever its words look like (a three-step approach read as "everything", "i'd
 // make a map ..." read as a draft), and an ask for the next question ("ok next", "another, harder") is the question kind.
-export function replyKind(message: string, history?: Msg[]): ReplyKind {
+// `open.restoreAnswer`: code's restore question is open on this turn and the message is a plain answer to it (plainAnswer): never an
+// acknowledgement, whatever the history holds (restoreAnswerNote asks for one short sentence about what was done).
+export function replyKind(message: string, history?: Msg[], open?: { restoreAnswer?: string | null }): ReplyKind {
   const t = lc(message);
   if (history && (practiceAnswerOf(message, history) || roastOf(message, history))) return "answer";
   if (history && practiceNextOf(message, history)) return "question";
-  if (ackOnly(t) && !acceptsAsked(t, history)) return "ack";
+  if (ackOnly(t) && !open?.restoreAnswer && !acceptsAsked(t, history)) return "ack";
   if (EVERYTHING.test(t)) return "everything";
   if (QUESTION_ASK.test(t) || practiceAskOf(t)) return "question"; // D-070: a practice question said any way
   if (DRAFT.test(t)) return "draft";
@@ -122,8 +130,8 @@ export const REPLY_LENGTH: Record<ReplyKind, { max: number; upper: number; aim: 
   answer: { max: 600, upper: 500, aim: "one short paragraph of plain sentences, about 300 to 500 characters" },
   ack: { max: 260, upper: 180, aim: "one brief acknowledgement, or one short offer of a next step, about 30 to 180 characters" },
 };
-export function replyLength(message: string, history?: Msg[]): { kind: ReplyKind; max: number; upper: number; aim: string } {
-  const kind = replyKind(message, history);
+export function replyLength(message: string, history?: Msg[], open?: { restoreAnswer?: string | null }): { kind: ReplyKind; max: number; upper: number; aim: string } {
+  const kind = replyKind(message, history, open);
   const base = REPLY_LENGTH[kind];
   return kind === "draft" && SHORTER.test(lc(message)) ? { kind, max: 400, upper: 200, aim: "the draft itself under about 200 characters, then one short line that it is theirs to send and nothing was sent" } : { kind, ...base };
 }

@@ -213,7 +213,7 @@ export async function agentTurn(o: {
   const restoreAnswer = restoreFact ? plainAnswer(o.message) : null;
   const turnNotes = [restoreAnswer ? restoreAnswerNote(restoreAnswer, String(restoreFact.id), String(restoreFact.text || restoreFact.title)) : "", stale.length ? staleFactNote(stale.map((f) => String(f.title || f.text))) : "", maybe.length ? factCorrectionNote(maybe.map((f) => String(f.title || f.text))) : "", practiceAnswer ? practiceAnswerNote() : "", hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
     correction ? correctionNote(correction) : "", typeof o.whileWorking === "string" ? whileWorkingNote(o.whileWorking) : severalAsks(o.message) ? multiAskNote() : "",
-    draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", historyAsk ? historyNote() : "", shownPay.length ? shownPayNote(shownPay) : "", lengthNote(replyLength(o.message, o.history))].filter(Boolean);
+    draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", historyAsk ? historyNote() : "", shownPay.length ? shownPayNote(shownPay) : "", lengthNote(replyLength(o.message, o.history, { restoreAnswer }))].filter(Boolean);
   const hypoWithheld = [...(hypo === "persona" ? PERSONA_WITHHELD : hypo ? HYPOTHETICAL_WITHHELD : []), ...(statesNothing(o.message) ? ["add_profile_fact"] : [])];
   const block = o.known ? personBlock({ profile: hypo === "persona" ? null : o.stores.profile, ...o.known }) : null;
   const notes: string[] = [];
@@ -315,7 +315,7 @@ export async function agentTurn(o: {
   if (pipeline === "untagged" && result.reply) result = { ...result, reply: stripTags(result.reply) };
   if (pipeline === "tagged" && result.show && result.reply) result = { ...result, reply: stripTags(result.reply) };
   if (pipeline === "tagged" && result.reply && !result.show) {
-    const l0 = replyLength(o.message, o.history);
+    const l0 = replyLength(o.message, o.history, { restoreAnswer });
     const repair = async (x: { system: string; user: string }) => { const res = await o.model({ system: x.system, messages: [{ role: "user", content: [{ type: "text", text: x.user }] }], tools: [], max_tokens: 500, tool_choice: { type: "none" } } as any); return ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim(); };
     const names = [...new Set((o.history ?? []).filter((m: any) => typeof m?.content === "string").flatMap((m: any) => (m.content as string).match(/(?<![\p{L}])\p{Lu}[\p{L}&'-]{2,}/gu) ?? []))];
     piped = await runReplyPipeline(result.reply, ledger!, { judge: (o.market?.judge ?? o.supportJudge ?? null), repair, own: [...(result.codeLines ?? [])], onRecord, ask: o.message, contracts: pipelineContracts((ctx.turn as any)?.contracts), names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
@@ -376,7 +376,7 @@ export async function agentTurn(o: {
   const nrLead = result.notRunText ?? "", nrLines = result.notRunLines ?? [];
   const nrBody = (t: string) => nrLead && t.startsWith(nrLead) ? t.slice(nrLead.length).trim() : t;
   if (result.reply && result.stopped === "final" && !trace.r && !trace.m && !piped) {
-    const l = replyLength(o.message, o.history), bound = overLimit(l), n = textLength(nrBody(result.reply));
+    const l = replyLength(o.message, o.history, { restoreAnswer }), bound = overLimit(l), n = textLength(nrBody(result.reply));
     // D-072 (item 11): a practice turn (a question asked, or a review of their answer) is shortened like any reply unless it shows a
     // code block; the code it names (a call, an index, an operator, a complexity) is kept verbatim (codeKept). Complexity notation
     // alone ("O(n) time") is not code. Every other turn keeps D-067's rule: code in the message or the reply is never shortened.

@@ -121,3 +121,32 @@ Deno.test("r12b-review-4 'no office' is the remote-only limit only when the offi
     ok(!/\b(?:office|commute|nothing|site)\b/.test(st.role), `${m}: role ${st.role}`);
   }
 });
+
+// Delta review of 91bc41ca6: code's real restore question ends in "... or no to leave it set aside." (a period), and an ask can end
+// in a bracket or an emoji after its question mark; each is still a question that "ok" answers.
+import { plainAnswer, restoreQuestion } from "../../supabase/functions/_shared/agent/turn_notes.ts";
+Deno.test("r12b-review-5 'ok' answering code's restore question, or a question with a tail after it, is not a bare acknowledgement", () => {
+  const asks = [restoreQuestion("I live in Denver"), "I found 3 roles. Want me to apply? (reply yes)", "That's the plan for this week. Sound good? 🙂",
+    "Here is the draft to Sofia. Reply yes or no.", "Drafted. Reply yes to send it."];
+  for (const a of asks) {
+    for (const m of ["ok", "sounds good", "okay", "perfect"]) {
+      const h = [{ role: "user", content: "find me data analyst roles" }, { role: "assistant", content: a }];
+      eq(replyKind(m, h) === "ack", false, `${m} after ${JSON.stringify(a)}`);
+      eq(replyKind(m, [...h, { role: "user", content: m }]) === "ack", false, `${m} (history ends with it) after ${JSON.stringify(a)}`);
+    }
+  }
+  // A restore ask open on this turn: a plain answer is that answer, whatever the history holds.
+  ok(plainAnswer("ok") === "yes");
+  eq(replyLength("ok", [], { restoreAnswer: plainAnswer("ok") }).kind === "ack", false);
+  eq(replyKind("ok", undefined, { restoreAnswer: "yes" }) === "ack", false);
+  // Still an acknowledgement: after a statement, and a thanks after a question.
+  eq(replyKind("ok", [{ role: "assistant", content: "I found 3 data analyst roles in Chicago. The first closes Friday." }]), "ack");
+  eq(replyKind("ok thanks", [{ role: "assistant", content: restoreQuestion("I live in Denver") }]), "ack");
+  eq(replyKind("ok", [{ role: "assistant", content: "Is Denver right? I checked it yesterday. Then I searched three boards and found four roles there for you today." }]), "ack");
+});
+
+Deno.test("r12b-review-6 a state code that is also a word counts only in capitals", () => {
+  eq(searchTextOf("data analyst roles in Honolulu HI").role, "data analyst");
+  eq(searchTextOf("nurse jobs in Columbus OH").role, "nurse");
+  eq(searchTextOf("data analyst roles in Austin or Dallas").role, "data analyst");
+});

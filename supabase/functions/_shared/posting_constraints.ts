@@ -217,6 +217,8 @@ export function searchTextOf(message: string): SearchText {
     // Ohio", "in London UK", "in Chicago downtown" left the role "data analyst tx" / "ohio" / "uk" / "downtown". ("ok", "hi", "or",
     // "in" and "me" are words before they are states; "co-op" is not Colorado.)
     t = t.replace(new RegExp(`\\b${esc}\\s+(?:${states.split("|").filter((x) => !["ok", "hi", "or", "in", "me"].includes(x)).join("|")}|${ABROAD.source}|${PLACE_DISTRICT})(?:\\s+(?:${PLACE_DISTRICT}))?(?![\\w-])`, "g"), place);
+    // Those five count as the state only when written as a code, in capitals ("Honolulu HI", "Portland OR").
+    for (const m of raw.matchAll(new RegExp(`\\b${esc}\\s+(ok|hi|or|in|me)(?![\\w-])`, "gi"))) if (m[1] === m[1].toUpperCase()) t = t.replace(new RegExp(`\\b${esc}\\s+${m[1].toLowerCase()}(?![\\w-])`), place);
   }
   if (place) t = t.replace(new RegExp(`\\b(?:in|near|around|based in|located in)\\s+${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ").replace(new RegExp(`\\b${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ");
   for (const [k, v] of Object.entries(ALIAS)) if (v === place) t = t.replace(new RegExp(`\\b${k}\\b`, "g"), " ");

@@ -184,6 +184,7 @@ import { applyReadiness } from "../_shared/apply_readiness.ts"; // SPEC 2.2
 import { writeReadinessAsk } from "../_shared/readiness_ask.ts";
 import { summaryFacts } from "../_shared/apply_status_summary.ts"; // SPEC 6.5
 import { resultsFile, whatOf } from "../_shared/role_results.ts"; // ROLE + PAY RESULTS PAGE
+import { qualifyFile } from "../_shared/qualify_file.ts"; // MASS APPLY rv-ma7: "that I qualify for" as a File
 import { supabaseAccountStamp, supabaseConfirmedFacts, supabaseJobStore, type JobDeps } from "../_shared/telegram_jobs.ts";
 import { APPLY_ALL_INTENT, type ApplyAllOffer, applyAllYesTurn, isApplyAllYes, isConditionalYes, liveOfferRow, readOffer, supabaseStoppedAt } from "../_shared/apply_all_yes.ts"; // apply all by yes
 import { applyAllYesOn, releaseFlagOn } from "./release_config.ts";
@@ -1415,7 +1416,26 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (asking) agentMeta = { employer_question: queued.ask };
         // MASS APPLY (rv-ma7): "…that I qualify for" shows the postings found with what each requires and queues nothing; they
         // become this thread's list, so the next "all of them" or "1 and 3" queues exactly what was shown.
-        if (Array.isArray(queued.listed) && queued.listed.length) (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), lastShortlist: queued.listed, lastAskAt: Date.now() };
+        // RESPONSE-RULES 3.1 / D-096 (architect ruling on rv-ma7): more than one posting goes in a File (the results page, eligibility
+        // unchecked, each card with its requirements as posted); the chat says the count, that eligibility was not confirmed, and
+        // asks which to queue. The thread's list is the File's, in its numbering. No File (links not configured): the inline list stands.
+        let qualifyListed = queued.listed;
+        if (queued.qualify && Array.isArray(queued.qualify.rows) && queued.qualify.rows.length > 1) {
+          const qf = await qualifyFile({ userId: user.id, now: Date.now(), what: queued.qualify.what, skipped: queued.qualify.skipped ?? [], rows: queued.qualify.rows, store: supabaseJobStore(admin),
+            name: (ctx as any).profile?.basics?.name ?? null, links: (u, l) => feedUrlsFor(Deno.env, u, l, Date.now()) })
+            .catch((e) => { console.error("qualify file: the inline list stands:", (e as Error)?.message ?? e); return null; });
+          if (qf) {
+            out = { ...out, reply: qf.reply };
+            agentMeta = { ...(agentMeta || {}), results_file: qf.listId };
+            qualifyListed = qf.listed;
+            if (fileCardOn(Deno.env)) {
+              const src = await rolesCardSource(supabaseJobStore(admin), user.id, qf.listId).catch(() => null);
+              const card = src ? fileCard({ ...src, url: qf.url }) : null;
+              if (card) (out as any).fileCards = [card];
+            }
+          }
+        }
+        if (Array.isArray(qualifyListed) && qualifyListed.length) (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), lastShortlist: qualifyListed, lastAskAt: Date.now() };
         // R9-G: the email half of the same message, drafted by the networking turn: both answers, the draft batch last, so
         // "send 1" answers it (OUTREACH_INTENT). The application keeps its own card and its own yes.
         if (reach && networking) {

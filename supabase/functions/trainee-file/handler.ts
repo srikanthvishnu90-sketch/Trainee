@@ -981,12 +981,12 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     fromWhere,
     `Pay is shown only where the posting lists it${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "role doesn't" : "roles don't"} list pay, so ${nUnlisted === 1 ? "it's" : "they're"} grouped separately` : ", and nothing is estimated"}.`,
     nOther ? `${nOther} ${nOther === 1 ? "lists" : "list"} pay in another currency or without a period, so ${nOther === 1 ? "it wasn't" : "they weren't"} compared${fl ? ` with ${fl}` : ""}.` : "",
-    "Fit is judged only on what you've confirmed.",
+    meta.eligibility === "unchecked" ? "Whether you meet each posting's requirements was not checked: each card shows them as the posting states them." : "Fit is judged only on what you've confirmed.",
   ].filter(Boolean).join(" ");
   const best = keep.filter((r) => r.payGroup === "meets").slice(0, 2).map((r) => `${r.job.title} at ${r.job.company}`);
   const quick = [
-    best.length ? `Best ${best.length === 1 ? "match" : "matches"}: ${best.join("; ")}.` : keep.length ? `Closest by fit: ${keep[0].job.title} at ${keep[0].job.company}.` : "",
-    fl ? `${nMeets} of ${keep.length} list ${fl} or more${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "doesn't" : "don't"} list pay` : ""}${nOther ? `; ${nOther} can't be compared` : ""}${nBelow ? `; ${nBelow} now list less` : ""}.` : `${keep.length} ${keep.length === 1 ? "role" : "roles"}, sorted by fit.`,
+    meta.eligibility === "unchecked" ? "" : best.length ? `Best ${best.length === 1 ? "match" : "matches"}: ${best.join("; ")}.` : keep.length ? `Closest by fit: ${keep[0].job.title} at ${keep[0].job.company}.` : "",
+    fl ? `${nMeets} of ${keep.length} list ${fl} or more${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "doesn't" : "don't"} list pay` : ""}${nOther ? `; ${nOther} can't be compared` : ""}${nBelow ? `; ${nBelow} now list less` : ""}.` : `${keep.length} ${keep.length === 1 ? "role" : "roles"}${meta.eligibility === "unchecked" ? ", each with the requirements its posting states." : ", sorted by fit."}`,
     `Next: tap Apply on a role. A ready one is sent exactly as its What will be sent shows; one that isn't ready asks for what it needs first. ${coverage(all) === NOTHING_SENT ? "Nothing is sent until you tap Apply." : "Each new send needs your tap on Apply."}`,
   ].filter(Boolean);
   return o.html(renderResults({ signedIn: o.who, token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,

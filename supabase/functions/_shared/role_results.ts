@@ -35,12 +35,14 @@ export function whatOf(ask: { role: string; place: string | null; remote: boolea
   return { one: `${pre}${role} ${noun[0]}${where}`.replace(/\s+/g, " ").trim(), many: `${pre}${role} ${noun[1]}${where}`.replace(/\s+/g, " ").trim() };
 }
 
-export interface Picked { hit: SearchHit; posting: SourcePosting | null; checked?: { state: "live" | "unknown" | "unchecked"; at: number } | null; submit?: SubmitCapability | null }
+export interface Picked { hit: SearchHit; posting: SourcePosting | null; checked?: { state: "live" | "unknown" | "unchecked"; at: number } | null; submit?: SubmitCapability | null; stated?: string[] | null }
 export async function resultsFile(o: {
   userId: string; now: number; what: What; floor: Floor | null; picked: Picked[]; store: JobStore;
   name?: string | null; source?: "live" | "snapshot" | null; read?: string | null;
   links: (userId: string, listId: string) => Promise<{ url: string | null }>;
-}): Promise<{ reply: string; parts: string[]; listId: string; url: string; offer: ApplyAllOffer; offerAsk: string; meets: number; unlisted: number; unchecked: number; otherCurrency: number; noPeriod: number; below: number; lines: string[] } | null> {
+  // MASS APPLY (rv-ma7): a "that I qualify for" list (ListMeta.eligibility).
+  eligibility?: "unchecked";
+}): Promise<{ reply: string; parts: string[]; listId: string; url: string; offer: ApplyAllOffer; offerAsk: string; meets: number; unlisted: number; unchecked: number; otherCurrency: number; noPeriod: number; below: number; lines: string[]; shown: { ref: string; job_id: string }[] } | null> {
   if (!o.store.rememberListMeta) return null;
   const meets: Picked[] = [], unlisted: Picked[] = [], unchecked: Picked[] = [];
   let below = 0;
@@ -62,7 +64,7 @@ export async function resultsFile(o: {
       url: p.posting?.url ?? p.hit.url, description: p.posting?.description ?? null, remote: live.remote ?? null, seniority_band: live.seniority_band ?? null, posted_at: live.posted_at ?? null,
       first_seen_at: p.posting?.first_seen_at ?? p.hit.first_seen_at, pay: p.posting?.pay ?? null, company_domain: live.company_domain ?? null };
     const pay = pays.get(p.hit.job_id) ?? null;
-    const view = { ...jobViewOf(p.hit, row), pay: pay ? payText(pay) : null, pay_parsed: pay, ...(p.checked ? { checked: p.checked } : {}), ...(p.submit ? { submit: p.submit } : {}) };
+    const view = { ...jobViewOf(p.hit, row), pay: pay ? payText(pay) : null, pay_parsed: pay, ...(p.checked ? { checked: p.checked } : {}), ...(p.submit ? { submit: p.submit } : {}), ...(Array.isArray(p.stated) ? { stated: p.stated } : {}) };
     const ref = await refOf(o.userId, view.job_id);
     await o.store.remember(o.userId, ref, view, "text");
     boards.add(String(view.source ?? row.provider ?? view.job_id.split(":")[0]).toLowerCase());
@@ -71,7 +73,7 @@ export async function resultsFile(o: {
   const listId = (await hex(`${o.userId}|results|${refs.join(",")}|${o.now}`)).slice(0, 10);
   await o.store.rememberList(o.userId, listId, refs);
   const name = String(o.name ?? "").trim().split(/\s+/)[0]?.replace(/[^\p{L}'-]/gu, "").slice(0, 40) || null;
-  const meta: ListMeta = { kind: "results", what: o.what.many, floor: o.floor, at: o.now, name, source: o.source ?? null, read: o.read ?? null, sources: boards.size };
+  const meta: ListMeta = { kind: "results", what: o.what.many, floor: o.floor, at: o.now, name, source: o.source ?? null, read: o.read ?? null, sources: boards.size, ...(o.eligibility ? { eligibility: o.eligibility } : {}) };
   await o.store.rememberListMeta(o.userId, listId, meta);
   const { url } = await o.links(o.userId, listId);
   if (!url) return null;
@@ -86,5 +88,5 @@ export async function resultsFile(o: {
   // R10 fix 8 (architect ruling 2026-11-09, spec B.2): the chat lists the roles by number, in the page's order, one short line each
   // (employer, exact title, location, one-word check state, the posting's own link: E.2 #18); the page holds the rest.
   const lines = ordered.map((p, i) => `${i + 1}. ${p.posting?.company ?? p.hit.company ?? "Employer not named"} — ${p.posting?.title ?? p.hit.title}, ${p.posting?.location ?? p.hit.location ?? "location not stated"}${submitLabel(p.submit) ? ` — ${submitLabel(p.submit)}` : ""} (${p.checked?.state === "live" ? "open-checked" : "not re-checked"})${(p.posting?.url ?? p.hit.url) ? ` ${p.posting?.url ?? p.hit.url}` : ""}`);
-  return { reply: parts.join("\n"), parts, listId, url, offer, offerAsk: offerQuestion(offer), below, ...counts, lines };
+  return { reply: parts.join("\n"), parts, listId, url, offer, offerAsk: offerQuestion(offer), below, ...counts, lines, shown };
 }

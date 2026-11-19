@@ -303,7 +303,7 @@ const NOT_A_COMMAND = /\b(?:i|we)\s+(?:wouldn'?t|would\s+not|won'?t|will\s+not|s
 // The postings on file that are what the person named: every role word in the title, the place in the location (or
 // remote), passed to the search itself so a place is never cut by a nationwide newest-first limit. Ranked by fit from
 // their confirmed facts when it can be computed (career_search.ts fitOf), else newest first, and the reply says which.
-async function postingsFor(o: ApplyChatDeps, what: ManyWhat): Promise<{ list: ShortlistEntry[]; rankedBy: "fit" | "newest"; about: Map<string, string> }> {
+async function postingsFor(o: ApplyChatDeps, what: ManyWhat): Promise<{ list: ShortlistEntry[]; rankedBy: "fit" | "newest"; about: Map<string, any> }> {
   // MASS APPLY CONVERSATIONS: several places ("in Chicago or remote") are each searched as one place is, then merged.
   const places = what.places?.length ? what.places : [what.place];
   const seen = new Set<string>(), matched: any[] = [];
@@ -331,8 +331,8 @@ async function postingsFor(o: ApplyChatDeps, what: ManyWhat): Promise<{ list: Sh
     }
   } catch { /* fit unknown: newest first, and said so */ }
   // Each posting's own text, for "that I qualify for": its stated requirements are quoted, never judged (rv-ma7, 1.).
-  const about = new Map<string, string>();
-  for (const p of matched) if (p?.job_id) about.set(String(p.job_id), String(p.description ?? ""));
+  const about = new Map<string, any>();
+  for (const p of matched) if (p?.job_id) about.set(String(p.job_id), p);
   return { rankedBy, about, list: ordered.map((p) => ({ id: p.job_id ?? null, title: p.title ?? null, company: p.company ?? null, location: p.location ?? null, url: p.url ?? null })) };
 }
 // A degree the posting requires that the person's confirmed facts show they do not hold ("must be enrolled in a PhD program"
@@ -503,6 +503,8 @@ export type ApplyChatResult = {
   screen?: GateResult;
   // rv-ma7: postings shown for the person to choose from ("that I qualify for"); agent-chat keeps them as the thread's list.
   listed?: ShortlistEntry[];
+  // rv-ma7 (RESPONSE-RULES 3.1): the postings of a "that I qualify for" answer with more than one, for the File (qualify_file.ts).
+  qualify?: { rows: any[]; what: ManyWhat; skipped: string[] };
 };
 
 // SERIAL-1420 (b) / SERIAL-1430: the person's pace from the database, in its three states (career_apply_pace_state): none
@@ -777,15 +779,19 @@ function leaveOut(list: ShortlistEntry[], ask: Extract<ManyAsk, { kind: "all" }>
 // requirements it states quoted as posted; plainly, eligibility was not confirmed; nothing queued; one question. The postings
 // are returned as `listed`, which agent-chat keeps as the thread's list, so "all of them" or "1 and 3" queues exactly these.
 const QUALIFY_SHOW = 25;
-function qualifyListed(list: ShortlistEntry[], about: Map<string, string>, what: ManyWhat, skipped: string[]): ApplyChatResult {
+function qualifyListed(list: ShortlistEntry[], about: Map<string, any>, what: ManyWhat, skipped: string[]): ApplyChatResult {
   const where = (what.places?.length ? what.places : what.place ? [what.place] : []).map((p) => p.replace(/\b\w/g, (c) => c.toUpperCase()));
   const lines = list.slice(0, QUALIFY_SHOW).map((e, i) => {
-    const req = statedRequirements(about.get(String(e.id ?? "")) ?? "");
+    const req = statedRequirements(about.get(String(e.id ?? ""))?.description ?? "");
     return `${i + 1}. ${nameOf(e)}${e.location ? ` (${e.location})` : ""}: ${req.length ? `the posting says ${req.map((r) => `"${r}"`).join("; ")}` : "no citizenship, sponsorship, clearance, degree, graduation, residence, GPA, language or age requirement in its text"}`;
   });
   const more = list.length > QUALIFY_SHOW ? [`and ${list.length - QUALIFY_SHOW} more on the same list.`] : [];
   return { reply: [`I found ${list.length} open ${what.role || "matching"} posting${list.length === 1 ? "" : "s"}${where.length ? ` in ${where.join(" or ")}` : ""}${skipped.length ? ` (left out: ${listed(skipped, 8)})` : ""}. I couldn't confirm you're eligible for ${list.length === 1 ? "it" : "them"}: I don't decide that for you, so nothing was queued. What each one states it requires, as posted:`,
-    ...lines, ...more, `Which should I queue? Say "all of them", or name them by number ("1 and 3").`].join("\n"), status: "none", intent: APPLY_QUEUE_INTENT, queued: [], refused: [], listed: list };
+    ...lines, ...more, `Which should I queue? Say "all of them", or name them by number ("1 and 3").`].join("\n"), status: "none", intent: APPLY_QUEUE_INTENT, queued: [], refused: [], listed: list,
+    // RESPONSE-RULES 3.1 / D-096 (architect ruling on rv-ma7): more than one posting goes in a File; agent-chat makes it from
+    // these (qualify_file.ts) and replaces the inline list above with a short summary. The inline list stays only when no File
+    // can be made (and for exactly one posting).
+    ...(list.length > 1 ? { qualify: { rows: list.map((e) => about.get(String(e.id ?? ""))).filter(Boolean), what, skipped } } : {}) };
 }
 export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistEntry[]; missing: Missing[]; note: string }): Promise<ApplyChatResult | null> {
   let ask: ManyAsk | null = given ? { kind: "all" } : applyManyAsk(o.message);
@@ -806,7 +812,7 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   const unread = what ? unreadExclusion(o.message, ask.kind === "all" ? ask.clause : null) : null;
   if (what && unread) return { reply: `I couldn't read "${unread.slice(0, 80)}": I can't tell what it leaves out, so nothing was searched or queued. Which employer or place should I leave out? Say it as "apply to every <role> in <place> except <Employer> and the ones in <place>".`, status: "none", intent, queued: [], refused: [] };
   if (what) {
-    let about = new Map<string, string>();
+    let about = new Map<string, any>();
     try { ({ list, rankedBy, about } = await postingsFor(o, what)); }
     catch { return { reply: `I couldn't search the postings just now, so nothing was queued. Ask again in a minute.`, status: "unreadable", intent, queued: [], refused: [] }; }
     // rv-ma5 B1: every part of the exclusion clause resolves against what was found, or nothing is queued and it is asked about.

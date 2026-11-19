@@ -267,6 +267,27 @@ export async function reviewLinksFor(shown: { id: string }[], d: ReviewDeps): Pr
   return out.length ? out.join("\n\n") : null;
 }
 
+// D-094: every application of a batch as review items, in the card's order, for the batch File (file_service.ts createBatch).
+// Null when any one of them cannot be read: the File must list exactly the batch, never part of it.
+export async function batchItemsFor(shown: { id: string }[], d: Pick<ReviewDeps, "prepared" | "titles" | "open" | "versions">): Promise<ReviewItem[] | null> {
+  const rows: Awaited<ReturnType<ReviewDeps["prepared"]>> = [];
+  for (let i = 0; i < shown.length; i += 500) rows.push(...await d.prepared(shown.slice(i, i + 500).map((p) => p.id)));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const jobs = rows.map((r) => String(r.job_id ?? "")).filter(Boolean);
+  const titles = d.titles ? await d.titles(jobs).catch(() => new Map<string, string>()) : new Map<string, string>();
+  const open = d.open ? await d.open(jobs).catch(() => []) : [];
+  const versions = d.versions ? await d.versions().catch(() => ({} as Record<string, { n: number; at?: string | null }>)) : {};
+  const out: ReviewItem[] = [];
+  for (const p of shown) {
+    const r = byId.get(p.id);
+    if (!r || !/^[0-9a-f]{64}$/.test(String(r.payload_hash ?? ""))) return null;
+    const job = String(r.job_id ?? ""), v = versions[String(r.payload?.resume_sha256 ?? "")];
+    out.push(reviewOf({ ...r, title: titles.get(job) ?? null, open: open.filter((q) => job && (q.job_ids ?? []).includes(job)),
+      resume_version: v && Number.isInteger(v.n) && v.n > 0 ? { n: v.n, at: typeof v.at === "string" ? v.at : null } : null }));
+  }
+  return out;
+}
+
 // A card text with its review links after it, only while the whole stays one text (the outbox and the card push take at most
 // `max` characters); a card that would not fit keeps its exact text and the links are left out, never the card cut.
 export function withLinks(text: string, links: string | null, max = 4000): string {

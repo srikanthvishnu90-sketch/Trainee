@@ -436,6 +436,26 @@ export function batchFor(pending: Prepared[], o: { max?: number; needs?: string 
   return { take: p.take, text: p.pages.join("\n\n"), parts: p.pages.length > 1 ? p.pages : [], more: p.more, skipped };
 }
 
+// D-094 (owner, 2026-11-16): a batch too big for one card text is shown as a short summary (the count, the first few, the File
+// link and how to answer) plus a File listing every application with its exact payload (application_review_links.ts
+// supabaseBatchFile). The File is the batch shown: the one yes approves exactly what it lists, by payload hash, and its numbers
+// are the card's (career_apply_card_push_batch_for checks the File lists exactly the card's items, in order).
+export const BATCH_TOP = 5;
+export function batchSummaryText(take: Prepared[], url: string): string {
+  const n = take.length, top = take.slice(0, BATCH_TOP), more = n - top.length;
+  const head = (p: Prepared) => {
+    const first = String(p.card_lines[0] ?? p.company).replace(/\s+/g, " ").trim() || p.company, role = String(p.role ?? "").replace(/\s+/g, " ").trim();
+    return (role && first === p.company ? `${first} — ${role}` : first).slice(0, 120);
+  };
+  return [
+    `${n === 1 ? "1 application is" : `${n} applications are`} ready. Nothing has been sent.`,
+    [...top.map((p, i) => `${i + 1}. ${head(p)}`), ...(more > 0 ? [`and ${more} more.`] : [])].join("\n"),
+    `Every one of the ${n}, with the exact answers, resume and link each sends: ${url}`,
+    n === 1 ? `Reply "yes" to send it exactly as the File shows, or "no".`
+      : `Reply "yes" to send all ${n} exactly as that File lists them, "yes except 2" or "only 1, 3" (the File's numbers) to send some, or "no".`,
+  ].join("\n\n");
+}
+
 const RESULT: Record<string, string> = {
   queued: "approved; it is sent next, from your computer or, if you turned it on, the cloud",
   declined: "not sent",
@@ -773,6 +793,10 @@ export async function cardTurn(
     // applications are exactly the set it showed.
     if (/card_pages_undelivered/.test(msg)) {
       return { reply: `Not every page of that card has reached you yet, so nothing was approved and nothing was sent. Say "show my applications" to see the whole card again.`, status: "pages_undelivered" };
+    }
+    // D-094: the File a summary card was shown with changed after it was shown: the File is the batch shown, so nothing goes.
+    if (/FILE_CHANGED/.test(msg)) {
+      return { reply: `The File listing these applications changed after it was shown, so nothing was approved and nothing was sent. Say "show my applications" for the current list.`, status: "file_changed" };
     }
     if (/APPROVAL_SET_CHANGED/.test(msg)) {
       return { reply: `The applications on that card changed after it was shown (APPROVAL_SET_CHANGED), so nothing was approved and nothing was sent. Say "show my applications" for the current card.`, status: "set_changed" };

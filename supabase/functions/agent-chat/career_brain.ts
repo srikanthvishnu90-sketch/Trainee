@@ -1020,9 +1020,20 @@ const CONSENT_RULE = /\b(?:without|until|after)\s+(?:you(?:r)?\s+)?(?:(?:explici
 const CONSENT_FUTURE = /\b(?:will|won'?t|never|goes|go|gets?|only|can|can't|cannot|nothing\s+(?:is|gets?)\s+(?:sent|submitted))\b/i;
 const CONSENT_PAST = /\b(?:was|were|has\s+been|have\s+been|had\s+been|went|got\s+(?:sent|submitted))\b/i;
 export const consentRule = (t: string) => CONSENT_RULE.test(t) && CONSENT_FUTURE.test(t) && !CONSENT_PAST.test(t) && !/\d/.test(t) && !OUTCOME.test(t) && !YOU_DID.test(t) && !IDIOM_NAMED.test(t);
+// A sentence that is the consent rule and nothing else (one clause); one that also states something is cut to the rule's clause.
+const soleConsent = (t: string) => consentRule(t) && t.replace(/[.!]+$/, "").split(CLAUSE_SPLIT).filter((x) => x.trim()).length === 1;
+// The consent rule's own clause in a sentence that also states something else, as a sentence of its own, or null.
+const CLAUSE_SPLIT = /,\s+(?:and|so|but)\s+|;\s+|:\s+|,\s+|\s+(?:and|but)\s+(?=(?:nothing|no|i|i'll|i\s+will|we|anything|everything)\b)/i;
+export function consentClause(sentence: string): string | null {
+  const t = tidy(sentence).replace(/\*+/g, "").replace(BULLET, "").trim();
+  const parts = t.replace(/[.!]+$/, "").split(CLAUSE_SPLIT).map((x) => x.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  const c = [...parts].reverse().find((x) => /^(?:nothing|no\b|i\b|i'll|we\b|anything|everything)/i.test(x) && consentRule(x));
+  return c ? `${c.charAt(0).toUpperCase()}${c.slice(1)}.` : null;
+}
 function keptSentences(reply: string, strict: boolean, own: string): string {
   const stays = (x: string) => { const t = tidy(x).replace(/\*+/g, "").replace(BULLET, "");
-    return strict ? consentRule(t) || !HELD_STATUS.test(t) && !IDIOM.test(t) && !IDIOM_NAMED.test(t) && !OUTCOME.test(t) && !/^\W*(?:yes|yep|yeah|no|nope|nah|not\s+yet)\b/i.test(t) && !YOU_DID.test(t) && (LISTING.test(t) || ACTION.test(t) || ADVICE.test(t) || HELP_Q.test(t)) : !statusLike(t); };
+    return strict ? soleConsent(t) || !HELD_STATUS.test(t) && !IDIOM.test(t) && !IDIOM_NAMED.test(t) && !OUTCOME.test(t) && !/^\W*(?:yes|yep|yeah|no|nope|nah|not\s+yet)\b/i.test(t) && !YOU_DID.test(t) && (LISTING.test(t) || ACTION.test(t) || ADVICE.test(t) || HELP_Q.test(t)) : !statusLike(t); };
   const out: string[] = [];
   let dropped = false, headGone = false, anyBullet = false;
   for (const line of String(reply ?? "").split(own).join("").split("\n")) {
@@ -1033,9 +1044,12 @@ function keptSentences(reply: string, strict: boolean, own: string): string {
     const kept: string[] = [];
     for (const x of parts) {
       // (the consent rule stands on its own: "the card that shows it" hangs on no dropped sentence)
-      const ok: boolean = stays(x) && !(dropped && !consentRule(tidy(x).replace(/\*+/g, "")) && /^\W*(?:that|this|it|those|these|which|so)\b|\b(?:it|them)\b/i.test(x));
-      if (ok) kept.push(x); else if (/:\s*$/.test(x)) headGone = true;
-      dropped = !ok;
+      const ok: boolean = stays(x) && !(dropped && !soleConsent(tidy(x).replace(/\*+/g, "")) && /^\W*(?:that|this|it|those|these|which|so)\b|\b(?:it|them)\b/i.test(x));
+      // (S3 r12c, the probes after b607840de: the rule joined to a status clause, "Nothing was submitted, and nothing will go out
+      // without your yes to the card that shows it", went with it; the rule's own clause, the model's words, stays on its own)
+      const rule = !ok && strict ? consentClause(x) : null;
+      if (ok) kept.push(x); else if (rule) kept.push(rule); else if (/:\s*$/.test(x)) headGone = true;
+      dropped = !ok && !rule;
     }
     if (kept.length) out.push(kept.join(" "));
   }

@@ -25,3 +25,17 @@ Deno.test("S3 r12c / H013: a status report dressed as the rule is still held", (
   const out = heldReply("Nothing was submitted without your yes. Want me to search?", ownEmpty, true);
   assert(!/Nothing was submitted without your yes/.test(out), out);
 });
+
+// (probe-r12c-fix2-2 and the traced replay of H013: the rule was joined to a status clause, and the sentence went whole)
+Deno.test("S3 r12c / H013: the rule joined to a status clause stays as its own clause; the status clause still goes", () => {
+  const cases: [string, string][] = [
+    ["Understood, and there's nothing to stop: you have no applications queued, prepared or sent, so nothing is in flight and nothing was waiting on you. Nothing was submitted, and nothing goes out without your yes to the card that shows it.", "Nothing goes out without your yes to the card that shows it."],
+    ["Understood, nothing is in flight: you have no applications queued, prepared or sent, so there is nothing to stop and nothing will go out without your yes. Nothing was submitted.", "Nothing will go out without your yes."],
+    ["You applied to 3 roles, and nothing goes out without your yes.", "Nothing goes out without your yes."],
+  ];
+  for (const [draft, rule] of cases) {
+    const out = heldReply(draft, ownEmpty, true);
+    assert(out.includes(rule), `${draft}\n=> ${out}`);
+    assert(!/you have no applications|nothing is in flight|applied to 3|Nothing was submitted/i.test(out.replace(OWN_RECORD_NOTE, "")), `a status clause stood: ${out}`);
+  }
+});

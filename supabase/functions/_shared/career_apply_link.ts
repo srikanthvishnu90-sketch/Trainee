@@ -95,11 +95,11 @@ export interface LinkPendingStore {
   update(userId: string, now: number, change: (cur: string[]) => string[]): Promise<{ before: PendingNow; after: string[] }>;
 }
 export const LINK_PENDING_KEY = "career:apply-links-reading";
-const pendingOf = (v: any, now: number): PendingNow & { version: number } => {
+const pendingOf = (v: any, now: number): PendingNow & { version: number; versioned: boolean } => {
   const urls = Array.isArray(v?.urls) ? v.urls.filter((u: unknown): u is string => typeof u === "string") : [];
   const at = Date.parse(String(v?.at ?? ""));
   const expired = urls.length && (!Number.isFinite(at) || now - at > LINK_PENDING_TTL_MS) ? urls.length : 0;
-  return { urls: expired ? [] : urls, expired, version: Number(v?.version ?? 0) || 0 };
+  return { urls: expired ? [] : urls, expired, version: Number(v?.version ?? 0) || 0, versioned: v?.version !== undefined && v?.version !== null };
 };
 // The per-person service-role key-value row (career_watch_kv, as career_apply_questions.ts keeps "career:questions-shown"),
 // bound to the account's privacy epoch (career:account): after an erase the kept links are gone, never read. The write is a
@@ -117,12 +117,14 @@ export function supabaseLinkPending(admin: any): LinkPendingStore {
     if (r?.error) throw Error(`links still being read: ${r.error.message}`);
     return r?.data?.value ?? null;
   };
+  // The compare-and-set filter: the version read, or, for a row written without one, a row that still has none.
+  const same = (q: any, cur: { version: number; versioned: boolean }) => cur.versioned ? q.eq("value->>version", String(cur.version)) : q.is("value->>version", null);
   const read = async (userId: string, now: number) => {
     const v = await row(userId);
-    if (!v) return { present: false, cur: { urls: [], expired: 0, version: 0 } };
+    if (!v) return { present: false, cur: { urls: [], expired: 0, version: 0, versioned: false } };
     const cur = pendingOf(v, now);
     // A list kept before an erase is not theirs to read: it reads as none (and is replaced or removed by the next write).
-    if (Number(v.epoch ?? 0) !== await epochOf(userId)) return { present: true, cur: { urls: [], expired: 0, version: cur.version } };
+    if (Number(v.epoch ?? 0) !== await epochOf(userId)) return { present: true, cur: { urls: [], expired: 0, version: cur.version, versioned: cur.versioned } };
     return { present: true, cur };
   };
   return {
@@ -138,10 +140,10 @@ export function supabaseLinkPending(admin: any): LinkPendingStore {
           r = await kv().insert({ user_id: userId, key: LINK_PENDING_KEY, value: { urls: next, version: 1, epoch: await epochOf(userId), at }, updated_at: at }).select("key");
           if (r?.error && /duplicate|23505|conflict/i.test(`${r.error.code ?? ""} ${r.error.message ?? ""}`)) continue;
         } else if (!next.length) {
-          r = await kv().delete().eq("user_id", userId).eq("key", LINK_PENDING_KEY).eq("value->>version", String(cur.version)).select("key");
+          r = await same(kv().delete().eq("user_id", userId).eq("key", LINK_PENDING_KEY), cur).select("key");
         } else {
-          r = await kv().update({ value: { urls: next, version: cur.version + 1, epoch: await epochOf(userId), at }, updated_at: at })
-            .eq("user_id", userId).eq("key", LINK_PENDING_KEY).eq("value->>version", String(cur.version)).select("key");
+          r = await same(kv().update({ value: { urls: next, version: cur.version + 1, epoch: await epochOf(userId), at }, updated_at: at })
+            .eq("user_id", userId).eq("key", LINK_PENDING_KEY), cur).select("key");
         }
         if (r?.error) throw Error(`keep the links still being read: ${r.error.message}`);
         if (Array.isArray(r?.data) && r.data.length === 1) return { before: { urls: cur.urls, expired: cur.expired }, after: next };

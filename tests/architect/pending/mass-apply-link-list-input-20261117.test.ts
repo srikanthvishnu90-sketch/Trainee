@@ -264,15 +264,16 @@ function kvDouble() {
   const q = (filters: [string, string][] = []) => ({
     filters,
     eq(c: string, v: string) { return q([...filters, [c, v]]); },
-    match(r: any) { return filters.every(([c, v]) => c === "value->>version" ? String(r.value?.version ?? "") === v : String(r[c]) === v); },
+    is(c: string, v: null) { return q([...filters, [c, v as unknown as string]]); },
+    match(r: any) { return filters.every(([c, v]) => c === "value->>version" ? (v === null ? (r.value?.version === undefined || r.value?.version === null) : String(r.value?.version ?? "") === v) : String(r[c]) === v); },
   });
   return {
     rows, onBeforeWrite: (f: (() => void) | null) => { beforeWrite = f; },
     from: (_t: string) => ({
       select: (_c: string) => { const b: any = q(); const wrap = (x: any): any => ({ eq: (c: string, v: string) => wrap(x.eq(c, v)), maybeSingle: async () => ({ data: [...rows.values()].find((r) => x.match(r)) ?? null, error: null }) }); return wrap(b); },
       insert: (row: any) => ({ select: async () => { beforeWrite?.(); if (rows.has(k(row.user_id, row.key))) return { data: null, error: { code: "23505", message: "duplicate key" } }; rows.set(k(row.user_id, row.key), structuredClone(row)); return { data: [{ key: row.key }], error: null }; } }),
-      update: (patch: any) => { const wrap = (x: any): any => ({ eq: (c: string, v: string) => wrap(x.eq(c, v)), select: async () => { beforeWrite?.(); const hit = [...rows.entries()].filter(([, r]) => x.match(r)); for (const [id, r] of hit) rows.set(id, { ...r, ...structuredClone(patch) }); return { data: hit.map(() => ({ key: "k" })), error: null }; } }); return wrap(q()); },
-      delete: () => { const wrap = (x: any): any => ({ eq: (c: string, v: string) => wrap(x.eq(c, v)), select: async () => { beforeWrite?.(); const hit = [...rows.entries()].filter(([, r]) => x.match(r)); for (const [id] of hit) rows.delete(id); return { data: hit.map(() => ({ key: "k" })), error: null }; } }); return wrap(q()); },
+      update: (patch: any) => { const wrap = (x: any): any => ({ eq: (c: string, v: string) => wrap(x.eq(c, v)), is: (c: string, v: null) => wrap(x.is(c, v)), select: async () => { beforeWrite?.(); const hit = [...rows.entries()].filter(([, r]) => x.match(r)); for (const [id, r] of hit) rows.set(id, { ...r, ...structuredClone(patch) }); return { data: hit.map(() => ({ key: "k" })), error: null }; } }); return wrap(q()); },
+      delete: () => { const wrap = (x: any): any => ({ eq: (c: string, v: string) => wrap(x.eq(c, v)), is: (c: string, v: null) => wrap(x.is(c, v)), select: async () => { beforeWrite?.(); const hit = [...rows.entries()].filter(([, r]) => x.match(r)); for (const [id] of hit) rows.delete(id); return { data: hit.map(() => ({ key: "k" })), error: null }; } }); return wrap(q()); },
     }),
   };
 }
@@ -301,4 +302,25 @@ Deno.test("review 1: the service-role store's write is a compare-and-set: a list
   // A write that keeps conflicting gives up and throws: nothing is written.
   kv.onBeforeWrite(() => { const r = kv.rows.get(`u1|${LINK_PENDING_KEY}`); if (r) kv.rows.set(`u1|${LINK_PENDING_KEY}`, { ...r, value: { ...r.value, version: r.value.version + 1 } }); });
   await assertNode.rejects(() => store.update("u1", NOW, (cur) => [...cur, "https://boards.greenhouse.io/d/jobs/4"]));
+});
+
+
+Deno.test("review (d6df9d4d9): 'keep going' on an expired list keeps a paste written between its read and its write; a row without a version is written", async () => {
+  const NOW = Date.parse("2026-11-17T16:00:00Z"), LATER = NOW + LINK_PENDING_TTL_MS + 60_000;
+  const FRESH = ["https://boards.greenhouse.io/fresh/jobs/1", "https://boards.greenhouse.io/fresh/jobs/2"];
+  const inner = memoryLinkPending();
+  await inner.update("u1", NOW, () => ["https://boards.greenhouse.io/old/jobs/9"]);
+  // The concurrent paste lands right after this turn read the (expired) list and before it writes.
+  const store = { read: async (u: string, n: number) => { const r = await inner.read(u, n); await inner.update(u, n, (cur) => [...cur, ...FRESH]); return r; }, update: inner.update };
+  const r = await applyTurn({ message: "keep going", userId: "u1", now: LATER, postings: { search: async () => [] }, wants: memoryWantStore(), apps: async () => [], facts: [],
+    link: { db: memoryPostingsDb(), fetchFeed: (async () => []) as never, pending: store } } as never);
+  ok(/that list expired/.test(r!.reply), r!.reply);
+  eq(inner.rows.get("u1")?.urls, FRESH, "the fresh paste is kept, never wiped by the expired list's clear");
+  // A row written without a version (an older writer): the compare-and-set matches "no version" and the write goes through.
+  const kv = kvDouble();
+  kv.rows.set("u1|career:account", { user_id: "u1", key: "career:account", value: { epoch: 0 } });
+  kv.rows.set(`u1|${LINK_PENDING_KEY}`, { user_id: "u1", key: LINK_PENDING_KEY, value: { urls: ["https://boards.greenhouse.io/x/jobs/1"], epoch: 0, at: new Date(NOW).toISOString() } });
+  const res = await supabaseLinkPending(kv as never).update("u1", NOW, (cur) => [...cur, "https://boards.greenhouse.io/y/jobs/2"]);
+  eq(res.after, ["https://boards.greenhouse.io/x/jobs/1", "https://boards.greenhouse.io/y/jobs/2"]);
+  eq(kv.rows.get(`u1|${LINK_PENDING_KEY}`).value.version, 1);
 });

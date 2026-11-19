@@ -457,7 +457,9 @@ export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | nul
       const kept = await o.link.pending.read(o.userId, o.now).catch(() => null);
       if (kept === null) return { reply: "I couldn't open the list of links I'm still reading just now, so none were read on this message; they are still kept. Say \"keep going\" again in a minute.", status: "unreadable", intent: APPLY_QUEUE_INTENT };
       if (kept.expired) {
-        const cleared = await o.link.pending.update(o.userId, o.now, () => []).then(() => true, () => false);
+        // (cur) => cur, never () => []: an expired list reads as [] (so it is removed), while a paste written since the read
+        // above is kept, not wiped (review of ag/ma-09, probe PROBE2).
+        const cleared = await o.link.pending.update(o.userId, o.now, (cur) => cur).then(() => true, () => false);
         return { reply: `The ${kept.expired} link${kept.expired === 1 ? "" : "s"} I was still reading ${kept.expired === 1 ? "was" : "were"} kept more than 24 hours ago, so that list expired${cleared ? "" : " (I couldn't clear it just now)"}; none of ${kept.expired === 1 ? "it" : "them"} ${kept.expired === 1 ? "was" : "were"} read on this message and nothing was queued. Paste the links again and I'll read them.`, status: "none", intent: APPLY_QUEUE_INTENT };
       }
       if (kept.urls.length) {

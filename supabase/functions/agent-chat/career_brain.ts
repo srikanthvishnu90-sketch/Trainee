@@ -24,6 +24,7 @@ import { bare, keepSupported, personQuestion, recordCheck, splitSentences } from
 import { confirmedRow, factRows } from "../_shared/agent/memory.ts";
 import { evidenceTurn, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
 import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
+import { recordPrepAsked } from "./career_staged.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
@@ -132,7 +133,7 @@ export async function agentTurn(o: {
   // WO-106 (F4): every job link checked just before it is shown.
   linkCheck?: LinkCheck | null;
   // FEATURE 13: the staged release's tool policy: tools withheld by name, and a note on what code does instead.
-  toolPolicy?: { withhold: readonly string[]; note: string } | null;
+  toolPolicy?: { withhold: readonly string[]; note: string; intent?: string } | null;
   // Situation knowledge (CAREER_KNOWLEDGE=on, off by default): the Person Context Pack and the 1 to 3 playbooks that fit it
   // go in the system prompt (_shared/agent/knowledge). Off, the prompt is exactly what it was.
   knowledge?: boolean;
@@ -581,6 +582,8 @@ export async function agentTurn(o: {
   const supportAll = supportTrace && supportTrace.refused.length ? supportTrace : researchTrace;
   const withSupport0 = supportAll ? { ...result, support: supportAll } : result;
   const withSupport = pipeline ? { ...withSupport0, pipeline, ...(piped ? { piped: { repaired: piped.repaired, calls: piped.calls, judgeCalls: piped.judgeCalls, judgeClaims: piped.judgeClaims, judgeCapped: piped.judgeCapped, fallback: piped.fallback, dropped: piped.dropped } } : {}) } : withSupport0;
+  // S3 r12 (dev H010): the questions a practice session the brain answered asked, for code's next serve (career_staged.ts recordPrepAsked).
+  if (withSupport.reply && withSupport.stopped === "final") recordPrepAsked(o.stores as Record<string, any>, o.toolPolicy?.intent ?? null, String(withSupport.reply));
   return know ? { ...withSupport, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : withSupport;
 }
 

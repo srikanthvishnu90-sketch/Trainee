@@ -21,16 +21,19 @@ import { ADVICE_CLAIM, bare, clausesOf, findSupport, hardParts, indexPages, judg
 export const PIPELINE = { on: true };
 export const isTagged = (t: string) => /\[E\d+(?:\s*,\s*E\d+)*\]/.test(String(t ?? ""));
 export type EvidenceKind = "page" | "chat" | "record" | "absent";
-export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[]; posting?: boolean; dated?: string[] }
+export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[]; posting?: boolean; dated?: string[]; empty?: boolean }
 
 // Units a tool added this turn (pages, posting records, counts): the turn rests on evidence only when it has one. Lines carried from
 // earlier replies, the person's record and what it lacks do not make a turn an evidence turn.
-export const evidenceTurn = (l: Ledger | null) => !!l && l.units.some((u) => (u.kind === "page" || u.kind === "chat") && u.source !== "an earlier reply in this chat");
+// (S3 r12: a search that returned no posting read nothing: its count alone does not make the turn an evidence turn. Before, an empty
+// search put the whole reply through the pipeline with one unit, "returned 0 postings", and every line of the advice its own result
+// asks for on an empty search, the roles to look at, failed as an unsupported fact; the reply left was "1. 2. 3." and the fallback)
+export const evidenceTurn = (l: Ledger | null) => !!l && l.units.some((u) => (u.kind === "page" || u.kind === "chat") && u.source !== "an earlier reply in this chat" && !u.empty);
 export class Ledger {
   units: EvidenceUnit[] = [];
   // The turn's clock (PROCESS rule 6): a year in a posting's title names the role only when it is this year or later.
   constructor(readonly now: number = Date.now()) {}
-  add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[]; posting?: boolean; dated?: string[] } = {}): string {
+  add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[]; posting?: boolean; dated?: string[]; empty?: boolean } = {}): string {
     const t = String(text ?? "").replace(/\s+/g, " ").trim();
     if (!t) return "";
     const had = this.units.find((u) => u.kind === kind && u.text === t && (u.url ?? null) === (meta.url ?? null));
@@ -74,7 +77,7 @@ export class Ledger {
       const st = typeof p?.state === "string" ? p.state : null;
       if (st || dl) ids.push(this.add("chat", `${who}: the posting is ${st ?? "listed"}${dl ? `; it closes ${dl}` : ""}.`, { url, source: name, owner: company, named, posting: true, dated }));
     }
-    if (Array.isArray(o.postings)) ids.push(this.add("chat", `The search (${name}) returned ${o.postings.length} posting${o.postings.length === 1 ? "" : "s"}.`, { source: name }));
+    if (Array.isArray(o.postings)) ids.push(this.add("chat", `The search (${name}) returned ${o.postings.length} posting${o.postings.length === 1 ? "" : "s"}.`, { source: name, ...(o.postings.length === 0 && !postings.length ? { empty: true } : {}) }));
     // Round 3 of #849: a requirement or a sign-in note belongs to its posting's employer, and says so in its text.
     const co: string | null = typeof o.company === "string" ? o.company : typeof o.posting?.company === "string" ? o.posting.company : postings.length === 1 && typeof postings[0]?.company === "string" ? postings[0].company :
       postings.length === 1 ? this.employerOf(postings[0], typeof postings[0]?.url === "string" ? postings[0].url : typeof o.url === "string" ? o.url : null) : null;
@@ -207,7 +210,11 @@ export const adviceClaim = (sentence: string, subject: string | null) => `${ADVI
 // opener (OPENER), an imperative (DIRECTIVE), a common word (NOT_NAME), a negative contraction ("Don't", "Won't"), an adverb in -ly
 // ("Politely", "Ideally"), or a discourse adverb.
 const FUNCTION_OPENER = (w: string) => { const x = w.replace(/['’]s$/, ""); return OPENER.test(x) || DIRECTIVE.test(x) || NOT_NAME.test(x) || /n['’]t$/i.test(w) || /^\p{L}{3,}ly$/iu.test(x) ||
-  /^(?:never|always|just|maybe|perhaps|then|first|second|third|next|also|even|only|still|ever|soon|now|later|again|quick|tip|heads|honestly|anyway|besides|otherwise|instead|therefore|thus|hence|so|yet|once|here|there|now)$/i.test(x); };
+  /^(?:never|always|just|maybe|perhaps|then|first|second|third|next|also|even|only|still|ever|soon|now|later|again|quick|tip|heads|honestly|anyway|besides|otherwise|instead|therefore|thus|hence|so|yet|once|here|there|now)$/i.test(x) ||
+  // (round 12 follow-up, S3 r12: an indefinite pronoun names no one. "Nothing has been sent or applied to." read "Nothing" as an
+  // unknown employer, carried it, and dropped every later sentence of the reply as "no cited unit is about Nothing")
+  INDEFINITE.test(x); };
+const INDEFINITE = /^(?:nothing|nobody|none|noone|no-one|neither|either|everything|everyone|everybody|something|someone|somebody|anything|anyone|anybody|nowhere|everywhere|somewhere|anywhere)$/i;
 // (round 9: an imperative opener, never a quantifier, an auxiliary or a discourse word: "Apply early" is advice; "Most interns…",
 // "Also, interns…" are not)
 const DIRECTIVE = /^(?:apply|send|ask|check|look|focus|use|keep|try|start|let|let's|remember|please|aim|pick|choose|avoid|skip|write|mention|lead|tailor|follow|reach|prepare|practice|practise|review|read|bring|save|plan|consider|add|make|say|tell|put|show|list|drop|cut|open|be|do|don't|never|always)$/i;
@@ -221,6 +228,7 @@ export function missingSpecifics(clause: string, units: EvidenceUnit[], strict =
 }
 
 // Verify a tagged reply against its ledger: what stands (tags removed), and every failure with its reason.
+const LIST_MARK = /^\s*(?:\(?\d{1,2}[.)]|[-•*]|[a-z][.)])\s*$/i;
 export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: SupportJudge | null; own?: string[]; onRecord?: (s: string) => boolean | null; ask?: string; carry?: string | null } = {}): Promise<Verified> {
   // (a question to the person may name only what their own record or their ask names)
   const allowed = [String(o.ask ?? ""), ...ledger.units.filter((u) => u.kind === "record").map((u) => u.text)].join("\n");
@@ -427,6 +435,9 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const got = await judgeAll(o.judge, asks.map((x) => ({ claim: x.claim, source: x.source })));
   const yesAt = new Set(asks.flatMap((x, j) => got[j] ? [x.k] : []));
   asks.forEach((x, j) => { const c = checks[x.k]; if (!yesAt.has(x.k) && asks.findIndex((y) => y.k === x.k) === j && !bad.has(`${c.a}:${c.b}`)) { failures.push({ sentence: c.claim, reason: c.untagged ? "it states a fact and cites no evidence unit, and no unit states it" : `the cited unit does not state "${x.claim}"`, subject: c.subject ?? null }); bad.add(`${c.a}:${c.b}`); } });
+  // (S3 r12: a list marker split off as its own piece, "1." of "1. Help desk …", goes with the item it numbers: an item dropped above
+  // left "1. 2. 3." standing as the reply)
+  lines.forEach((l, a) => l.forEach((x, b) => { if (LIST_MARK.test(x) && (b + 1 >= l.length || bad.has(`${a}:${b + 1}`) || LIST_MARK.test(l[b + 1] ?? ""))) bad.add(`${a}:${b}`); }));
   const text = lines.map((l, a) => l.filter((x, b) => x && !bad.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   const cites: string[] = [], citeOf: [string, string[]][] = [];
   lines.forEach((l, a) => l.forEach((x, b) => { if (x && !bad.has(`${a}:${b}`)) { kept.push(x); citeOf.push([x, citeAt.get(`${a}:${b}`) ?? []]); for (const id of citeAt.get(`${a}:${b}`) ?? []) if (!cites.includes(id)) cites.push(id); } }));

@@ -5903,7 +5903,7 @@ const CareerRouter = (() => {
     if (!qs.length && !fam) return null;
     const textOf = (x) => s(x && (x.q || x.question || x.text));
     const norm = (x) => lc(x).replace(/[^a-z0-9]+/g, " ").trim();
-    const served = new Set((Array.isArray(thread.served) ? thread.served : []).map(norm));
+    const served = prepServedSet(thread, norm);
     const dcfQ = /\bdcf\b/.test(t) ? qs.find((x) => /dcf/i.test(textOf(x))) : null;
     const ordered = [...new Set([...(fam ? fam.questions : []), ...qs.filter((x) => x && (x.round === "technical" || /technical/i.test(s(x.round)))).map(textOf), ...qs.map(textOf)].filter(Boolean))];
     // A stated weakness ("I'm weakest on prioritizing") is drilled first, from the unserved questions that name it.
@@ -6066,7 +6066,7 @@ const CareerRouter = (() => {
     const qs = (bank && bank.questions) || [];
     if (!qs.length) return null;
     const norm = (x) => lc(x).replace(/[^a-z0-9]+/g, " ").trim();
-    const served = new Set((Array.isArray(thread.served) ? thread.served : []).map(norm));
+    const served = prepServedSet(thread, norm);
     const inSector = (row) => {
       const ty = s(row && row.source && row.source.type);
       if (ty.startsWith(`interview_bank_${sector}`)) return true;
@@ -8025,6 +8025,25 @@ const CareerRouter = (() => {
     const m = threadMirrorForWrite(c);
     if (m) m.path = rec;
     return rec;
+  }
+  // S3 r12 (dev H010): the brain can start a mock in its own words; the questions it asked are on the thread (prep.asked, written
+  // by agent-chat career_brain.ts recordPrepAsked). A bank question the brain already asked counts as served, so "next question"
+  // never serves it again: "Tell me about yourself and why you want this role." asked by the brain, then "Here is your question: Tell
+  // me about yourself and why this role." from the bank. Close wording counts (the content words, nearly all shared); a different
+  // question with the same frame ("Tell me about a time you failed" / "... you led") does not.
+  const PREP_STOP = new Set(["the", "and", "you", "your", "for", "with", "are", "was", "that", "this", "what", "how", "would", "did", "can", "will", "have", "has"]);
+  function prepWords(x) { return new Set(String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter((w) => w.length >= 3 && !PREP_STOP.has(w))); }
+  function prepSameQuestion(a, b) {
+    const x = prepWords(a), y = prepWords(b);
+    if (!x.size || !y.size) return false;
+    let both = 0;
+    for (const w of x) if (y.has(w)) both += 1;
+    return both / (x.size + y.size - both) >= 0.7;
+  }
+  function prepServedSet(thread, norm) {
+    const base = new Set((Array.isArray(thread && thread.served) ? thread.served : []).map(norm));
+    const asked = (Array.isArray(thread && thread.asked) ? thread.asked : []).filter((x) => typeof x === "string" && x.trim());
+    return { has: (k) => base.has(k) || asked.some((a) => prepSameQuestion(k, a)) };
   }
   function prepThreadOf(ctx) {
     const c = ctx || {};

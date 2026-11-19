@@ -111,7 +111,9 @@ function typos(t: string): string {
 /** The routing reading of a messy message, or null when nothing in it needed reading differently. */
 export function routingReading(message: string): string | null {
   const raw = String(message ?? "");
-  if (!raw.trim() || raw.length > 4000 || /https?:\/\//i.test(raw)) return null;
+  // A pasted document (a resume, a posting, an email: several lines or a long block) is the person's own words to keep exactly,
+  // and a link is read as typed; only a texted message is read here.
+  if (!raw.trim() || raw.length > 600 || raw.split("\n").filter((l) => l.trim()).length > 2 || /https?:\/\//i.test(raw)) return null;
   let t = dictation(raw);
   t = t.replace(HESITATION, "$1");
   t = t.replace(LEAD, "");

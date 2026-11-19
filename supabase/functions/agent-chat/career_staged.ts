@@ -921,3 +921,31 @@ export function emailReplyAsk(env: Env, message: string, intent: string | null):
   if (!intent || PAYLOAD_INTENTS.has(intent) || /^(?:prep_mock|negotiation_roleplay|career_apply_email|career_followup|conversation_bare_reply|conversation_hold|intent_cancelled)/.test(intent) || !releaseFlagOn(env, "CAREER_MAIL_TRACKING")) return false;
   return EMAIL_REPLY.test(String(message ?? "").replace(/[’`]/g, "'"));
 }
+
+// Review of ac1e068aa: code's watch, run dry on a copy of the person's turn state (probeCtx), for next_step.ts watchVerified: what the
+// staged route does with the exact phrase, and what the router replies. Nothing is saved: the copy is thrown away.
+let watchHost: Host | null = null;
+async function loadWatchHost(): Promise<Host> {
+  if (watchHost) return watchHost;
+  const RC = await import("../_shared/router_core.career.js");
+  const { CareerHost } = await import("../_shared/career_host.js");
+  watchHost = CareerHost.createCareerHost({ CareerAccess: RC.CareerAccess, CareerOnboarding: RC.CareerOnboarding, CareerRouter: RC.CareerRouter, CareerDoorstep: RC.CareerDoorstep, CareerReply: RC.CareerReply, CareerContainment: RC.CareerContainment }) as unknown as Host;
+  return watchHost;
+}
+export const watchHostReady = loadWatchHost();
+export function routerWatchProbe(ctx: Record<string, unknown> | null | undefined) {
+  return {
+    staged: (cmd: string) => {
+      if (!watchHost || !ctx) return { brain: true, intent: null };
+      const d = stagedDecision({ env: { get: (k: string) => (globalThis as any).Deno?.env?.get?.(k) }, message: cmd, ctx: probeCtx(ctx), host: watchHost, structured: false });
+      return { brain: d.brain, intent: d.intent };
+    },
+    run: (cmd: string) => { if (!watchHost || !ctx) return { intent: null, reply: null }; try { const r: any = watchHost.runTurn(cmd, probeCtx(ctx) as any); return { intent: r?.intent ?? null, reply: r?.reply ?? null }; } catch { return { intent: null, reply: null }; } },
+  };
+}
+// The person has a profile on file (a fact or a basic of their own), as the watch needs.
+export function hasProfileOn(ctx: unknown): boolean {
+  const p = (ctx as any)?.profile;
+  if (!p || typeof p !== "object") return false;
+  return (Array.isArray(p.facts) && p.facts.length > 0) || Object.values(p.basics ?? {}).some((v) => typeof v === "string" && v.trim().length > 0);
+}

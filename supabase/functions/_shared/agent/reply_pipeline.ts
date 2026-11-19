@@ -236,14 +236,17 @@ export function missingSpecifics(clause: string, units: EvidenceUnit[], strict =
 
 // Verify a tagged reply against its ledger: what stands (tags removed), and every failure with its reason.
 // (S3 r12: a clause that says something is open, posted or hiring is a posting claim; a suggestion unit never holds one)
-const POSTING_CLAIM = /\b(?:openings?|postings?|posted|vacanc(?:y|ies)|hiring|hires|listings?|listed|job ads?|positions? (?:open|available)|(?:is|are) open|apply (?:to|for|at)|now accepting)\b/i;
+const POSTING_CLAIM = /\b(?:openings?|postings?|posted|vacanc(?:y|ies)|hiring|hires|listings?|listed|job ads?|positions? (?:open|available)|(?:is|are) open|apply (?:to|for|at)|apply you|now accepting|(?:send|submit) (?:your|my|the) (?:resume|application)s? to|available (?:near|in|around|now|right now)|(?:jobs?|roles?|positions?|work)\s+(?:\w+\s+){0,4}?(?:near|around|close to)\s+(?:you|your|me|here)|(?:near|around) (?:you|your|me)\b[^.?!]{0,40}\b(?:jobs?|roles?)|in your (?:city|area|town))\b/i;
 // (a posting denied, "not postings", "no openings", claims none)
 const NO_POSTING = /\b(?:not|no|never|nor|zero|0)\s+(?:an?\s+|any\s+)?(?:[\p{L}-]+\s+){0,2}?(?:openings?|postings?|listings?|vacanc(?:y|ies))\b/giu;
 const forClaim = (us: EvidenceUnit[], text: string) => POSTING_CLAIM.test(String(text).replace(NO_POSTING, " ")) ? us.filter((u) => u.kind !== "suggestion") : us;
 const TAG_AFTER_STOP = /([.!?])(["'\u201d)\]]*)[ \t]*(\[E\d+(?:\s*,\s*E\d+)*\])/g;
-const SUGGESTION_UNSAFE = /\b(?:pay|pays|paid|paying|salar\w*|wages?|earn\w*|requir\w*|sponsor\w*|degrees?|certif\w*|licen[cs]\w*|guarantee\w*|always|never)\b|[$€£%]/i;
 // "those four", "these 3", "the two": a count referring back to items
 const COUNT_REF = /\b(those|these|the)\s+(two|three|four|five|six|seven|eight|nine|ten|[2-9]|10)\b/i;
+// A count that refers back to items: "those four", "these 3" (deictic), "the four roles above" / "the 3 I listed", "one of the five",
+// "all four". "The 10 postings in your File" refers to no list here and is not one.
+const N_WORD = "two|three|four|five|six|seven|eight|nine|ten|[2-9]|10";
+const BACK_REF = new RegExp(`\\b(?:those|these)\\s+(${N_WORD})\\b|\\bthe\\s+(${N_WORD})(?:\\s+[\\p{L}-]+){0,2}?\\s+(?:above|listed|I (?:named|listed|mentioned|gave))\\b|\\b(?:one|any|each|either|which|whichever|all|pick|choose)\\s+of\\s+(?:the|those|these)\\s+(${N_WORD})\\b|\\ball\\s+(${N_WORD})\\b`, "giu");
 const COUNT_WORDS: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
 const countOf = (w: string) => COUNT_WORDS[w.toLowerCase()] ?? Number(w);
 // How many items the reply lists: its numbered or bulleted lines, or the longest series in one of its sentences ("A, B, C, or D"),
@@ -258,6 +261,22 @@ export function listCount(reply: string): number {
   return Math.max(marked, series);
 }
 const LIST_MARK = /^\s*(?:\(?\d{1,2}[.)]|[-•*]|[a-z][.)])\s*$/i;
+// (S3 r12, architect ruling) The same rule on a finished reply, whichever path made it (the pipeline, the untagged path, the condense
+// pass that rewrites a long reply in fewer words): a sentence that counts back to a list goes when the reply no longer shows that many
+// items. Returns the reply unchanged when nothing dangles.
+export function dropDanglingCounts(reply: string): string {
+  const lines = String(reply ?? "").split("\n").map((l) => splitSentences(l));
+  const gone = new Set<string>();
+  lines.forEach((l, a) => l.forEach((x, b) => {
+    const refs = [...x.matchAll(BACK_REF)].map((m) => countOf(m[1] ?? m[2] ?? m[3] ?? m[4] ?? "")).filter((n) => n >= 2);
+    if (!refs.length) return;
+    const rest = lines.map((l2, i) => l2.filter((_, j) => !(i === a && j === b) && !gone.has(`${i}:${j}`)).join(" ")).join("\n");
+    const listed = listCount(rest), own = listCount(x);
+    if (refs.some((n) => n !== listed && n !== own)) gone.add(`${a}:${b}`);
+  }));
+  if (!gone.size) return String(reply ?? "");
+  return lines.map((l, a) => l.filter((_, b) => !gone.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: SupportJudge | null; own?: string[]; onRecord?: (s: string) => boolean | null; ask?: string; carry?: string | null } = {}): Promise<Verified> {
   // (a question to the person may name only what their own record or their ask names)
   const allowed = [String(o.ask ?? ""), ...ledger.units.filter((u) => u.kind === "record").map((u) => u.text)].join("\n");
@@ -267,8 +286,8 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   // (S3 r12, H034: "Which of those four sounds closest to what you want?" after a list of four roles: the count word counts what this
   // reply shows, so it is no figure; the question is read as the plain question it is without it. Any other count still refuses it.)
   const shown = listCount(stripTags(String(reply ?? "")));
-  const counted = new Set<string>();
-  const countedQuestion = (q: string) => { const m = COUNT_REF.exec(q); return !!m && countOf(m[2]) === shown && shown >= 2 && personQuestion(q.replace(m[0], m[1]), allowed); };
+  // (never a posting claim: "Which of those four openings should I apply you to?" after an empty search is not a plain question)
+  const countedQuestion = (q: string) => { const m = COUNT_REF.exec(q); return !!m && countOf(m[2]) === shown && shown >= 2 && !POSTING_CLAIM.test(q.replace(NO_POSTING, " ")) && personQuestion(q.replace(m[0], m[1]), allowed); };
   const lines = String(reply ?? "").replace(TAG_AFTER_STOP, " $3$1$2").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : splitSentences(l).filter((x) => x.trim()));
   const raw = lines.map((l) => [...l]);
   const failures: Failure[] = [], kept: string[] = [];
@@ -345,7 +364,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
     const { ids, text } = tagsOf(x);
     lines[a][b] = text;
-    if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || personQuestion(text, allowed) || (countedQuestion(text) && !!counted.add(`${a}:${b}`))) return carryPast(text);
+    if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || personQuestion(text, allowed) || countedQuestion(text)) return carryPast(text);
     if (rec(text) === true) return carryPast(text);
     // The record's verdict comes before the plain-sentence rule: a sentence about the record that the record contradicts fails.
     if (rec(text) === false) { failures.push({ sentence: text, reason: "it is not what the person's record holds" }); bad.add(`${a}:${b}`); return; }
@@ -368,7 +387,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (!units.length) { failures.push({ sentence: text, reason: "it states a fact and no evidence unit holds it" }); bad.add(`${a}:${b}`); return; }
     citeAt.set(`${a}:${b}`, ids);
     for (const c of clausesOf(text)) {
-      if (noClaim(c) || personQuestion(c, allowed) || (countedQuestion(c) && !!counted.add(`${a}:${b}`)) || rec(c) === true) continue;
+      if (noClaim(c) || personQuestion(c, allowed) || countedQuestion(c) || rec(c) === true) continue;
       if (rec(c) === false) return fail(a, b, text, `"${c}" is not what the person's record holds`);
       // Round 3 of #849: every clause, not only one with a figure ("The posting is open", "It requires a clearance").
       const names = owners.length ? mentioned(c) : [];
@@ -466,9 +485,6 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (c.subject && (unitOwner ? unitOwner !== c.subject : !c.soft && !nameFoundIn(c.subject, f.unit.passage))) { failures.push({ sentence: c.claim, reason: `the unit that holds "${c.clause}" is not about ${c.subject}`, subject: c.subject }); bad.add(`${c.a}:${c.b}`); return; }
     // (an untagged sentence a unit supports keeps that unit's source link, as a tagged one does)
     if (c.untagged && held) citeAt.set(`${c.a}:${c.b}`, [...new Set([...(citeAt.get(`${c.a}:${c.b}`) ?? []), held.id])]);
-    // (S3 r12, architect ruling: a suggestion unit is code's own words, as code's lines are; a clause it holds by layer A, with no
-    // figure, no posting claim and no pay, requirement or credential claim of its own, stands on it without the judge)
-    if (held?.kind === "suggestion" && !figure && !POSTING_CLAIM.test(c.clause.replace(NO_POSTING, " ")) && !SUGGESTION_UNSAFE.test(c.clause)) return;
     asks.push({ k, claim: withSubject(c), source: f.unit.passage });
   });
   const got = await judgeAll(o.judge, asks.map((x) => ({ claim: x.claim, source: x.source })));
@@ -477,13 +493,19 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   // (S3 r12: a list marker split off as its own piece, "1." of "1. Help desk …", goes with the item it numbers: an item dropped above
   // left "1. 2. 3." standing as the reply)
   // (a counted question stands only while what it counts still stands: its items checked above, it is checked again on what is kept)
-  for (const key of counted) {
-    if (bad.has(key)) continue;
-    const [a, b] = key.split(":").map(Number);
-    const keptText = lines.map((l, i) => l.filter((x, j) => x && !bad.has(`${i}:${j}`) && `${i}:${j}` !== key).join(" ")).join("\n");
-    const m = COUNT_REF.exec(lines[a][b]);
-    if (m && countOf(m[2]) !== listCount(keptText)) { failures.push({ sentence: lines[a][b], reason: `"${m[0]}" counts items this reply no longer shows` }); bad.add(key); }
-  }
+  // (S3 r12, architect ruling: and so does ANY kept sentence that counts back to a list, "the four roles above", "those 3", "pick one
+  // of the five": the items it refers to must still stand, as many as it says; a dangling reference is a defect, so it goes too.
+  // probe-r12-nextstep-5: "Pick whichever of the four roles above sounds closest…" stood after the four roles were dropped)
+  lines.forEach((l, a) => l.forEach((x, b) => {
+    const key = `${a}:${b}`;
+    if (!x || bad.has(key)) return;
+    const refs = [...x.matchAll(BACK_REF)].map((m) => ({ said: m[0], n: countOf(m[1] ?? m[2] ?? m[3] ?? m[4] ?? "") })).filter((r) => r.n >= 2);
+    if (!refs.length) return;
+    const keptText = lines.map((l2, i) => l2.filter((y, j) => y && !bad.has(`${i}:${j}`) && `${i}:${j}` !== key).join(" ")).join("\n");
+    const listed = listCount(keptText), own = listCount(x);
+    const off = refs.find((r) => r.n !== listed && r.n !== own);
+    if (off) { failures.push({ sentence: x, reason: `"${off.said}" counts items this reply no longer shows` }); bad.add(key); }
+  }));
   lines.forEach((l, a) => l.forEach((x, b) => { if (LIST_MARK.test(x) && (b + 1 >= l.length || bad.has(`${a}:${b + 1}`) || LIST_MARK.test(l[b + 1] ?? ""))) bad.add(`${a}:${b}`); }));
   const text = lines.map((l, a) => l.filter((x, b) => x && !bad.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   const cites: string[] = [], citeOf: [string, string[]][] = [];

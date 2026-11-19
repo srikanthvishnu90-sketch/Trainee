@@ -22,10 +22,11 @@ import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research
 import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed, type ResearchCheck } from "../_shared/agent/research/market.ts";
 import { bare, keepSupported, personQuestion, recordCheck, splitSentences } from "../_shared/agent/research/support.ts";
 import { confirmedRow, factRows } from "../_shared/agent/memory.ts";
-import { evidenceTurn, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
+import { dropDanglingCounts, evidenceTurn, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
 import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
 import { recordPrepAsked } from "./career_staged.ts";
-import { nextStepLine } from "../_shared/agent/next_step.ts";
+import { nextStepLine, watchVerified } from "../_shared/agent/next_step.ts";
+import { hasProfileOn, routerWatchProbe, watchHostReady } from "./career_staged.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
@@ -588,8 +589,13 @@ export async function agentTurn(o: {
   const withSupport = pipeline ? { ...withSupport0, pipeline, ...(piped ? { piped: { repaired: piped.repaired, calls: piped.calls, judgeCalls: piped.judgeCalls, judgeClaims: piped.judgeClaims, judgeCapped: piped.judgeCapped, fallback: piped.fallback, dropped: piped.dropped } } : {}) } : withSupport0;
   // S3 r12 (architect ruling): an empty search whose kept reply asks and offers nothing gets code's one next-step line (next_step.ts),
   // after the pipeline and the condense pass, never judged.
+  // (and, first, a sentence counting back to a list the delivered reply no longer shows goes: reply_pipeline.ts dropDanglingCounts;
+  // probe-r12-nextstep-5, "Pick whichever of the four roles above…" after the condense pass dropped the roles)
+  if (withSupport.reply && withSupport.stopped === "final" && !withSupport.show) (withSupport as any).reply = dropDanglingCounts(String(withSupport.reply));
+  if ((ctx.turn as any)?.emptySearch) await watchHostReady.catch(() => null);
   const nextStep = withSupport.reply && withSupport.stopped === "final" && !withSupport.show
-    ? nextStepLine(String(withSupport.reply), (ctx.turn as any)?.emptySearch ?? null, Array.isArray(withSupport.postings) && withSupport.postings.length > 0) : null;
+    ? nextStepLine(String(withSupport.reply), (ctx.turn as any)?.emptySearch ?? null, Array.isArray(withSupport.postings) && withSupport.postings.length > 0,
+      (q) => watchVerified(q, { hasProfile: hasProfileOn(o.stores), probe: routerWatchProbe(o.stores as Record<string, unknown>) })) : null;
   if (nextStep) (withSupport as any).reply = `${String(withSupport.reply).trimEnd()}\n\n${nextStep}`;
   // S3 r12 (dev H010): the questions a practice session the brain answered asked, for code's next serve (career_staged.ts recordPrepAsked).
   if (withSupport.reply && withSupport.stopped === "final") recordPrepAsked(o.stores as Record<string, any>, o.toolPolicy?.intent ?? null, String(withSupport.reply));

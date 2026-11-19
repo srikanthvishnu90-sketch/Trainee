@@ -20,8 +20,33 @@ export function emptySearchNextStep(query: string): string | null {
 // A question to the person, or an offer of what Trainee can do next, anywhere in the kept reply.
 const OFFER = /\?|\b(?:want me to|would you like me to|shall i|should i|i can|i could|i'll|i will|you can (?:ask|say|text|tell|send|name|reply)|say ["“]|reply ["“]|text ["“]|tell me)\b/i;
 export const asksOrOffers = (reply: string) => OFFER.test(String(reply ?? ""));
-// The line to add, or null: only when the turn's searches all came back empty and the kept reply neither asks nor offers.
-export function nextStepLine(reply: string, emptyQuery: string | null | undefined, anyFound: boolean): string | null {
+// The line to add, or null: only when the turn's searches all came back empty, the kept reply neither asks nor offers, and the
+// watch it offers is really saved for those words (`verified`, watchVerified below).
+export function nextStepLine(reply: string, emptyQuery: string | null | undefined, anyFound: boolean, verified: (query: string) => boolean = () => false): string | null {
   if (!emptyQuery || anyFound || !String(reply ?? "").trim() || asksOrOffers(reply)) return null;
-  return emptySearchNextStep(emptyQuery);
+  return verified(emptyQuery) ? emptySearchNextStep(emptyQuery) : null;
+}
+
+// Review of ac1e068aa (REJECT): the line may promise a saved watch only when code's watch, run dry on the person's own state with the
+// exact phrase the line quotes, saves one for exactly those words. Refused: no profile on file; a command word ("stop", "cancel my
+// applications", "delete my account": a watch on "stop" is no watch); a figure (pay, a year: "data analyst $80k" saved "Data
+// Analyst"); a phrase the staged route would not give to code's watch; a watch whose title is not the query's words ("remote
+// software engineer jobs" saved "Software Engineering Intern / New-Grad"); a place in the words the watch did not keep ("…, New York"
+// saved "… York — New York"; "… Columbus" saved "any location").
+const COMMAND = /\b(?:stop|cancel|delete|remove|erase|forget|unsubscribe|pause|resume|quit|opt|apply|send|submit|undo|reset|block|report)\b/i;
+const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+export interface WatchProbe { staged: (cmd: string) => { brain: boolean; intent: string | null }; run: (cmd: string) => { intent?: string | null; reply?: unknown } }
+export function watchVerified(query: string, o: { hasProfile: boolean; probe: WatchProbe }): boolean {
+  const w = watchWords(query);
+  if (!w || !o.hasProfile || COMMAND.test(w) || /[\d$€£%]/.test(String(query))) return false;
+  const cmd = watchCommand(w);
+  const d = o.probe.staged(cmd);
+  if (d.brain || d.intent !== "career_watch_create") return false;
+  const r = o.probe.run(cmd);
+  if (r.intent !== "career_watch_create") return false;
+  const m = /^Watch set: (.+?)\.\s*\n\s*Watching: (.+?) \u2014 (.+?)(?: \+ remote)?\.\s/u.exec(String(r.reply ?? ""));
+  if (!m || norm(m[1]) !== norm(w) || norm(m[2]) !== norm(w)) return false;
+  // (a word written as a name after the first, "Columbus", "New York", is a place or an employer, and a watch that kept the query's
+  // words as its title kept none of them as its place: refused; a lowercase place the watch read as one changed the title, refused above)
+  return !w.split(/\s+/).slice(1).some((x) => /^\p{Lu}/u.test(x)) && !/[^,]\s*,|\bnear\b|\bin\s+\p{L}/iu.test(w);
 }

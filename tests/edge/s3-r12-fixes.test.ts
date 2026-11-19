@@ -1,6 +1,6 @@
 // S3 r12 (the subscription sitting for 66118fb7a: dev H010, H034, H035 failed in code). Each test names the transcript it comes from.
 // Run: deno test -A --no-check tests/edge/s3-r12-fixes.test.ts
-import { evidenceTurn, Ledger, verifyTagged } from "../../supabase/functions/_shared/agent/reply_pipeline.ts";
+import { dropDanglingCounts, evidenceTurn, Ledger, verifyTagged } from "../../supabase/functions/_shared/agent/reply_pipeline.ts";
 import { careerTools, EMPTY_SEARCH_NOTE } from "../../supabase/functions/_shared/agent/career_tools.ts";
 import { prepQuestionsAsked, recordPrepAsked, STAGED_TOOL_POLICY, stagedToolPolicy } from "../../supabase/functions/agent-chat/career_staged.ts";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
@@ -75,31 +75,17 @@ Deno.test("S3 r12 / H034: an empty-search reply naming the suggested roles survi
   assert(v.text.includes("Which of those sounds closest to what you want?"), v.text);
 });
 
-Deno.test("S3 r12 / H034: a sentence a suggestion unit holds stands without the judge; pay, requirements and postings on it do not", async () => {
-  // (the eval harness gives the brain no support judge, so every judged claim fails closed there: probe-r12-ruling kept nothing)
-  const { l } = await emptySearch(H034, "entry level help desk IT support");
-  const sg = l.units.find((u) => u.kind === "suggestion")!;
-  const good = `People moving into computer and IT work commonly start as IT support or help desk technician, data entry or records clerk, or QA tester [${sg.id}].`;
-  const v = await verifyTagged(good, l, { ask: H034, judge: null });
-  assert(v.text.includes("help desk technician"), JSON.stringify(v));
-  for (const bad of ["IT support or help desk technician roles pay well and need no degree", "IT support or help desk technician roles require a certification",
-    "IT support or help desk technician openings are posted near you", "IT support or help desk technician jobs pay $20 an hour"]) {
-    const b = await verifyTagged(`${bad} [${sg.id}].`, l, { ask: H034, judge: null });
-    assert(!b.text, `kept: ${bad} -> ${b.text}`);
-  }
-});
-
 Deno.test("S3 r12 / H034: a question whose count word counts the items this reply shows stands; any other count does not", async () => {
   // (probe-r12-ruling3 1 and 4: the roles stood, and "Which of those four sounds closest to what you want?" was dropped for "four")
   const { l } = await emptySearch(H034, "entry level help desk IT support");
   const sg = l.units.find((u) => u.kind === "suggestion")!;
   const four = `People moving into computer and IT work commonly start as IT support or help desk technician, technical or customer support at a software company, data entry or records clerk, or QA tester [${sg.id}].`;
-  const ok = await verifyTagged(`${four} Which of those four sounds closest to what you want?`, l, { ask: H034, judge: null });
+  const ok = await verifyTagged(`${four} Which of those four sounds closest to what you want?`, l, { ask: H034, judge: yes });
   assert(ok.text.includes("Which of those four sounds closest to what you want?") && ok.text.includes("QA tester"), JSON.stringify(ok));
-  const listed = await verifyTagged(`1. IT support or help desk technician [${sg.id}].\n2. QA tester [${sg.id}].\nWhich of these two fits you best?`, l, { ask: H034, judge: null });
+  const listed = await verifyTagged(`1. IT support or help desk technician [${sg.id}].\n2. QA tester [${sg.id}].\nWhich of these two fits you best?`, l, { ask: H034, judge: yes });
   assert(listed.text.endsWith("Which of these two fits you best?"), listed.text);
   // (a count that is not what the reply shows, or a list that did not stand, refuses the question as before)
-  const wrong = await verifyTagged(`${four} Which of those three sounds closest to what you want?`, l, { ask: H034, judge: null });
+  const wrong = await verifyTagged(`${four} Which of those three sounds closest to what you want?`, l, { ask: H034, judge: yes });
   assert(!wrong.text.includes("those three"), wrong.text);
   const gone = await verifyTagged("Zorblax Medical, Quintel Care, Brightline Health and Arden Labs pay $90 an hour. Which of those four sounds best?", l, { ask: H034, judge: null });
   assert(!gone.text.includes("those four"), gone.text);
@@ -179,8 +165,8 @@ Deno.test("S3 r12 / H010: \"next question\" never serves a bank question the bra
 
 // ---- S3 r12, architect ruling: code's next-step line after an empty search whose kept reply neither asks nor offers (next_step.ts)
 import { agentTurn } from "../../supabase/functions/agent-chat/career_brain.ts";
-import { emptySearchNextStep, nextStepLine, watchCommand, watchWords } from "../../supabase/functions/_shared/agent/next_step.ts";
-import { stagedDecision } from "../../supabase/functions/agent-chat/career_staged.ts";
+import { emptySearchNextStep, nextStepLine, watchVerified } from "../../supabase/functions/_shared/agent/next_step.ts";
+import { routerWatchProbe, watchHostReady } from "../../supabase/functions/agent-chat/career_staged.ts";
 const H035 = "got anything for nurses near columbus who want days only?";
 const stub = (query: string, draft: string) => {
   let n = 0;
@@ -191,36 +177,102 @@ const stub = (query: string, draft: string) => {
       : { content: [{ type: "text", text: draft }], stop_reason: "end_turn" };
   };
 };
-const turn = (query: string, draft: string, message = H035) => agentTurn({ message, history: [], stores: { profile: { facts: [] } }, userId: "u-ns", threadId: "t-ns", now: NOW,
+const PROFILE = { facts: [{ id: "F-001", kind: "experience", text: "I'm a registered nurse", status: "confirmed", source: "user" }] };
+const turn = (query: string, draft: string, message = H035, stores: Record<string, unknown> = { profile: structuredClone(PROFILE) }) => agentTurn({ message, history: [], stores, userId: "u-ns", threadId: "t-ns", now: NOW,
   model: stub(query, draft), postings: async () => [], supportJudge: yes } as any) as Promise<any>;
 
-Deno.test("S3 r12 / H035: an empty search whose kept reply asks and offers nothing ends with code's watch line", async () => {
-  const r = await turn("registered nurse day shift Columbus", "The search for registered nurse day shift Columbus returned 0 postings [E2]. Nothing has been sent or applied to.");
-  const line = emptySearchNextStep("registered nurse day shift Columbus")!;
-  eq(line, 'Say "watch for registered nurse day shift Columbus roles" and I\'ll save a watch for them on your list.');
+Deno.test("S3 r12 / H034, architect ruling: any sentence that counts back to a list goes when the list is not shown, or the count is off", async () => {
+  // (probe-r12-nextstep-5: "Pick whichever of the four roles above sounds closest and I'll search for it" was delivered after the
+  // roles were gone; the delivered reply is checked whatever path made it, the pipeline's kept text too)
+  const four = "People moving into computer work commonly start as IT support or help desk technician, technical or customer support at a software company, data entry or records clerk, or QA tester.";
+  const saved = "Saved: you're a cashier, and you want to do something with computers.";
+  for (const ref of ["Pick whichever of the four roles above sounds closest and I'll search for it.", "I can search all four for you.", "I'll look up the 4 roles I listed next.", "Which of those four sounds closest?"]) {
+    eq(dropDanglingCounts(`${saved} ${ref}`), saved, `dangling: ${ref}`);
+    eq(dropDanglingCounts(`${four} ${ref}`), `${four} ${ref}`, `kept list: ${ref}`);
+    eq(dropDanglingCounts(`${four} ${ref.replace(/four|4/, "three")}`), four, `wrong count: ${ref}`);
+    eq(dropDanglingCounts(`1. IT support\n2. Data entry\n3. QA tester\n4. Tech support\n${ref}`), `1. IT support\n2. Data entry\n3. QA tester\n4. Tech support\n${ref}`, `numbered: ${ref}`);
+  }
+  // (a count that refers to no list is untouched)
+  eq(dropDanglingCounts(`${saved} I can put the 10 postings I find in a File for you.`), `${saved} I can put the 10 postings I find in a File for you.`);
+  // (in the pipeline, on what it keeps)
+  const { l } = await emptySearch(H034, "entry level help desk IT support");
+  const v = await verifyTagged("1. Plumber [E99].\n2. Welder [E99].\n3. Electrician [E99].\n4. Carpenter [E99].\nWhich of those four sounds closest to what you want?", l, { ask: H034, judge: yes });
+  assert(!v.text.includes("those four"), v.text);
+  // (through a real turn: the delivered reply)
+  const r = await turn("entry level help desk IT support", `${saved} Pick whichever of the four roles above sounds closest and I'll search for it.`, H034);
+  assert(!String(r.reply).includes("four roles above"), r.reply);
+});
+
+// ---- review of ac1e068aa (REJECT): probes p1-p4 as regression tests, and the verified next-step line
+
+Deno.test("review p1: a suggestion-held claim goes to the support judge like any other, and a no drops it", async () => {
+  const { l } = await emptySearch(H034, "entry level help desk IT support");
+  const sg = l.units.find((u) => u.kind === "suggestion")!;
+  const no = async (cs: unknown[]) => cs.map(() => "no" as const);
+  for (const c of ["IT support or help desk technician roles are fully remote and easy to get", "A help desk technician job is a great fit for you because cashier work is customer support",
+    "You would be hired as a QA tester within weeks", "QA tester roles lead quickly to software engineer jobs", "Data entry or records clerk work is being replaced by AI",
+    "IT support at a software company is the best-paid of these", "Technical or customer support at a software company is what most cashiers do next",
+    "People moving into computer work start as help desk technician and get promoted fast", "Help desk technician roles need no experience at all",
+    "QA tester is the most common route into tech for people with no background", "Help desk technicians work nights and weekends", "Microsoft starts many people as help desk technicians",
+    "IT support at a software company is in high demand in your city", "These roles open up a lot in January", "Help desk technicians at Amazon get trained on the job",
+    "QA tester work suits you since you already use computers daily", "Help desk is the role you told me you wanted",
+    // (and the unit's own sentence too: nothing stands on a suggestion without the judge's yes)
+    "People moving into computer and IT work commonly start as IT support or help desk technician, or QA tester"]) {
+    eq((await verifyTagged(`${c} [${sg.id}].`, l, { ask: H034, judge: no })).text, "", c);
+    eq((await verifyTagged(`${c}.`, l, { ask: H034, judge: no })).text, "", `untagged: ${c}`);
+    eq((await verifyTagged(`${c} [${sg.id}].`, l, { ask: H034, judge: null })).text, "", `no judge: ${c}`);
+  }
+  assert((await verifyTagged(`People moving into computer and IT work commonly start as IT support or help desk technician, or QA tester [${sg.id}].`, l, { ask: H034, judge: yes })).text, "a yes keeps it");
+});
+
+Deno.test("review p3, p4: a counted question that claims postings, and posting claims on suggestions, are dropped", async () => {
+  const { l } = await emptySearch(H034, "entry level help desk IT support");
+  const sg = l.units.find((u) => u.kind === "suggestion")!;
+  const four = `People moving into computer and IT work commonly start as IT support or help desk technician, technical or customer support at a software company, data entry or records clerk, or QA tester [${sg.id}].`;
+  for (const q of ["Which of those four openings should I apply you to?", "Which of those four jobs near you do you want me to send your resume to?", "Should I apply you to all four of those?"]) {
+    const v = await verifyTagged(`${four} ${q}`, l, { ask: H034, judge: yes });
+    assert(!v.text.includes(q), `kept: ${q}`);
+  }
+  for (const c of ["There are QA tester jobs near you", "Help desk technician jobs are available near you right now", "QA tester jobs are easy to find near you", "IT support roles are hiring in your area"]) {
+    const v = await verifyTagged(`${c} [${sg.id}].`, l, { ask: H034, judge: yes });
+    eq(v.text, "", c);
+  }
+  const bare = new Ledger(NOW);
+  bare.fromToolResult("search_jobs", { postings: [] });
+  eq((await verifyTagged("Which of those four openings should I apply you to?", bare, { ask: "jobs w computers", judge: async (cs: unknown[]) => cs.map(() => "no" as const) })).text, "");
+});
+
+Deno.test("review p2: the watch line is offered only for a watch code would really save for exactly those words", async () => {
+  await watchHostReady;
+  const ctx = { profile: structuredClone(PROFILE) };
+  const ok = (q: string, c: Record<string, unknown> | null = ctx) => watchVerified(q, { hasProfile: !!c, probe: routerWatchProbe(c ?? {}) });
+  for (const q of ["registered nurse day shift", "nurse", "data entry or records clerk", "barista"]) assert(ok(q), `verified: ${q}`);
+  for (const q of ["jobs near me", "data analyst $80k", "entry-level marketing coordinator, New York", "remote software engineer jobs", "software engineer intern summer 2027",
+    "stop", "cancel my applications", "delete my account", "apply to everything", "send my resume", "unsubscribe alerts", "part-time warehouse jobs in Dallas",
+    "night shift CNA Columbus OH", "registered nurse day shift Columbus", "Google", "jobs", "IT", "help desk OR IT support"]) assert(!ok(q), `refused: ${q}`);
+  assert(!ok("registered nurse day shift", null), "no profile: no line");
+});
+
+Deno.test("S3 r12 / H035: an empty search whose kept reply asks and offers nothing ends with code's verified watch line", async () => {
+  const r = await turn("registered nurse day shift", "The search for registered nurse day shift returned 0 postings [E2]. Nothing has been sent or applied to.");
+  const line = emptySearchNextStep("registered nurse day shift")!;
+  eq(line, 'Say "watch for registered nurse day shift roles" and I\'ll save a watch for them on your list.');
   assert(String(r.reply).endsWith(line), r.reply);
   eq(String(r.reply).split(line).length, 2, "once");
+  // (a watch code would not save as asked: no line)
+  for (const [q, stores] of [["registered nurse day shift Columbus", { profile: structuredClone(PROFILE) }], ["registered nurse day shift", {}], ["stop", { profile: structuredClone(PROFILE) }]] as const) {
+    const n = await turn(q, `The search for ${q} returned 0 postings [E2]. Nothing has been sent or applied to.`, H035, structuredClone(stores) as any);
+    assert(!/save a watch/.test(String(n.reply)), `${q}: ${n.reply}`);
+  }
 });
 
 Deno.test("S3 r12 / H035: no line when the brain's own question or offer stood, or when the search found postings", async () => {
-  const asked = await turn("registered nurse day shift Columbus", "The search for registered nurse day shift Columbus returned 0 postings [E2]. Which of those sounds closest to what you want?");
+  const asked = await turn("registered nurse day shift", "The search for registered nurse day shift returned 0 postings [E2]. Which kind of nursing role should I search next?");
   assert(!/save a watch/.test(asked.reply), asked.reply);
-  eq(nextStepLine("Nothing matched. I can look at named hospitals if you name them.", "nurse", false), null, "an offer");
-  eq(nextStepLine("Nothing matched.", "nurse", true), null, "a search found postings");
-  eq(nextStepLine("Nothing matched.", null, false), null, "no empty search");
-  assert(nextStepLine("Nothing matched.", "nurse", false), "otherwise, the line");
-});
-
-Deno.test("S3 r12 / H035: the line's command is code's watch, word for word", () => {
-  const host = CareerHost.createCareerHost({ CareerAccess, CareerOnboarding, CareerRouter, CareerDoorstep, CareerReply, CareerContainment });
-  for (const q of ["registered nurse day shift Columbus", "entry level help desk support", "nurse \"days\" Columbus, OH"]) {
-    const cmd = watchCommand(watchWords(q)!);
-    assert(emptySearchNextStep(q)!.includes(`"${cmd}"`), cmd);
-    const ctx: any = host.createTurnCtx({ userId: "u1", threadId: "t1", now: NOW, snapshot: null });
-    const d = stagedDecision({ env: { get: (k: string) => k === "CAREER_BRAIN" ? "staged" : undefined }, message: cmd, ctx, host, structured: false });
-    eq([d.brain, d.intent], [false, "career_watch_create"], cmd);
-    const r = host.runTurn(cmd, ctx);
-    eq(r.intent, "career_watch_create", cmd);
-    assert(/^Watch set: /.test(String(r.reply)), r.reply);
-  }
+  const yesQ = () => true;
+  eq(nextStepLine("Nothing matched. I can look at named hospitals if you name them.", "nurse", false, yesQ), null, "an offer");
+  eq(nextStepLine("Nothing matched.", "nurse", true, yesQ), null, "a search found postings");
+  eq(nextStepLine("Nothing matched.", null, false, yesQ), null, "no empty search");
+  eq(nextStepLine("Nothing matched.", "nurse", false, () => false), null, "not verified");
+  assert(nextStepLine("Nothing matched.", "nurse", false, yesQ), "otherwise, the line");
 });

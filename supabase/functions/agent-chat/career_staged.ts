@@ -16,6 +16,8 @@
 // it does today, so what the router saves is exactly what it saved before.
 
 import { releaseFlagOn, servedBrain } from "./release_config.ts";
+import * as RCW from "../_shared/router_core.career.js"; // S3 r12: code's watch, run dry (routerWatchProbe)
+import { CareerHost as CareerHostForWatch } from "../_shared/career_host.js";
 import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
@@ -924,23 +926,23 @@ export function emailReplyAsk(env: Env, message: string, intent: string | null):
 
 // Review of ac1e068aa: code's watch, run dry on a copy of the person's turn state (probeCtx), for next_step.ts watchVerified: what the
 // staged route does with the exact phrase, and what the router replies. Nothing is saved: the copy is thrown away.
+// (PR #870 CI: no dynamic import here; the .cjs suites load the handler in a vm realm with no dynamic-import callback. Static imports,
+// and the host is made on first use.)
 let watchHost: Host | null = null;
-async function loadWatchHost(): Promise<Host> {
-  if (watchHost) return watchHost;
-  const RC = await import("../_shared/router_core.career.js");
-  const { CareerHost } = await import("../_shared/career_host.js");
-  watchHost = CareerHost.createCareerHost({ CareerAccess: RC.CareerAccess, CareerOnboarding: RC.CareerOnboarding, CareerRouter: RC.CareerRouter, CareerDoorstep: RC.CareerDoorstep, CareerReply: RC.CareerReply, CareerContainment: RC.CareerContainment }) as unknown as Host;
+function watchHostOf(): Host {
+  watchHost ??= CareerHostForWatch.createCareerHost({ CareerAccess: RCW.CareerAccess, CareerOnboarding: RCW.CareerOnboarding, CareerRouter: RCW.CareerRouter, CareerDoorstep: RCW.CareerDoorstep, CareerReply: RCW.CareerReply, CareerContainment: RCW.CareerContainment }) as unknown as Host;
   return watchHost;
 }
-export const watchHostReady = loadWatchHost();
+// (kept for callers that awaited the old async load; resolves at once)
+export const watchHostReady: Promise<void> = Promise.resolve();
 export function routerWatchProbe(ctx: Record<string, unknown> | null | undefined) {
   return {
     staged: (cmd: string) => {
-      if (!watchHost || !ctx) return { brain: true, intent: null };
-      const d = stagedDecision({ env: { get: (k: string) => (globalThis as any).Deno?.env?.get?.(k) }, message: cmd, ctx: probeCtx(ctx), host: watchHost, structured: false });
+      if (!ctx) return { brain: true, intent: null };
+      const d = stagedDecision({ env: { get: (k: string) => (globalThis as any).Deno?.env?.get?.(k) }, message: cmd, ctx: probeCtx(ctx), host: watchHostOf(), structured: false });
       return { brain: d.brain, intent: d.intent };
     },
-    run: (cmd: string) => { if (!watchHost || !ctx) return { intent: null, reply: null }; try { const r: any = watchHost.runTurn(cmd, probeCtx(ctx) as any); return { intent: r?.intent ?? null, reply: r?.reply ?? null }; } catch { return { intent: null, reply: null }; } },
+    run: (cmd: string) => { if (!ctx) return { intent: null, reply: null }; try { const r: any = watchHostOf().runTurn(cmd, probeCtx(ctx) as any); return { intent: r?.intent ?? null, reply: r?.reply ?? null }; } catch { return { intent: null, reply: null }; } },
   };
 }
 // The person has a profile on file (a fact or a basic of their own), as the watch needs.

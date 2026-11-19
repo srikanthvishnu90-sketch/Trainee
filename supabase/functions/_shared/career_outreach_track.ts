@@ -90,6 +90,8 @@ export function trackAsk(message: string): TrackAsk | null {
   return null;
 }
 const LINKEDIN = /\blinked ?in\b|\beasy ?apply\b|\bin-?mails?\b/;
+const LI_DRAFT = /\b(?:draft|write|word|compose|help me (?:write|word)|what (?:should|do) i (?:say|write))\b[^.?!]{0,30}\blinked ?in (?:msg|message|note|dm|connection (?:note|request)|request)s?\b/;
+const LI_HANDED_ACT = /\b(?:send|sending|post|connect (?:me|with)|dm (?:him|her|them)|message (?:him|her|them)|for me on|on my behalf|reach out (?:to|for))\b/;
 // Any ACTION on LinkedIn: messaging, connecting, endorsing, posting, commenting, following, applying (Easy Apply), and
 // any ask routed "via / on / through LinkedIn". Their own export stays theirs (LI_OWN).
 const LI_ACT = /\b(?:message|msg|dm|inmail|in-mail|connect|link (?:my|your|to)|hook up|add (?:her|him|them|everyone|people|[a-z]+) on|invite|send (?:an? |the |my |some )?(?:connection(?: request)?s?|invites?|invitations?|messages?|notes?|dms?|inmails?|requests?)|connection requests?|reach out|ping|scrape|crawl|automate|auto-?(?:connect|message|apply|send)|pull (?:people|profiles|contacts|emails)|find (?:people|profiles|recruiters|alumni|emails?)|search|look up|log ?in|sign ?in|endorse|endorsements?|recommend (?:me|her|him|them)|write (?:me |her |him )?(?:a )?recommendation|post|publish|share|comment|like (?:her|his|their|the|a|my) post|follow(?! ?-?up)|apply|easy ?apply|submit)\b|\b(?:via|through|thru|over|using) linked ?in\b|\beasy ?apply\b/;
@@ -148,6 +150,10 @@ export function siteAsk(message: string): Site | null {
   }
   // Advice the person asked for themselves, never an act handed to Trainee.
   if (ADVICE.test(t) && !HANDED.test(t)) return null;
+  // Word-vomit benchmark (2026-11-18, WV27): words for the person to paste and send themselves ("can u draft a linkedin msg",
+  // "help me word a linkedin note to him") are a draft, not an act on LinkedIn; nothing here signs in, sends or connects.
+  // Handing the act over ("send it on linkedin", "message him for me", "connect me") is still refused.
+  if (LI_DRAFT.test(t) && !LI_HANDED_ACT.test(t)) return null;
   // An apply ask beside the employer's own posting link applies there ("apply to the analyst job at Indeed <careers link>").
   if (employer && !/\b(?:message|msg|dm|inmail|connect|reach out|ping|invite|endorse|post|scrape|crawl|search|log ?in|sign ?in)\b/.test(t)) return null;
   // In words, only their export is theirs ("here are my linkedin connections, who should I email?"); "here's my linkedin,

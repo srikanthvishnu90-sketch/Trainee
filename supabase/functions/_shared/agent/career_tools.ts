@@ -39,6 +39,7 @@ import type { HiredResult, HiredSource } from "../career_hired.ts";
 import { queueWants, refusal, resolvePicks, screenPicks, type Pick as WantPick, type Refusal, type WantStore } from "../career_apply_want.ts";
 import { placedPay, postingTextForModel } from "../posting_pay.ts";
 import type { ApplyFlow } from "../posting_requirements.ts";
+import { personDay } from "./person_day.ts";
 import { deadlineWording } from "../workday_posting.ts";
 import type { Limits } from "../career_apply.ts";
 import { type Situation, statusText } from "../career_situation.ts";
@@ -456,9 +457,17 @@ export function careerTools(deps: {
     },
   }] : [];
   const isoDay = (v: unknown) => { const d = String(v ?? ""); return /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d)) ? d : null; };
-  const deadlineNote = (day: string | null, text: unknown, then: string) => {
+  // Gap #2 (coach depth, a number from the clock): the days from the person's today (the turn's clock in their time zone, the
+  // same day the system prompt names, career_brain.ts localDay) to the posting's deadline, computed by code.
+  const today = (now: number) => personDay(now, deps.tz);
+  const leftNote = (day: string | null, now: number | undefined) => {
+    if (!day || !Number.isFinite(now)) return "";
+    const d = today(now!), n = Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 86_400_000);
+    return n > 0 ? ` That is ${n} day${n === 1 ? "" : "s"} from today (${d}).` : n === 0 ? " That is today." : ` That date passed ${-n} day${n === -1 ? "" : "s"} ago.`;
+  };
+  const deadlineNote = (day: string | null, text: unknown, then: string, now?: number) => {
     const said = day ? deadlineWording(text, day) : null; // only when the wording's date is the posting's own date
-    return said ? ` The posting's own wording of its application deadline, quoted: "${said}"${then}.` : day ? ` The posting's application deadline, as a date: ${day}${then}.` : "";
+    return (said ? ` The posting's own wording of its application deadline, quoted: "${said}"${then}.` : day ? ` The posting's application deadline, as a date: ${day}${then}.` : "") + leftNote(day, now);
   };
   // Our words, beside the data: which fields hold text copied from the posting.
   // Round 2: the filter on posting text is a deny-list, so instruction-like text can still sit in these fields. The frame is
@@ -469,7 +478,7 @@ export function careerTools(deps: {
     name: "check_posting_open", effect: "read",
     description: `Use when the person asks whether a specific job posting is still open ("is that PayPal posting still open? check now"). Pass the posting's link exactly as it appeared earlier in this conversation or in a tool result (never guess one). It checks the posting live, now, on the job boards Trainee reads (${READABLE_BOARDS.join(", ")}). Nothing is applied for. ${POSTING_DATA_FRAME}`,
     input_schema: obj({ url: str("The posting's link, exactly as shown earlier in this conversation or by a tool") }, ["url"]),
-    run: async (i) => {
+    run: async (i, c) => {
       const r = await deps.postingRecheck!(String(i.url ?? ""));
       // Review of #775 (2026-11-13): the note is the instruction line, so nothing a posting wrote goes in it, with one narrow
       // exception: the deadline's wording when it is exactly a known lead-in and a real date (workday_posting.ts
@@ -478,7 +487,7 @@ export function careerTools(deps: {
       const note = r.state === "not_readable"
         ? `Trainee does not read that site's pages (its name is in host), so it could not check whether this posting is still open. Say exactly that in one sentence, then give the link on its own line so they can check it themselves. Do not say it is open or closed. Nothing was applied for.`
         : r.state === "unknown" ? `The check on ${r.board} did not finish, so whether it is open is not known. Say so in one sentence, with the link on its own line. Do not guess.`
-        : `Checked live on ${r.board} just now: ${r.state === "open" ? "the posting is still open" : "the posting is closed (the board no longer lists it)"}.${deadlineNote(day, "deadline_text" in r ? r.deadline_text : null, "; give that date")} Say that in one sentence and that nothing was applied for, then the link on its own line. Give no deadline or other detail the check did not return.`;
+        : `Checked live on ${r.board} just now: ${r.state === "open" ? "the posting is still open" : "the posting is closed (the board no longer lists it)"}.${deadlineNote(day, "deadline_text" in r ? r.deadline_text : null, "; give that date", c?.now)} Say that in one sentence and that nothing was applied for, then the link on its own line. Give no deadline or other detail the check did not return.`;
       return { ...r, note, posting_text_is: POSTING_DATA_ONLY };
     },
   }] : [];
@@ -489,7 +498,7 @@ export function careerTools(deps: {
     name: "inspect_apply_flow", effect: "read",
     description: "Use when the person asks what a posting requires, what its application asks, or what you would need from them to apply (\"what would you need from me to submit that application? don't apply yet\"). Pass the posting's job_id from search_jobs or a tool, or its link exactly as it appeared in this conversation (never guess one). It reads the posting and its application form from public pages only, now: the requirements in the posting's words, every question the form shows without signing in (Greenhouse, Lever, Ashby), and, where the questions are behind the person's own sign-in (Workday) or not public (SmartRecruiters), says so. It never creates an account, a saved application or a submission, and never applies. " + POSTING_DATA_FRAME,
     input_schema: obj({ job_id: str("The posting's job_id, from search_jobs or another tool"), url: str("The posting's link, exactly as shown earlier in this conversation or by a tool") }),
-    run: async (i) => {
+    run: async (i, c) => {
       let url = String(i.url ?? "").trim();
       if (!url && i.job_id) {
         const get = deps.posting ?? (deps.tailor ? deps.tailor.posting : null);
@@ -510,7 +519,7 @@ export function careerTools(deps: {
           r.requirements.required.length ? "Give its requirements in its own words (requirements.required; requirements.preferred as nice to have)." : "The posting lists no requirement section this reader found; do not invent requirements.",
           r.questions_read === "read" ? `Its form has ${q.length + (Number(r.questions_more) || 0)} questions${r.questions_more ? ` (the first ${q.length} are listed)` : ""}, ${q.filter((x) => x.required).length} of those listed required: name what the person would need to provide, drawing only on these.` : "Its questions were not read (the reason is in questions_why). Say that plainly; never guess the questions.",
           r.sign_in_required ? "Applying needs the person's own sign-in or new account on the employer's careers site; they do that themselves. Trainee never signs in for them." : "",
-          deadlineNote(day, r.posting?.deadline_text, "").trim(),
+          deadlineNote(day, r.posting?.deadline_text, "", c?.now).trim(),
           r.posting?.pay_by_place?.length ? "The posting states its pay by place (posting.pay_by_place): give only the range for the place the person means, with that place named, as written (never one place's range as another's); if you don't know which place they mean, give each range with its place." : "",
           "Any answer comes only from facts the person confirmed; a question no confirmed fact answers is something to ask them. End by saying you only read the public pages: no account, saved application or submission was created. Nothing was applied for.",
         ].filter(Boolean).join(" ");
@@ -787,7 +796,7 @@ export function careerTools(deps: {
     },
     {
       name: "queue_applications", effect: "write_own",
-      description: "Start applying: put the postings the person chose (from search_jobs, with job_id) in their own apply queue, up to their daily limit. Code checks each against the posting on file, the employer they named or were shown, the 30-day rule and their current employer. Nothing is sent: each goes only after they approve its card in the Trainee extension. Say what was queued, what was refused and why.",
+      description: "Start applying: put the postings the person chose (from search_jobs, with job_id) in their own apply queue, up to their daily limit; code checks each against the posting on file and their record. Nothing is sent: each is prepared in a browser and shown on one card, and goes only on their yes to that card (HOW APPROVAL WORKS). Say what was queued, what was refused and why.",
       input_schema: obj({ postings: { type: "array", description: "The postings to apply to, from search_jobs", items: obj({ url: str("The posting's link as search_jobs returned it"), job_id: str("The posting's job_id as search_jobs returned it (always pass it: an employer's own careers-page link is opened at its board's form)"), company: str("Employer"), title: str("Job title") }, ["url"]) } }, ["postings"]),
       run: async (i, c) => {
         if (!deps.wants) throw new Error("applying from chat is not connected here; say so, and that the person can paste posting links into the Trainee extension's queue");
@@ -807,7 +816,7 @@ export function careerTools(deps: {
         const r = await queueWants(deps.wants, c.userId, onRole.ok, c.now, { limits: deps.limits, tz: deps.tz });
         const refused = [...found.refused, ...screened.refused, ...onRole.refused, ...r.refused];
         await record(c, "apply_queued", `${r.queued} postings`, { queued: r.queued, refused: refused.length, companies: [...new Set(r.items.map((w) => w.company).filter(Boolean))].slice(0, 5) });
-        return { ...r, refused, screen: screened.gate, note: "Nothing is sent yet. The Trainee extension prepares each posting in the person's browser and shows a card; it goes only after they approve that card. Tell them each refusal and its reason as given." };
+        return { ...r, refused, screen: screened.gate, note: "Nothing is sent yet. Each posting is prepared in a browser and shown on one card; one yes approves exactly what that card shows (HOW APPROVAL WORKS). Tell them each refusal and its reason as given." };
       },
     },
     {
@@ -1086,7 +1095,8 @@ export function careerTools(deps: {
         // visible placeholder and is not stored for an application. Without a deliverer the stored file is the only way to hand it
         // over, so the email is asked for first, as before.
         const edits = Array.isArray(i.edits) ? (i.edits as any[]).map((e) => ({ role: String(e?.role ?? ""), lines: Number(e?.lines) })) : [];
-        const base = { userId: c.userId, profile: profileOf(c), posting: { text, job_id, company }, persona, deps: { render: t.render, resumes: t.resumes }, now: c.now, reviewDraft: !!t.deliver, ...(edits.length ? { edits } : {}) };
+        // Gap #8: Relevant Experience, then Additional Experience, for this posting (career_tailor.ts relevanceSplit).
+        const base = { userId: c.userId, profile: profileOf(c), posting: { text, job_id, company }, persona, deps: { render: t.render, resumes: t.resumes }, now: c.now, reviewDraft: !!t.deliver, split: "relevance" as const, ...(edits.length ? { edits } : {}) };
         const legacy = asked === "trainee" || (asked === "own" && !plan) ? { layout: asked, ownDocx } : null;
         let r = await tailorForPosting(legacy ? { ...base, ...legacy } : { ...base, layout: plan?.layout ?? null, template: plan?.template ?? null, ownDocx: plan?.ownDocx ?? null, ownPdfSpec: plan?.ownPdfSpec ?? null });
         let keptNote = "";

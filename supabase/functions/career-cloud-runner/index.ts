@@ -5,6 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { createRunnerHandler } from "../_shared/cloud_runner_http.ts";
 import { supabaseBatchFile, supabaseReviewLinks } from "../_shared/application_review_links.ts";
+import { withRoles } from "../_shared/career_apply_cards.ts";
 
 // A preparation started by the chat's kick keeps running after the 202 (the edge runtime's waitUntil); the minute's tick
 // picks up any request it did not start.
@@ -16,4 +17,7 @@ const admin = url && key ? createClient(url, key, { auth: { persistSession: fals
 const review = admin ? supabaseReviewLinks(admin, Deno.env) : undefined;
 // D-094: a batch too big for one card text is ONE card, a short summary plus the File of every application with its exact payload.
 const batchFile = admin ? supabaseBatchFile(admin, Deno.env) : undefined;
-Deno.serve(createRunnerHandler({ batchFile, env: Deno.env, waitUntil: (p) => edge?.waitUntil ? edge.waitUntil(p) : void p, review }));
+// Each application's role and its posting's own terms (where, pay and deadline as posted) on the pushed card.
+// deno-lint-ignore no-explicit-any
+const describe = admin ? (user: string, rows: any[]) => withRoles(admin, user, rows) : undefined;
+Deno.serve(createRunnerHandler({ batchFile, describe, env: Deno.env, waitUntil: (p) => edge?.waitUntil ? edge.waitUntil(p) : void p, review }));

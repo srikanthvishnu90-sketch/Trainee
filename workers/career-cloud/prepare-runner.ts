@@ -84,7 +84,13 @@ export async function runPrepareRequest(o: {
       db: o.bridge.db, runEngine: o.runEngine, limiter: new PacedLimiter({ concurrency: parallel, hostMax: parallel, hostSpacingMs: 0 }), profileFor: storedProfile(o.bridge.db), resumeFor: keptResume(o.bridge.call), resumeIsFile: true,
       ...(o.urlFor ? { urlFor: o.urlFor } : {}), ...(o.tmpRoot ? { tmpRoot: o.tmpRoot } : {}),
       ...(o.schema === false ? {} : { schemaFor: (url: string) => postingSchema(url, { fetch: o.schema?.fetch ?? fetch, cache: SCHEMAS, greenhouseApi: o.schema?.greenhouseApi }) }),
-    }, { only: { user_id: String(req.user_id), job_ids: (req.job_ids ?? []).map(String) }, perPerson: 25, limit: 500 });
+    }, (() => {
+      // D-092/D-094 (owner, 2026-11-16): every posting of a request is prepared in one pass (before: a page of 25, so a request
+      // of 122 tried 25); per-host pacing (PacedLimiter above) is unchanged. 25 and 500 stay the floor for a request that names
+      // few or no postings.
+      const job_ids = (req.job_ids ?? []).map(String);
+      return { only: { user_id: String(req.user_id), job_ids }, perPerson: Math.max(25, job_ids.length), limit: Math.max(500, job_ids.length) };
+    })());
   } catch (e) {
     log(`prepare: ${(e as Error)?.message ?? e}`);
   }

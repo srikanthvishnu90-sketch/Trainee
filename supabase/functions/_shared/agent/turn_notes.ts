@@ -75,7 +75,13 @@ export function roastNote(r: { question: string }): string {
 // Instinct's replies on the benchmark, by kind (characters of text, links apart): drafts 109 to 361 (178 for "way shorter"),
 // practice questions 241 and 262, grading an answer 312 to 412, recalls 130 and 135, advice 385 to 568, "everything you remember"
 // 1,240, research 410 to 1,141 in several messages with their links.
-export type ReplyKind = "draft" | "question" | "recall" | "everything" | "answer";
+export type ReplyKind = "draft" | "question" | "recall" | "everything" | "answer" | "ack";
+// S3 r12b (dev H002 on 8e80264f2: "ok thanks" after a search got a 520-character status recap, under the answer kind's bound):
+// a message that only acknowledges or thanks, and asks for nothing, is answered with one brief acknowledgement or one short
+// offer of a next step. Any question or ask in it makes it another kind.
+const ACK_WORD = String.raw`(?:ok(?:ay)?|k|kk|cool|great|perfect|awesome|nice|sweet|good|alright|all right|got it|gotcha|understood|noted|sounds good|sounds great|will do|fair enough|makes sense|amazing|lovely|wonderful|excellent|thanks?|thank you|thx|ty|tysm|cheers|appreciate it|much appreciated|that helps|that's helpful|helpful)`;
+const ACK = new RegExp(String.raw`^(?:${ACK_WORD}(?:\s+(?:so much|a lot|a ton|very much|you|again|man|then|for that|for this|for the help|for your help))*[\s,.!]*)+$`);
+export const ackOnly = (message: string): boolean => String(message ?? "").length <= 80 && ACK.test(lc(message).replace(/[’]/g, "'").replace(/[\p{Emoji_Presentation}]/gu, " ").trim());
 const DRAFT = /\b(?:draft|write|rewrite|redo|make|shorten|tighten)\b[^.?!]{0,60}\b(?:message|email|e-mail|note|dm|text|reply|letter|intro(?:duction)?|follow[- ]?up|thank[- ]you|ask|draft|it|that|one)\b|\b(?:cold|referral|outreach|follow[- ]?up|thank[- ]you)\s+(?:message|email|note|dm|draft)\b|\b(?:shorter|less formal|more casual)\b/;
 const SHORTER = /\b(?:shorter|way short|less formal|more casual|keep it (?:casual|short|brief)|brief(?:er)?|one[- ]liner)\b/;
 const QUESTION_ASK = /\b(?:quiz|drill)\s+me\b|\bask me\b[^.?!]{0,80}\b(?:question|about a time)\b|\b(?:mock|behavioral|technical|coding)\s+(?:round|question|interview)\b[^.?!]{0,40}\bask\b/;
@@ -88,6 +94,7 @@ export function replyKind(message: string, history?: Msg[]): ReplyKind {
   const t = lc(message);
   if (history && (practiceAnswerOf(message, history) || roastOf(message, history))) return "answer";
   if (history && practiceNextOf(message, history)) return "question";
+  if (ackOnly(t)) return "ack";
   if (EVERYTHING.test(t)) return "everything";
   if (QUESTION_ASK.test(t) || practiceAskOf(t)) return "question"; // D-070: a practice question said any way
   if (DRAFT.test(t)) return "draft";
@@ -102,6 +109,7 @@ export const REPLY_LENGTH: Record<ReplyKind, { max: number; upper: number; aim: 
   recall: { max: 280, upper: 200, aim: "one or two sentences, about 100 to 200 characters: the answer and where it came from, with its link alone on the next line if there is one" },
   everything: { max: 1400, upper: 1200, aim: "about 900 to 1,200 characters; for research, the answer first and then each source link alone on its own line" },
   answer: { max: 600, upper: 500, aim: "one short paragraph of plain sentences, about 300 to 500 characters" },
+  ack: { max: 260, upper: 180, aim: "one brief acknowledgement, or one short offer of a next step, about 30 to 180 characters" },
 };
 export function replyLength(message: string, history?: Msg[]): { kind: ReplyKind; max: number; upper: number; aim: string } {
   const kind = replyKind(message, history);
@@ -118,6 +126,9 @@ export const overLimit = (l: { upper: number }): number => Math.round(l.upper * 
 const DETAIL = /\b(?:detailed|in detail|in depth|in-depth|whole plan|full plan|step[- ]by[- ]step|long version)\b/;
 export const asksForDetail = (message: string): boolean => DETAIL.test(lc(message));
 export function lengthNote(l: { kind: ReplyKind; aim: string }): string {
+  // S3 r12b: an acknowledgement adds nothing to say back: no recap of what was searched, saved, sent or checked (code's own
+  // not-run and boundary lines are code's, added after the reply when a turn needs them).
+  if (l.kind === "ack") return `LENGTH OF THIS REPLY (a text message): ${l.aim}. They are only acknowledging: do not recap what was searched, saved, sent, applied for or checked, and make at most one short offer.`;
   return `LENGTH OF THIS REPLY (a text message): ${l.aim}. Keep every fact, caveat and statement of what was not sent, submitted or verified; cut repetition, lists and advice they did not ask for.`;
 }
 

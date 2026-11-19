@@ -345,6 +345,9 @@ export const TODO_CLAUSE = /\bi\s+(?:really\s+)?(?:(?:need|have|got|want|should|
 // G1/D-007 (C1): a question or request that states nothing about the person (or only a task for now, "I need to lock in") gives a
 // record write nothing to draw on, so add_profile_fact is not offered on that turn at all (D-065 refused it; now it is not tried).
 export function statesNothing(message: string): boolean {
+  // S3 r12b (dev H002 on 8e80264f2, both failing turns): "ok thanks" was answered by two refused add_profile_fact calls (the
+  // facts were not in what they said), whose not-run lines made the reply a status recap. A bare acknowledgement states nothing.
+  if (ackOnly(message)) return true;
   const s = statementsOf(message);
   if (!s.asking) return false;
   return s.stated.split(/\.\s+/).map((c) => c.trim()).filter(Boolean).every((c) => TODO_CLAUSE.test(c.toLowerCase()));

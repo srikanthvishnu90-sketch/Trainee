@@ -11,7 +11,7 @@ import assertNode from "node:assert/strict";
 import { searchTextOf } from "../../supabase/functions/_shared/posting_constraints.ts";
 import * as core from "../../supabase/functions/_shared/router_core.career.js";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
-import { lengthNote, replyKind, replyLength } from "../../supabase/functions/_shared/agent/turn_notes.ts";
+import { lengthNote, replyKind, replyLength, statesNothing } from "../../supabase/functions/_shared/agent/turn_notes.ts";
 import { confirmClaimsDropped } from "../../supabase/functions/_shared/agent/reply_guards.ts";
 import { confirmationOpen } from "../../supabase/functions/agent-chat/career_brain.ts";
 
@@ -86,6 +86,9 @@ Deno.test("r12b-4 an acknowledgement gets one brief acknowledgement or one short
     ok(l.upper <= 200, `${m}: ${l.upper}`);
     ok(/one short/.test(lengthNote(l)) && !/Keep every fact/.test(lengthNote(l)), `${m}: the note asks for brevity, not a recap`);
   }
+  // It states nothing, so no record write is offered on it (career_brain.ts withholds add_profile_fact; D67-7 pins the withholding).
+  for (const m of ["ok thanks", "thank you", "got it"]) ok(statesNothing(m), m);
+  ok(!statesNothing("thanks, I'm a junior at Lakeshore"), "a thanks that states a fact still offers the write");
   // A thanks that asks something, or asks for work, is not a bare acknowledgement.
   for (const m of ["thanks, what about remote roles?", "ok thanks, now find me data analyst jobs", "thanks for that, can you draft the email"]) ok(replyKind(m) !== "ack", m);
 });

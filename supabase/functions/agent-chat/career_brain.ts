@@ -1011,9 +1011,18 @@ const HELP_Q = /^\W*(?:want|should|shall|would\s+you|do\s+you|can\s+i|need|ready
 // What the person did, said by the model ("You went for the PM role at Notion."): a status sentence, even when it names a role.
 const YOU_DID = /\b(?:you|you've|you'd|u)\s+(?:\w+\s+)?(?:went|gone|did|done|sent|hit|tried|put|got|landed|made|pursued|chose)\b/i;
 const BULLET = /^\s*(?:[-*•]|\d+[.)])\s+/;
+// S3 r12c (dev H013, s3sub 2789d3090 p2: "stop, don't submit anything yet" -> list_applications -> only code's record line and a search
+// offer reached the person): the rule that nothing goes out without the person's yes is Trainee's own rule about what it will do,
+// not a statement of where their applications stand, so the strict hold keeps it. Only the rule itself: a sentence with a figure, an
+// outcome, something the person did, a name after "only/just", or a past-tense report ("nothing was submitted without your yes",
+// which is a status claim) is held as before.
+const CONSENT_RULE = /\b(?:without|until|after)\s+(?:you(?:r)?\s+)?(?:(?:explicit|clear|own)\s+)?(?:yes|approval|approve|say(?:-so)?|go-ahead|ok|okay|permission)\b/i;
+const CONSENT_FUTURE = /\b(?:will|won'?t|never|goes|go|gets?|only|can|can't|cannot|nothing\s+(?:is|gets?)\s+(?:sent|submitted))\b/i;
+const CONSENT_PAST = /\b(?:was|were|has\s+been|have\s+been|had\s+been|went|got\s+(?:sent|submitted))\b/i;
+export const consentRule = (t: string) => CONSENT_RULE.test(t) && CONSENT_FUTURE.test(t) && !CONSENT_PAST.test(t) && !/\d/.test(t) && !OUTCOME.test(t) && !YOU_DID.test(t) && !IDIOM_NAMED.test(t);
 function keptSentences(reply: string, strict: boolean, own: string): string {
   const stays = (x: string) => { const t = tidy(x).replace(/\*+/g, "").replace(BULLET, "");
-    return strict ? !HELD_STATUS.test(t) && !IDIOM.test(t) && !IDIOM_NAMED.test(t) && !OUTCOME.test(t) && !/^\W*(?:yes|yep|yeah|no|nope|nah|not\s+yet)\b/i.test(t) && !YOU_DID.test(t) && (LISTING.test(t) || ACTION.test(t) || ADVICE.test(t) || HELP_Q.test(t)) : !statusLike(t); };
+    return strict ? consentRule(t) || !HELD_STATUS.test(t) && !IDIOM.test(t) && !IDIOM_NAMED.test(t) && !OUTCOME.test(t) && !/^\W*(?:yes|yep|yeah|no|nope|nah|not\s+yet)\b/i.test(t) && !YOU_DID.test(t) && (LISTING.test(t) || ACTION.test(t) || ADVICE.test(t) || HELP_Q.test(t)) : !statusLike(t); };
   const out: string[] = [];
   let dropped = false, headGone = false, anyBullet = false;
   for (const line of String(reply ?? "").split(own).join("").split("\n")) {
@@ -1023,7 +1032,8 @@ function keptSentences(reply: string, strict: boolean, own: string): string {
     if (!bullet) headGone = false;
     const kept: string[] = [];
     for (const x of parts) {
-      const ok: boolean = stays(x) && !(dropped && /^\W*(?:that|this|it|those|these|which|so)\b|\b(?:it|them)\b/i.test(x));
+      // (the consent rule stands on its own: "the card that shows it" hangs on no dropped sentence)
+      const ok: boolean = stays(x) && !(dropped && !consentRule(tidy(x).replace(/\*+/g, "")) && /^\W*(?:that|this|it|those|these|which|so)\b|\b(?:it|them)\b/i.test(x));
       if (ok) kept.push(x); else if (/:\s*$/.test(x)) headGone = true;
       dropped = !ok;
     }

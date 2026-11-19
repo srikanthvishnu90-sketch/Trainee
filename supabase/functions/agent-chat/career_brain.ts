@@ -318,9 +318,9 @@ export async function agentTurn(o: {
     const l0 = replyLength(o.message, o.history);
     const repair = async (x: { system: string; user: string }) => { const res = await o.model({ system: x.system, messages: [{ role: "user", content: [{ type: "text", text: x.user }] }], tools: [], max_tokens: 500, tool_choice: { type: "none" } } as any); return ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim(); };
     const names = [...new Set((o.history ?? []).filter((m: any) => typeof m?.content === "string").flatMap((m: any) => (m.content as string).match(/(?<![\p{L}])\p{Lu}[\p{L}&'-]{2,}/gu) ?? []))];
-    // S3 r12c (dev H022, s3sub 2789d3090 p2): "which of my skills match a data analyst role?" after "I know SQL, Excel and Tableau and
-    // did 2 years of reporting": the turn searched, so the pipeline ran, and what they had said was in no unit (the ledger holds only
-    // what they confirmed, D-007); every sentence mapping their skills to the role was dropped and only the suggestion unit stood. The
+    // S3 r12c (dev H022, s3sub 2789d3090 p2): a skills-fit question about a role, after the person had stated their skills the turn
+    // before: the turn searched, so the pipeline ran, and what they had said was in no unit (the ledger holds only what they
+    // confirmed, D-007); every sentence mapping their skills to the role was dropped and only the suggestion unit stood. The
     // person's own messages in this chat are read by the check (never put in the drafting ledger), so their words may be said back as
     // theirs; they back no claim about an employer or a posting.
     const said = hypo ? [] : [...(o.history ?? []).slice(-HISTORY_WINDOW).filter((m: any) => m?.role === "user").map((m: any) => String(m.content ?? "")), String(o.message ?? "")].filter((x) => x.trim());
@@ -1011,8 +1011,8 @@ const HELP_Q = /^\W*(?:want|should|shall|would\s+you|do\s+you|can\s+i|need|ready
 // What the person did, said by the model ("You went for the PM role at Notion."): a status sentence, even when it names a role.
 const YOU_DID = /\b(?:you|you've|you'd|u)\s+(?:\w+\s+)?(?:went|gone|did|done|sent|hit|tried|put|got|landed|made|pursued|chose)\b/i;
 const BULLET = /^\s*(?:[-*•]|\d+[.)])\s+/;
-// S3 r12c (dev H013, s3sub 2789d3090 p2: "stop, don't submit anything yet" -> list_applications -> only code's record line and a search
-// offer reached the person): the rule that nothing goes out without the person's yes is Trainee's own rule about what it will do,
+// S3 r12c (dev H013, s3sub 2789d3090 p2: a request to hold every submission -> list_applications -> only code's record line and a
+// search offer reached the person): the rule that nothing goes out without the person's yes is Trainee's own rule about what it will do,
 // not a statement of where their applications stand, so the strict hold keeps it. Only the rule itself: a sentence with a figure, an
 // outcome, something the person did, a name after "only/just", or a past-tense report ("nothing was submitted without your yes",
 // which is a status claim) is held as before.

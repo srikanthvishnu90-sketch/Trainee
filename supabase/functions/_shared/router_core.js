@@ -38651,7 +38651,7 @@ const CareerRouter = (() => {
   // Campaign-scale asks (counts, lists, many firms) never match this
   // gate and keep the plan-first path.
   // S3 r12c (dev H015): `said` is the person's own words. The routing copy (detypo) re-spells a company one edit from the route
-  // vocabulary ("Bluepeak Networks" -> "Bluepeak Network", the CB-0441 class), so the company a draft names is read from what they
+  // vocabulary (a company ending "Networks" became "... Network", the CB-0441 class), so the company a draft names is read from what they
   // wrote whenever it names one there.
   function saidCompany(text, said) {
     const own = said ? companyFromText(s(said)) : null;
@@ -38728,8 +38728,8 @@ const CareerRouter = (() => {
         if (gs && Array.isArray(gs.people) && gs.people.some((p) => p && lc(p.current_firm || p.company || "") === lc(company))) return null;
       } catch { /* no graph: the stop stands */ }
     }
-    // S3 r12c (dev H015, s3sub 2789d3090 p1: "introduce me to an alum working at Bluepeak Networks" got the alternative "draft a
-    // coffee-chat email to a role at a named company", though they had named one): when the ask names the company, the alternative
+    // S3 r12c (dev H015, s3sub 2789d3090 p1: an introduction ask that named the company got the alternative "draft a coffee-chat
+    // email to a role at a named company", though they had named one): when the ask names the company, the alternative
     // is the draft route for THAT company, and the command it quotes is one the single-draft route really answers (a role it reads,
     // the company as they wrote it). Sending stays off, so the draft is one they send themselves.
     const roleM = /\b(alum(?:nus|na|ni)?|analyst|banker|associate|recruiter|manager|engineer|consultant|intern|partner|director)\b/.exec(t);

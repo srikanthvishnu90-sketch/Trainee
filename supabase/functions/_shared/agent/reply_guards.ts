@@ -633,7 +633,7 @@ export function confirmClaimsDropped(reply: string): string {
     const about = RECORD_TALK.test(x) || (/^\W*(?:it|that|this)\b/i.test(x) && i > 0 && RECORD_TALK.test(all[i - 1]));
     if (!CONFIRM_CLAIM.test(x) || !about || APPROVAL_TALK.test(x)) return x;
     const end = /[.!?]["')\]]*\s*$/.exec(x)?.[0]?.trim() ?? "";
-    const left = x.replace(CONFIRM_CLAIM, "").replace(/[\s,;:—–-]+$/, "").replace(/[.!?]["')\]]*$/, "").trim();
+    const left = x.replace(CONFIRM_CLAIM, "").replace(/[.!?]["')\]]*\s*$/, "").replace(/[\s,;:—–(-]+$/, "").trim();
     // Only the claim was the sentence ("It's still waiting for your yes."): it goes whole.
     if (left.split(/\s+/).filter((w) => /\p{L}/u.test(w)).length < 3) return "";
     return `${left}${/[?!]/.test(end) ? end : "."}`;

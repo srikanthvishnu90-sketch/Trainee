@@ -100,6 +100,8 @@ Deno.test("r12b-5 a stated fact is never said to wait for a yes unless a confirm
   ok(out1.includes("It's on your record as your goal.") && out1.includes("Is that right?") && out1.includes("nothing in an office"), out1);
   eq(confirmClaimsDropped("Your goal is saved. It still needs your confirmation."), "Your goal is saved.");
   eq(confirmClaimsDropped("Your school is on file but still awaiting your confirmation before I use it."), "Your school is on file.");
+  eq(confirmClaimsDropped("It's on your record as your goal, still waiting for your yes. Nothing has been sent."), "It's on your record as your goal. Nothing has been sent.");
+  eq(confirmClaimsDropped("It's saved as your goal (waiting for your yes)."), "It's saved as your goal.");
   // Applications and cards waiting for a yes are real, and are left alone.
   const apps = "4 sent today. 2 applications are waiting for your yes: text \"show my applications\".";
   eq(confirmClaimsDropped(apps), apps);

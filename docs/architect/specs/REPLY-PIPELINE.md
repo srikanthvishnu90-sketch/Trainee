@@ -114,7 +114,12 @@ The fix is for the drafting model to say which unit each sentence rests on, and 
 | requirements | list each thing needed |
 | draft | say after the draft that it was not sent |
 
-Each contract's `says` text goes to the drafting model up front. Its `missing` check feeds the repair pass.
+Review rv4 (architect ruling, 2026-11-17: one contract system): no contract is read from the person's message. The brain's task
+contracts are attached to the tool whose result the reply reports, in that tool's run note, and chosen by the result
+(`task_contracts.ts` `withContracts`, `contractFor`): none for a call refused before it ran, one that threw, or a result that says
+the work was not done. The pipeline's checks for a turn are `answer_first` plus each `missing` check of a contract a tool attached
+(`pipelineContracts`: `requirements` from `inspect_apply_flow`, `draft` from `draft_followup` and `draft_outreach`); the
+`referral` item is in the draft contract's note. `contractsFor` is no longer called by the product.
 
 ## Fixes on the untagged path (support check)
 

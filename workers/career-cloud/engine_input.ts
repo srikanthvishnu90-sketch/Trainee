@@ -97,13 +97,14 @@ export function restEngineInputSource(o: { url: string; key: string; fetch?: typ
   };
   return {
     async latestProfile(owner) {
-      // The same read the chat restores from (production-sources.cjs readStoredMaster): the freshest snapshot with a profile.
-      const rows = await get(`agent_flow_state?select=state,updated_at&user_id=eq.${encodeURIComponent(owner)}&order=updated_at.desc&limit=25`);
-      for (const row of rows) {
-        const profile = row?.state?.career?.stores?.profile;
-        if (object(profile) && (object(profile.basics) || Array.isArray(profile.facts))) return profile;
-      }
-      return null;
+      // MASS APPLY CONVERSATIONS (2026-11-16): the ONE trusted fact set preparation reads (career_apply_profile_for, with
+      // its confirmed-resume filter; 20261116120000), never the raw stored profile, so nothing is prepared on one set and
+      // sent on another.
+      const r = await f(`${o.url.replace(/\/$/, "")}/rest/v1/rpc/career_apply_profile_for`, { method: "POST", headers: { apikey: o.key, Authorization: `Bearer ${o.key}`, "Content-Type": "application/json" }, body: JSON.stringify({ p_user: owner }) });
+      const text = await r.text();
+      if (!r.ok) throw Error(`career_apply_profile_for: ${r.status} ${text.slice(0, 200)}`);
+      const profile = text ? JSON.parse(text) : null;
+      return object(profile) && (object(profile.basics) || Array.isArray(profile.facts)) ? profile : null;
     },
     answeredRows: (owner) =>
       get(`career_apply_questions?select=id,user_id,key,kind,answer,state&user_id=eq.${encodeURIComponent(owner)}&state=eq.answered&order=answered_at.asc`),

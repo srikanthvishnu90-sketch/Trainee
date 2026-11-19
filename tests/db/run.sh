@@ -1336,6 +1336,15 @@ echo "== career_outreach_adopt_skip_mail_reply.check.sql (an outreach thread is 
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261113150000_career_outreach_adopt_skip_mail_reply.sql"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_outreach_adopt_skip_mail_reply.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 echo "  ok   rollback restores the adopt function as it was; up again"
+# One trusted fact set (20261116120000): the bridge's source snapshot profile is career_apply_profile_for's. Applied twice
+# (idempotent), checked, rolled back (the bridge's own read), up again and checked again.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261116120000_career_apply_one_fact_set.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261116120000_career_apply_one_fact_set.sql"
+[[ "$("${PSQL[@]}" -tAc "select prosrc like '%career_apply_profile_for(p_user)%' from pg_proc where proname = 'career_apply_message_cloud_sources'")" == "t" ]] || { echo "FAIL career_apply_one_fact_set"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261116120000_career_apply_one_fact_set.down.sql"
+[[ "$("${PSQL[@]}" -tAc "select prosrc not like '%career_apply_profile_for%' from pg_proc where proname = 'career_apply_message_cloud_sources'")" == "t" ]] || { echo "FAIL career_apply_one_fact_set rollback"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261116120000_career_apply_one_fact_set.sql"
+echo "  ok   one fact set: the bridge's snapshot reads career_apply_profile_for; rollback restores the bridge's read; up again"
 # D-094 (20261116140000): a large batch is ONE card, a summary plus a File; the yes approves exactly the File's set, by
 # payload hash; a File changed after it was shown approves nothing. After every redefinition of the card answer above (the
 # R9-G2 rounds put 20261108100000's back): applied twice (idempotent), its test, the rollback, then up again and the test again.

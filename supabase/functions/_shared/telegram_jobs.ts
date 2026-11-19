@@ -689,6 +689,11 @@ export async function tapJob(o: { userId: string; data: string; messageId: strin
         if (await applied()) return duplicate();
         const m = /needs_answer: (.+)$/.exec(String((e as Error)?.message ?? e));
         if (m) { await say(`Nothing was approved: a required answer is still missing. ${m[1]}`); return { toast: "Needs your answer.", status: "needs_answer" }; }
+        // D-094: it is on a batch File that changed after it was shown: nothing goes, on any path.
+        if (/FILE_CHANGED/.test(String((e as Error)?.message ?? e))) {
+          await say(`The File listing your applications changed after it was shown, so nothing was approved. Say "show my applications" for the current list.`);
+          return { toast: "Changed. Nothing approved.", status: "file_changed" };
+        }
         if (/card_changed|invalid card/.test(String((e as Error)?.message ?? e))) {
           await say(`That application changed after I showed it, so nothing was approved. Tap Apply on the card again.`);
           return { toast: "Changed. Nothing approved.", status: "changed" };

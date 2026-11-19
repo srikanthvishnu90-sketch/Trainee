@@ -87,6 +87,8 @@ const LEAD = /^(?:(?:hey|hi|ok|okay|so|please|pls|trainee)[,!]? )*(?:(?:can|coul
 // saved as one reminder saying "call mom every".
 const REPEAT = new RegExp(String.raw`\b(?:every (?:single )?(?:day|night|morning|afternoon|evening|week|weekday|weekend|month|year|hour|other ${WEEKDAY}|other \w+|\d+ ${UNIT}|${NUM} ${UNIT}|${WEEKDAY})|each (?:day|night|morning|afternoon|evening|week|weekday|month|${WEEKDAY})|daily|nightly|weekly|monthly|(?:on )?(?:mon|tues|wednes|thurs|fri|satur|sun)days)\b`, "i");
 
+const MID_DAY = new RegExp(String.raw`^(.+?),? (?:by |before |on )?((?:today|tonight|tomorrow|tmrw|tmr|(?:this |next )?${WEEKDAY})(?: ${PART})?)((?:,? (?:and|also|plus) .+)|(?:, .+))$`, "i");
+const REMARK = /,\s*(?:i|i'm|im|cuz|cause|because|bc|lol|lmao|pls|please|thanks|ty)\b.*$/i;
 export function reminderAsk(message: string): ReminderAsk | null {
   const t = norm(message).replace(/[?!.]+$/, "").trim();
   if (!t || t.length > 600) return null;
@@ -120,6 +122,14 @@ export function reminderAsk(message: string): ReminderAsk | null {
   rest = rest.replace(/^(?:to|about|that|of) /i, "");
   const end = WHEN_END.exec(rest);
   if (end) return set(end[1], end[2]);
+  // Word-vomit benchmark (2026-11-18, WV31): the day said mid-sentence, with more of the ask or a remark after it: "remind me to
+  // apply to quarry lane by friday and also the copperline one, i keep forgetting". The day is the when; "and also ..." stays
+  // part of what to remind; a remark after a comma ("i keep forgetting", "lol") is not. Before, the whole message was asked back.
+  const mid = MID_DAY.exec(rest);
+  if (mid && !TIMELIKE.test(mid[1])) {
+    const more = (mid[3] ?? "").replace(REMARK, "").trim();
+    return set(`${mid[1]}${more ? ` ${more}` : ""}`, mid[2]);
+  }
   // A time that could not be read ("at 8ish to ...", "at 9.30am. to ..."): asked when, never left to the general reply.
   if (TIMELIKE.test(rest)) return { kind: "when", what: clean(untimed(rest)) };
   // "remind me about the Acme interview" with no time: a reminder, asked when; "remind me what ..." returned above.
@@ -128,7 +138,7 @@ export function reminderAsk(message: string): ReminderAsk | null {
 function set(what: string, when: string): ReminderAsk {
   const odd = TIMEISH.exec(what.trim());
   if (odd) return { kind: "when", what: clean(what.trim().slice(odd[0].length).replace(/^,? (?:to|about|that) /i, "")) };
-  return { kind: "set", what: clean(what.replace(/^(?:to|about|that|of) /i, "")), when: when.trim() };
+  return { kind: "set", what: clean(what.replace(/^(?:to|about|that|of) /i, "").replace(/,?\s+(?:by|before)$/i, "")), when: when.trim() };
 }
 // The text with a leading time phrase that could not be read taken off ("at 8ish to call Acme" -> "call Acme").
 const untimed = (s: string) => s.replace(/^(?:(?:at|around|by) )?\S*\d\S*(?: ?o'?clock)?,?:? (?:to |about |that )?/i, "").replace(/^(?:(?:at|around|by) )?(?:half past|quarter (?:past|after|to|til)) \S+,? (?:to |about |that )?/i, "");

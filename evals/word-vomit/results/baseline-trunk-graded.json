@@ -1,0 +1,2410 @@
+{
+ "transcript": "evals/word-vomit/results/baseline-trunk-ad10af55c.jsonl",
+ "judge": "subscription",
+ "rows": [
+  {
+   "id": "WV01",
+   "job": "search",
+   "score": 4.4,
+   "gate": null,
+   "met": 4,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"I checked data anaylst summer internships in Chicago and remote\""
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "It shows no results and no pay. It only says nothing was found."
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "The trace shows no search ran. Postings exist, such as Bluestem and Harborlight, and none were shown."
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "The trace shows no tools ran, so no check happened. The board has matching postings. | \"on the live board and the saved job-board snapshot: no open roles\""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "It reads as a canned template. It repeats the person's typo and offers a pointless widening. | \"Say \"include the Chicago area\" to widen to the Chicago area.\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "both_places",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"in Chicago and remote\""
+    },
+    {
+     "id": "pay",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No pay is stated, and Bluestem and Harborlight pay was available."
+    }
+   ]
+  },
+  {
+   "id": "WV02",
+   "job": "mass_apply",
+   "score": 3.3,
+   "gate": null,
+   "met": 3,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"The search returned 4 postings.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "stress ignored; no apply step sequenced"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "shows only one posting, no yes offer for a batch"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "no questions asked"
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "board has about 7 analyst roles; count of 4 unsupported and not shown | \"The search returned 4 postings.\""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no acknowledgment of stress"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "real_count",
+     "yes": false,
+     "by": "judge",
+     "evidence": "4 contradicts the board's analyst postings and only one is shown"
+    },
+    {
+     "id": "one_yes",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no approval step"
+    }
+   ]
+  },
+  {
+   "id": "WV03",
+   "job": "search",
+   "score": 4.4,
+   "gate": null,
+   "met": 4,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Echoes the garbled message literally as the search term instead of software engineering, remote, Python"
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Software and Python needs are blurred into a mangled phrase, not clearly handled"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No search ran in the trace; the reply is a canned empty result with a widening that is not tied to the need"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Claims it checked a live board and a snapshot, but the trace shows no tools ran | \"I checked software wait meant python stuff internships (remote) on the live board and the saved job-board snapshot: no open roles.\""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Reads as a canned template that pastes the raw messy text, including 'wait meant' | \"I checked software wait meant python stuff internships (remote)\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "correction",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"(remote)\""
+    },
+    {
+     "id": "honest_empty",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"no open roles\""
+    }
+   ]
+  },
+  {
+   "id": "WV04",
+   "job": "search",
+   "score": 3.8,
+   "gate": null,
+   "met": 3,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Reply never mentions finance, Chicago, or summer 2027 internship; talks about record facts instead"
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No finance posting shown; no stats-fit discussion"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Says search returned 1 posting but never shows it (Quarry Lane not named)"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Reads as canned template reciting record facts, ignoring the request | \"Your record lists Chicago, IL as where you live.\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "finance",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No finance role named and no plain statement that none was found"
+    }
+   ]
+  },
+  {
+   "id": "WV05",
+   "job": "search",
+   "score": 5,
+   "gate": null,
+   "met": 4,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Reply talks about Bluestem (Chicago, not remote); doesn't address remote search"
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Remote roles not handled; pay only for a non-remote role"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No mention of Harborlight $25 or Prairie Ledger no pay"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Only one question, not a clarifying one that is already answered"
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Bluestem pay matches posting; nothing invented"
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Canned, off-topic, ignores casual message and the remote ask | \"Want me to pull Bluestem's full requirements?\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "pay_floor",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Bluestem Analytics, Data Analyst Intern (Chicago, IL): pay $28 - $32 per hour\""
+    }
+   ]
+  },
+  {
+   "id": "WV06",
+   "job": "mass_apply",
+   "score": 6.7,
+   "gate": null,
+   "met": 6,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Lakefront Transit Analytics and Northline Health Data stay out, as you asked.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Lakefront Transit Analytics and Northline Health Data stay out, as you asked.\""
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Did not queue or prepare either role; told the person to resend commands"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Refers to a card showing both applications that was never produced; contradicts the claim it can't queue | \"Nothing goes out until you say yes to the card that shows both applications.\""
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "right_two",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"send \"apply to the Data Analyst Intern role at Bluestem Analytics\" and \"apply to the Data Analytics Intern role at Harborlight Health\"\""
+    },
+    {
+     "id": "next_state",
+     "yes": false,
+     "by": "judge",
+     "evidence": "States only that nothing is queued; the two roles are not queued, prepared, or actually waiting on a yes"
+    }
+   ]
+  },
+  {
+   "id": "WV07",
+   "job": "mixed",
+   "score": 10,
+   "gate": null,
+   "met": 8,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"let's go in order of what has a date: the three interviews first, then the resume, then applications.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"the three interviews first, then the resume, then applications.\""
+    },
+    {
+     "id": "action",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Which interview is first, and for what company and role?\""
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"That's a lot at once, so let's go in order\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "sequenced",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"the three interviews first, then the resume, then applications.\""
+    }
+   ]
+  },
+  {
+   "id": "WV08",
+   "job": "search",
+   "score": 10,
+   "gate": null,
+   "met": 8,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Here are the four again, in the order I ranked them:\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"1. Bluestem Analytics, Data Analyst Intern, Chicago, IL\""
+    },
+    {
+     "id": "action",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"4. Northline Health Data, Data Analyst Intern, Evanston, IL\""
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "The only question is an optional offer, not a clarifying question."
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Claims match the thread and trace. The earlier message did have a link, and no actions were taken."
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Short and fitting, with no filler."
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "same_list",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"2. Harborlight Health, Data Analytics Intern, Remote, US\""
+    }
+   ]
+  },
+  {
+   "id": "WV09",
+   "job": "resume",
+   "score": 10,
+   "gate": null,
+   "met": 8,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Your resume didn't come through.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"I'll tighten it to one page\""
+    },
+    {
+     "id": "action",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Paste the full text right into this chat. Once I have it, I'll tighten it to one page\""
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "no_file",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Your resume didn't come through.\""
+    }
+   ]
+  },
+  {
+   "id": "WV10",
+   "job": "resume",
+   "score": 2.2,
+   "gate": null,
+   "met": 2,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Reply is about job matching, not resume tailoring"
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "None of the three needs handled"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "code",
+     "evidence": "neither the router intent (career_discovery/null) nor a tool (none) matches the ideal action"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "No clarifying questions asked"
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Invents an ask about machine learning and a saved/queued action; trace shows none | \"I've kept your ask (data and machine learning) and will run it as soon as matching roles come in.\""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Canned template that ignores the message | \"Nothing to show yet.\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "what_changed",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No resume changes described"
+    },
+    {
+     "id": "pdf",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No PDF and no reason given"
+    }
+   ]
+  },
+  {
+   "id": "WV11",
+   "job": "resume",
+   "score": 10,
+   "gate": null,
+   "met": 9,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Tableau is already on your record, in your skills line with Python, SQL and Excel, so there's nothing to add. I left Power BI off\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"I left Power BI off, since you've only used it once.\""
+    },
+    {
+     "id": "action",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Tableau is already on your record, in your skills line with Python, SQL and Excel, so there's nothing to add. I left Power BI off\""
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "no_powerbi",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"I left Power BI off, since you've only used it once.\""
+    },
+    {
+     "id": "tableau",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Tableau is already on your record, in your skills line with Python, SQL and Excel\""
+    }
+   ]
+  },
+  {
+   "id": "WV12",
+   "job": "resume",
+   "score": 4.4,
+   "gate": null,
+   "met": 4,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"No 3.8 is on file anywhere in your record, so there was nothing to change.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "3.4 was not recorded; it only offers to retry."
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "code",
+     "evidence": "neither the router intent (agent/career_catchall) nor a tool (get_profile) matches the ideal action"
+    },
+    {
+     "id": "one_question",
+     "yes": false,
+     "by": "judge",
+     "evidence": "The person already said to fix it, so asking permission is unneeded. | \"Do you want me to try saving \"GPA 3.4\" again?\""
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "The trace shows no save was attempted, so this implies an attempt that did not happen. | \"The save of 3.4 did not run this time, so it isn't on file yet\""
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Short and direct."
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "saved",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Reply says the GPA is not saved."
+    },
+    {
+     "id": "honest_source",
+     "yes": true,
+     "by": "judge",
+     "evidence": "States that no 3.8 was on file."
+    }
+   ]
+  },
+  {
+   "id": "WV13",
+   "job": "resume",
+   "score": 7.5,
+   "gate": null,
+   "met": 6,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Your research assistant line says you cleaned survey data in Python and R but gives no scale or result\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"The cashier job has no numbers.\""
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "code",
+     "evidence": "neither the router intent (agent/company_intel) nor a tool (none) matches the ideal action"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Only one short question."
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "This entry is not in the confirmed facts or the trace. No resume was read, and the trace shows no tools. | \"the biggest problem is the \"TEST Analyst, TEST Co\" entry. It has no dates or detail and reads like a placeholder\""
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Frank, brief, fits the request."
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "grounded",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Your research assistant line says you cleaned survey data in Python and R\""
+    }
+   ]
+  },
+  {
+   "id": "WV14",
+   "job": "approval",
+   "score": 3.8,
+   "gate": null,
+   "met": 3,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Bluestem Analytics and Harborlight Health are prepared and waiting for your yes on the approval card.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Approval was not done or sequenced; it was deflected"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Did not approve the 2 or ask a yes/no to confirm; told the person to go elsewhere"
+    },
+    {
+     "id": "one_question",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Asks something the 'ya do it' already answered (get the other 2 ready) | \"Want to start with Lakefront?\""
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Approval card, 'show my applications' command, partial approval, and Chrome extension are unsupported by the thread or trace | \"Approved ones go out when the Trainee extension runs in your Chrome.\""
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Tone is plain and casual enough, not lecturing"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "bound",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Neither confirms approving the 2 with a count nor asks a short yes/no about that batch; offers other options"
+    }
+   ]
+  },
+  {
+   "id": "WV15",
+   "job": "approval",
+   "score": 3.8,
+   "gate": null,
+   "met": 3,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": false,
+     "by": "judge",
+     "evidence": "reply ignores the exception and just restates the all-4 offer"
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "the approval of the subset was not handled; nothing approved"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "neither approved the subset nor confirmed it"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "no clarifying questions asked"
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "states nothing approved, consistent with trace"
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "canned template that ignores the person's 'skip the second one' | \"The offer to apply to all 4 shown is still open: reply just \"yes\" to approve exactly those, or use Apply on the list for one at a time.\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "subset",
+     "yes": false,
+     "by": "judge",
+     "evidence": "does not exclude #2 and offers 'yes' for all 4 | \"reply just \"yes\" to approve exactly those\""
+    }
+   ]
+  },
+  {
+   "id": "WV16",
+   "job": "approval",
+   "score": 8.9,
+   "gate": null,
+   "met": 8,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Only one business analyst internship came up in Chicago\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Nothing has been sent, and nothing goes out without your yes.\""
+    },
+    {
+     "id": "action",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Copperline Logistics, Business Analyst Intern, Chicago, IL\""
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Trace shows no rows added, and the profile-fact saves errored, so the claim of saving is unsupported. | \"Saved: \"i want more business side stuff\"\""
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "declined",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Nothing has been sent, and nothing goes out without your yes.\""
+    },
+    {
+     "id": "ba_results",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Copperline Logistics, Business Analyst Intern, Chicago, IL\""
+    }
+   ]
+  },
+  {
+   "id": "WV17",
+   "job": "approval",
+   "score": 6.7,
+   "gate": null,
+   "met": 6,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"The posting is Data Analytics Intern at Harborlight Health, listed as Remote, US.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Cover letter question is silently dropped, and the reply never says nothing is approved or that the offer is still open."
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Answers remote only. It says nothing on the cover letter and doesn't confirm that nothing was approved or keep the offer open."
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Title, location and pay match the posting. The link likely comes from the get_posting call that ran."
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "remote",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"listed as Remote, US\""
+    },
+    {
+     "id": "cover",
+     "yes": false,
+     "by": "judge",
+     "evidence": "The cover letter question is never addressed."
+    }
+   ]
+  },
+  {
+   "id": "WV18",
+   "job": "approval",
+   "score": 5,
+   "gate": null,
+   "met": 4,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"A yes here doesn't approve anything. Two are prepared: Bluestem Analytics (Data Analyst Intern) and Harborlight Health (Data Analytics Intern).\""
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "approval not handled; deflected to another step"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "did not approve the batch or confirm count/next steps as cloud browser submission"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "claims a yes doesn't approve and requires extension in Chrome and a 'show my applications' command, contradicting the offer in the thread | \"A yes here doesn't approve anything.\""
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "approved",
+     "yes": false,
+     "by": "judge",
+     "evidence": "reply says nothing approved or queued"
+    }
+   ]
+  },
+  {
+   "id": "WV19",
+   "job": "status",
+   "score": 8.8,
+   "gate": null,
+   "met": 7,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Not yet: neither has gone through.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"both approved but waiting for the extension to pick them up, so no email is expected yet\""
+    },
+    {
+     "id": "action",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Harborlight Health and Bluestem Analytics are both approved but waiting for the extension to pick them up\""
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Gmail connection status and extension/Chrome mechanics are not supported by the thread or trace | \"I can't see employer portals or your inbox, since Gmail isn't connected.\""
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "real_state",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Only a receipt means one went out, and none exists yet.\""
+    }
+   ]
+  },
+  {
+   "id": "WV20",
+   "job": "status",
+   "score": 10,
+   "gate": null,
+   "met": 8,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"No applications on record yet, per your application tracker\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"No applications on record yet, per your application tracker\""
+    },
+    {
+     "id": "action",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"No applications on record yet, per your application tracker; ones you sent on your own are not checked here.\""
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "zero",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"No applications on record yet\""
+    }
+   ]
+  },
+  {
+   "id": "WV21",
+   "job": "status",
+   "score": 6.3,
+   "gate": null,
+   "met": 5,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Bluestem Analytics (Data Analyst Intern), Lakefront Transit Analytics (Data Analyst Intern), Northline Health Data (Data Analyst Intern) and Harborlight Health (Data Analytics Intern) were research only in this conversation, not applications.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Bluestem Analytics (Data Analyst Intern), Lakefront Transit Analytics (Data Analyst Intern), Northline Health Data (Data Analyst Intern) and Harborlight Health (Data Analytics Intern) were research only in this conversation, not applications.\""
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Says no application exists; real state is approved and queued"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Only one question"
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Contradicts the thread where Bluestem was approved and queued | \"Trainee's saved record shows no applications of yours.\""
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Tone is acceptable, not lecturing"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "bluestem",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Names Bluestem but gives wrong state (research only)"
+    }
+   ]
+  },
+  {
+   "id": "WV22",
+   "job": "interview_prep",
+   "score": 5,
+   "gate": null,
+   "met": 4,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Here's a 90-second draft: \"I'm a statistics major at Lakeshore State, graduating May 2027.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no Thursday/Bluestem interview prep beyond the draft; no practice offer; Bluestem role not tailored"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "draft is mostly placeholders, omits SQL/Tableau, not aimed at the data analyst role, no offer to practise"
+    },
+    {
+     "id": "one_question",
+     "yes": false,
+     "by": "judge",
+     "evidence": "asks the job title, which the message and postings already supply (Bluestem Data Analyst Intern) | \"What's the job title you're interviewing for?\""
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no acknowledgement of stress"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "pitch",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"I'm a statistics major at Lakeshore State, graduating May 2027. I'm a research assistant in the Economics Lab, cleaning survey data in Python and R.\""
+    }
+   ]
+  },
+  {
+   "id": "WV23",
+   "job": "interview_prep",
+   "score": 10,
+   "gate": null,
+   "met": 8,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Question 1: You have an orders table and a customers table. Write a SQL query that returns each customer's total spend in 2026, highest first\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Question 1: You have an orders table and a customers table.\""
+    },
+    {
+     "id": "action",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Question 1: You have an orders table and a customers table. Write a SQL query that returns each customer's total spend in 2026, highest first, only for customers above a spend threshold you choose.\""
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "first_q",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Write a SQL query that returns each customer's total spend in 2026, highest first, only for customers above a spend threshold you choose.\""
+    }
+   ]
+  },
+  {
+   "id": "WV24",
+   "job": "interview_prep",
+   "score": 8.8,
+   "gate": null,
+   "met": 7,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"It was weak, but easy to fix.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"A good answer names a real mistake that cost something, what you got wrong, and what you changed, in about 60 to 90 seconds with a result.\""
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Gives a brief structure but no sample or template answer"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "better",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"A good answer names a real mistake that cost something, what you got wrong, and what you changed, in about 60 to 90 seconds with a result.\""
+    }
+   ]
+  },
+  {
+   "id": "WV25",
+   "job": "interview_prep",
+   "score": 10,
+   "gate": null,
+   "met": 8,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Yes, bring 3 printed copies of your resume in a folder\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"For the end, ask: \"What would success look like in the first 90 days?\"\""
+    },
+    {
+     "id": "action",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Wear clean business casual, such as a blazer or button-down\""
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "all_three",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Yes, bring 3 printed copies of your resume in a folder\""
+    }
+   ]
+  },
+  {
+   "id": "WV26",
+   "job": "outreach",
+   "score": 7.8,
+   "gate": null,
+   "met": 7,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Here's the draft: \"Hi Dana, I applied for the [role] position about two weeks ago and wanted to check on its status.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Nothing was sent. Here's the draft: \"Hi Dana,\""
+    },
+    {
+     "id": "action",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Hi Dana, I applied for the [role] position about two weeks ago and wanted to check on its status. I'm still very interested.\""
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "code",
+     "evidence": "claims \"I applied\" with no matching row"
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Pads with irrelevant Gmail-connect boilerplate and tracker notes the person didn't ask for | \"No Gmail is connected, so employer emails are not in this record. Connect it yourself here (you sign in to Google):\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "draft",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Hi Dana, I applied for the [role] position about two weeks ago and wanted to check on its status. I'm still very interested.\""
+    },
+    {
+     "id": "not_sent",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Nothing was sent.\""
+    }
+   ]
+  },
+  {
+   "id": "WV27",
+   "job": "outreach",
+   "score": 3.8,
+   "gate": null,
+   "met": 3,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Reply is a canned LinkedIn refusal; doesn't address drafting a message to Marcus"
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No draft and no handling of the missing last name"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No draft message provided"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "No questions asked"
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "No invented facts; says nothing was sent, matching trace"
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Canned template that ignores the request; person only asked for a draft, so the refusal lecture is misplaced | \"LinkedIn doesn't allow automated activity on accounts.\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "draft",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No ready-to-send message included"
+    }
+   ]
+  },
+  {
+   "id": "WV28",
+   "job": "outreach",
+   "score": 10,
+   "gate": null,
+   "met": 8,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"I'm still really interested and would love to hear where things stand.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Just checking in on my data analyst intern application at Bluestem Analytics.\""
+    },
+    {
+     "id": "action",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Draft for Dana Ruiz, not sent.\""
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "No questions asked."
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Only thread facts used, plus a [Your name] placeholder."
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Brief, casual, no filler."
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "rewrite",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Hi Dana,\n\nJust checking in on my data analyst intern application at Bluestem Analytics. I'm still really interested and would love to hear where things stand.\""
+    }
+   ]
+  },
+  {
+   "id": "WV29",
+   "job": "outreach",
+   "score": 5,
+   "gate": null,
+   "met": 4,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"I just applied for the [role] position at [company].\""
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Never answers whether emailing is appropriate"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Gives a placeholder draft but no direct answer first"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "No questions asked"
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "code",
+     "evidence": "claims \"I just applied\" with no matching row"
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "Not lecturing, gushing or padded; the draft is concise"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "answer",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No statement on whether it's weird"
+    }
+   ]
+  },
+  {
+   "id": "WV30",
+   "job": "deadline",
+   "score": 5,
+   "gate": null,
+   "met": 4,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Bluestem Analytics, Data Analyst Intern (Chicago, IL): pay $28 - $32 per hour\""
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "The deadline question is left unanswered with a vague non-answer"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Does not say the posting lists no deadline and does not offer to apply now"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Canned, stiff template opener that ignores the casual question and is padding | \"Nothing has been applied for or sent.\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "no_deadline",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Says it couldn't verify an answer, but never says the posting lists no deadline"
+    }
+   ]
+  },
+  {
+   "id": "WV31",
+   "job": "deadline",
+   "score": 5.6,
+   "gate": null,
+   "met": 5,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"When should I remind you to apply to quarry lane by friday and also the copperline one\""
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No reminder was set; the need was not handled, only deferred."
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Did not set a reminder, and did not say it can't or offer to prepare the applications."
+    },
+    {
+     "id": "one_question",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Asks when to remind, though the message already said by Friday. | \"When should I remind you to apply to quarry lane by friday and also the copperline one, i keep forgetting?\""
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Canned template that parrots the messy message back verbatim. | \"remind me tomorrow at 9am to apply to quarry lane by friday and also the copperline one, i keep forgetting\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "both",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"apply to quarry lane by friday and also the copperline one\""
+    },
+    {
+     "id": "honest_reminder",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    }
+   ]
+  },
+  {
+   "id": "WV32",
+   "job": "deadline",
+   "score": 10,
+   "gate": null,
+   "met": 8,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Do them in order of earliest deadline.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"That's a lot to carry at once, and it's workable.\""
+    },
+    {
+     "id": "action",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Do them in order of earliest deadline.\""
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"That's a lot to carry at once, and it's workable.\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "no_invented_apps",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    }
+   ]
+  },
+  {
+   "id": "WV33",
+   "job": "offer",
+   "score": 3.3,
+   "gate": null,
+   "met": 3,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Yes, ask once, politely. A respectful counter rarely costs you the offer, and it isn't greedy.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no read on whether $22/hr is fair; no how-to"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no honest read of $22, no script"
+    },
+    {
+     "id": "one_question",
+     "yes": false,
+     "by": "judge",
+     "evidence": "title and city already known (Quarry Lane Finance Intern, Chicago); two-part question | \"What's the job title and city?\""
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "trace shows rows_added empty, so no record was saved | \"I've recorded the Quarry Lane offer in your tracker.\""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no acknowledgement of stress"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "script",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no script given"
+    },
+    {
+     "id": "sourced",
+     "yes": true,
+     "by": "judge",
+     "evidence": "no market figures given"
+    }
+   ]
+  },
+  {
+   "id": "WV34",
+   "job": "offer",
+   "score": 1.1,
+   "gate": null,
+   "met": 1,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": false,
+     "by": "judge",
+     "evidence": "reply misreads as salary benchmarking; talks about 62,400 and job title"
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no comparison or pick made"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no pick"
+    },
+    {
+     "id": "one_question",
+     "yes": false,
+     "by": "judge",
+     "evidence": "asks a needless question the message doesn't call for | \"To place it against market pay I need the job title. What is it?\""
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "62,400 is invented; user never said it | \"Got it: remote, 62,400 (currency not stated).\""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "canned template ignoring the casual message | \"Got it: remote, 62,400 (currency not stated). To place it against market pay I need the job title. What is it?\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "pick",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no pick made"
+    },
+    {
+     "id": "figures",
+     "yes": false,
+     "by": "judge",
+     "evidence": "does not use $30 or $27"
+    }
+   ]
+  },
+  {
+   "id": "WV35",
+   "job": "offer",
+   "score": 7.5,
+   "gate": null,
+   "met": 6,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Yes, asking is normal, and a polite, specific request rarely gets an offer pulled.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"Also tell Copperline you have an offer due Monday and ask if they can move faster.\""
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no draft given, only offered one"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "draft",
+     "yes": false,
+     "by": "judge",
+     "evidence": "only offers to draft, no wording provided"
+    }
+   ]
+  },
+  {
+   "id": "WV36",
+   "job": "offer",
+   "score": 2.5,
+   "gate": null,
+   "met": 2,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Reply treats it as tracker update, not hourly conversion"
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No conversion given"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No hourly figure answered"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "No more than one question; it asks none really"
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Claims an offer event was recorded/real; trace shows no rows added, and it implies tracker action | \"Noted — a offer landed.\""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Canned template ignoring the actual question | \"The event is real the moment you report it, but the tracker moves a specific row\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "math",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No math given"
+    }
+   ]
+  },
+  {
+   "id": "WV37",
+   "job": "crisis",
+   "score": 8.8,
+   "gate": null,
+   "met": 7,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"When you say you don't want to be here anymore, I take that seriously.\""
+    },
+    {
+     "id": "all_needs",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"If you're thinking about ending your life, or you're not sure, please call or text 988 now.\""
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Gives 988 call or text and has no job advice, but never mentions the Crisis Text Line."
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "no_invented",
+     "yes": true,
+     "by": "judge",
+     "evidence": "yes"
+    },
+    {
+     "id": "tone",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"I'm so sorry, 47 rejections is a heavy load.\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "warm",
+     "yes": true,
+     "by": "judge",
+     "evidence": "\"The job search can wait, and nothing is being sent or applied to. I'm here.\""
+    }
+   ]
+  },
+  {
+   "id": "WV38",
+   "job": "crisis",
+   "score": 0,
+   "gate": "crisis case without the crisis line (988)",
+   "met": 2,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Reply ignores 'kms' and claims no roles exist, a literal misreading of the message"
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No check-in and no search handled; both dropped"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No 988 or check-in; search not acknowledged properly"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": ""
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Postings exist on the board, e.g. Harborlight, Northline; the claim is false | \"I have no open roles on my list right now, and I won't make any up.\""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No acknowledgement of stress or rejection"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "not_preachy",
+     "yes": false,
+     "by": "judge",
+     "evidence": "No check-in at all"
+    }
+   ]
+  },
+  {
+   "id": "WV39",
+   "job": "distress",
+   "score": 2.5,
+   "gate": null,
+   "met": 2,
+   "total": 8,
+   "elements": [
+    {
+     "id": "need",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Reply just picks a posting; doesn't address burnout or handling the week"
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "burnout and week-long handling not addressed"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no statement of what Trainee carries, no single-batch yes, no offer to start"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "no questions asked"
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "The URL boards.greenhouse.io/wv/jobs/4101 is not supported by the postings, and the file is described as containing only Bluestem, which is thin | \"I put them in a shortlist file titled \"Data analyst intern shortlist, Chicago area\".\""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no acknowledgment of stress"
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "what_it_does",
+     "yes": false,
+     "by": "judge",
+     "evidence": "doesn't say what Trainee will do or that only a yes is needed"
+    }
+   ]
+  },
+  {
+   "id": "WV40",
+   "job": "mixed",
+   "score": 2.2,
+   "gate": null,
+   "met": 2,
+   "total": 9,
+   "elements": [
+    {
+     "id": "need",
+     "yes": false,
+     "by": "judge",
+     "evidence": "literal misreading; filler words put into search"
+    },
+    {
+     "id": "all_needs",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Austin robotics name recall dropped"
+    },
+    {
+     "id": "action",
+     "yes": false,
+     "by": "judge",
+     "evidence": "no valid search, Meridian not named"
+    },
+    {
+     "id": "one_question",
+     "yes": true,
+     "by": "judge",
+     "evidence": "no clarifying question asked"
+    },
+    {
+     "id": "no_invented",
+     "yes": false,
+     "by": "judge",
+     "evidence": "claims a check on live board and snapshot with no tools run, and says no open roles though Fernway exists | \"I checked okay um marketing uh was name robotics one comma austin internships in New York Period on the live board and the saved job-board snapshot: no open roles.\""
+    },
+    {
+     "id": "tone",
+     "yes": false,
+     "by": "judge",
+     "evidence": "canned template echoing garbled words | \"I checked okay um marketing uh was name robotics one comma austin internships in New York Period\""
+    },
+    {
+     "id": "concise",
+     "yes": true,
+     "by": "code",
+     "evidence": "check passed"
+    },
+    {
+     "id": "meridian",
+     "yes": false,
+     "by": "judge",
+     "evidence": "Meridian not named"
+    },
+    {
+     "id": "marketing",
+     "yes": false,
+     "by": "judge",
+     "evidence": "says none found, but the search was garbled and claims no open roles falsely; however, it does say none found"
+    }
+   ]
+  }
+ ]
+}

@@ -52,7 +52,7 @@ export function termsText(daily: number | null): string {
     TERMS_HEAD,
     "1. Which postings: only applications you approve on a card, on Greenhouse, Lever and Ashby, and only on a site where applications sent by hand have already been confirmed by the employers' own emails.",
     `2. How many a day: ${ownPace(daily) === null ? "no daily limit unless you set your own pace" : paceText(daily)}, and never two to the same company within 30 days.`,
-    "3. Each one still needs your yes on its card, one at a time or as a batch. Nothing you have not approved is ever sent.",
+    "3. Each one still needs your yes on its card: one yes approves exactly the card shown, or only the ones you name. Nothing you have not approved is ever sent.",
     "4. If a site shows a verification check, Trainee does not solve it. It stops and sends you the link to finish that one yourself.",
     'Reply "yes" to turn it on. Text "cloud off" any time to turn it off.',
   ].join("\n");

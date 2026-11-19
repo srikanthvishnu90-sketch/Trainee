@@ -19,6 +19,7 @@
 // duplicate guard would refuse it anyway). This module sends nothing itself; the person's worker claims and finishes.
 import { batchHoldBack, hashTag, screenedOut, tapJob, type JobDeps, type JobSender, type JobView, type ListMeta } from "./telegram_jobs.ts";
 import { YES_WINDOW_MS } from "./career_apply_cards.ts";
+import { readApproval } from "./approval_words.ts";
 import { type ApplySummary, applySummary } from "./apply_status_summary.ts";
 import type { OpenQuestion } from "./career_apply_questions.ts";
 
@@ -68,9 +69,24 @@ export function readOffer(meta: Record<string, unknown> | null | undefined): App
 // and the rest approve NOTHING.
 const YES = /^(?:(?:yes|yep|yeah)(?: (?:please|do it|go ahead|apply to all(?: of them)?|send them all|approve all))?|do it|go ahead|apply to all(?: of them)?|send them all|send all|approve all)(?: please)?$/;
 const norm = (message: string) => String(message ?? "").toLowerCase().replace(/[’`]/g, "'").replace(/[!.\s]+$/g, "").replace(/^[\s"']+|[\s"']+$/g, "").replace(/\s*,\s*/g, " ").replace(/\s+/g, " ").trim();
+// Word-vomit benchmark (2026-11-18, WV14 and WV18): the same yes as people text it. "ya do it", "ok do it", "yeah go for it" and
+// "yes!!! omg finally ok go 🙏" are each a yes plus an explicit act or more yes, and they went to the brain, which cannot approve,
+// while a card read them as yes (approval_words.ts, the reader every other approval path uses). They are read here the way
+// that reader reads them, with two limits that keep D-MS-1's list: the reading must hold an explicit yes word or an act ("ya",
+// a thumbs-up, "ok" or "sure" alone still approve nothing), and only excitement words are taken out before it reads
+// ("omg", "finally"); a hedge, a condition, a question or anything else still makes it no yes.
+const EXCITED = /(?:^|\s)(?:omg+|finally|yay+|woo+(?:hoo+)?|lfg|awesome|perfect|great|amazing)(?=[\s!.,]|$)/gi;
+const EXPLICIT = /\b(?:yes|yep|yeah|yea|do it|go ahead|go for it|send|submit|approve|apply|let'?s go)\b/i;
 export function isApplyAllYes(message: string): boolean {
   const t = norm(message);
-  return t.length > 0 && t.length <= 40 && YES.test(t);
+  if (t.length > 0 && t.length <= 40 && YES.test(t)) return true;
+  const calm = String(message ?? "").replace(EXCITED, " ").replace(/\s+/g, " ").trim();
+  // One word alone is D-MS-1's to read (YES above): "yup", "ya" and a thumbs-up stay no yes.
+  if (!calm || calm.length > 60) return false;
+  if (calm.split(" ").length < 2) return calm !== String(message ?? "").trim() && YES.test(norm(calm));
+  if (!EXPLICIT.test(calm.replace(/[’`]/g, "'"))) return false;
+  const a = readApproval(calm, { languages: "en" });
+  return !!a && (a.scope === "batch" || a.scope === "all");
 }
 // A yes with a condition on it ("yes but not Acme", "yeah except 2", "yes skip the first"): approves nothing, and says the offer is still open.
 export function isConditionalYes(message: string): boolean {

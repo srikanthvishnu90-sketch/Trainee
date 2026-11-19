@@ -7,9 +7,12 @@
 // career_staged.ts keeps every such turn off the brain, and the handler answers it with this reply when the router did
 // not. No new prose here: the reply is the core's text.
 import { CareerIntel, CareerSafety } from "../_shared/router_core.career.js";
+import { crisisReading } from "../_shared/messy_text.ts";
 
-// Typographic apostrophes as typed on phones ("don’t") read as the plain one the screens expect.
-const plain = (s: string) => String(s ?? "").replace(/[‘’ʼ]/g, "'");
+// Typographic apostrophes as typed on phones ("don’t") read as the plain one the screens expect. Word-vomit benchmark
+// (2026-11-18): so do the dropped ones ("i dont want to be here anymore") and self-harm slang ("kms", "i want to die"),
+// which the screens' fixed phrases missed (messy_text.ts crisisReading). Only the reading changes; the reply is the core's.
+const plain = (s: string) => crisisReading(String(s ?? "").replace(/[‘’ʼ]/g, "'"));
 
 // The core's crisis reply for this message, or null when neither screen calls it a crisis.
 export function crisisReply(message: string): string | null {

@@ -134,6 +134,9 @@ export async function agentTurn(o: {
   linkCheck?: LinkCheck | null;
   // FEATURE 13: the staged release's tool policy: tools withheld by name, and a note on what code does instead.
   toolPolicy?: { withhold: readonly string[]; note: string; intent?: string } | null;
+  // D-098: the reply pipeline's support judge when no market research is wired (the reply-quality eval: evals/career/run.ts
+  // brainSupportJudge builds it as production does). Production passes it as market.judge.
+  supportJudge?: import("../_shared/agent/research/support.ts").SupportJudge | null;
   // Situation knowledge (CAREER_KNOWLEDGE=on, off by default): the Person Context Pack and the 1 to 3 playbooks that fit it
   // go in the system prompt (_shared/agent/knowledge). Off, the prompt is exactly what it was.
   knowledge?: boolean;
@@ -309,7 +312,7 @@ export async function agentTurn(o: {
     const l0 = replyLength(o.message, o.history);
     const repair = async (x: { system: string; user: string }) => { const res = await o.model({ system: x.system, messages: [{ role: "user", content: [{ type: "text", text: x.user }] }], tools: [], max_tokens: 500, tool_choice: { type: "none" } } as any); return ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim(); };
     const names = [...new Set((o.history ?? []).filter((m: any) => typeof m?.content === "string").flatMap((m: any) => (m.content as string).match(/(?<![\p{L}])\p{Lu}[\p{L}&'-]{2,}/gu) ?? []))];
-    piped = await runReplyPipeline(result.reply, ledger!, { judge: o.market?.judge ?? null, repair, own: [...(result.codeLines ?? [])], onRecord, ask: o.message, contracts: pipelineContracts((ctx.turn as any)?.contracts), names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
+    piped = await runReplyPipeline(result.reply, ledger!, { judge: (o.market?.judge ?? o.supportJudge ?? null), repair, own: [...(result.codeLines ?? [])], onRecord, ask: o.message, contracts: pipelineContracts((ctx.turn as any)?.contracts), names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
     // Live-12 review (item 2): a link stays only when a ledger unit, a tool result or a File made this turn gave it (after the draft and
     // after the repair alike: this runs on what the pipeline returns).
     result = { ...result, reply: stripUnseenLinks(piped.text, [...(result.linksSeen ?? []), ...(result.fileLinks ?? []), ...shownBefore(o.history), ...ledger!.units.map((u) => u.url).filter((u): u is string => !!u)]) };
@@ -325,7 +328,7 @@ export async function agentTurn(o: {
     ...(hypo ? [] : shownPayOf("what is the pay", o.history)).map((l) => ({ text: l.text, title: "A posting line shown earlier in this chat", url: l.url })),
   ];
   if (piped) { /* the reply pipeline checked it */ }
-  else if (FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: o.market?.judge ?? null, ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: o.market?.judge ?? null, ask: o.message, chat: chatUnits(), trace: (rows) => { researchRows = rows; } }) };
+  else if (FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: (o.market?.judge ?? o.supportJudge ?? null), ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: (o.market?.judge ?? o.supportJudge ?? null), ask: o.message, chat: chatUnits(), trace: (rows) => { researchRows = rows; } }) };
   else if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
   // D-073 review 2: research read pages and none supported an answer, and the model's reply did not stand (the loop removed its
   // unsourced claim, asked once more and stopped: "incomplete_reply"). The person is told what research found, in code's words: that
@@ -430,7 +433,7 @@ export async function agentTurn(o: {
   const supportTrace: { draft: string; refused: { sentence: string; why: string }[] } | null = FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show ? { draft: String(result.reply), refused: [] } : null;
   const keepSupportedT: typeof keepSupported = async (r0, src, opts) => { const k = await keepSupported(r0, src, { onRecord, ...(opts ?? {}) }); supportTrace?.refused.push(...((k as any).why ?? [])); return k; };
   if (FAIL_CLOSED.support && !piped && !trace.m && result.reply && result.stopped === "final" && !result.show) {
-    const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);
+    const judge = (o.market?.judge ?? o.supportJudge ?? null), pure = (s: string) => pureUnconfirmed(s, o.message);
     // Live-11 C11: a question to the person ("Which email should go on the resume?") is never judged, when it states no figure.
     const askOnly = (s: string) => personQuestion(s, [o.message, ...(hypo ? [] : factRows((o.stores as any)?.profile).filter(confirmedRow).map((f: any) => String(f.text ?? "")))].join("\n"));
     const recs = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].filter((p: any) => numbersIn(String(p?.pay ?? "")).length);

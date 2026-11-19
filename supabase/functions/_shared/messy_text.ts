@@ -40,3 +40,85 @@ export function crisisReading(s: string): string {
   for (const [rx, to] of CRISIS_SLANG) t = t.replace(rx, to);
   return t;
 }
+
+// ------------------------------------------------------------------------------------------------ the routing reading
+// What the router and the code-first turns read (handler-career.ts, before careerAskCanon): the message with the talk taken
+// out and the corrections applied. The stored message and the brain's text stay as typed.
+import { ROLE_NOUNS, slip, slips2, TITLE_WORDS, VERBS } from "./career_ask_canon.ts";
+
+// Voice-to-text: hesitations, and punctuation said as a word. "period" stays a word after a noun it belongs to ("pay period").
+const HESITATION = /(^|[\s,])(?:u+m+|u+h+m*|e+r+m+|hm+)(?=[\s,.!?]|$)[,]?/gi;
+const PERIOD_NOUNS = /\b(?:pay|trial|grace|probation|probationary|notice|waiting|time|this|that|the|a|review|reporting|billing|vesting|cooling|holiday|blackout|application|quiet|study|exam|testing)\s*$/i;
+function dictation(t: string): string {
+  let s = t.replace(/\s+question mark\b/gi, "?").replace(/\s+exclamation (?:point|mark)\b/gi, "!").replace(/\s+comma\b/gi, ",").replace(/\s+new ?line\b/gi, "\n");
+  s = s.replace(/\s+(?:period|full stop)\b(?=\s+[a-z]|\s*$)/gi, (m, off: number) => PERIOD_NOUNS.test(s.slice(0, off)) ? m : ".");
+  return s;
+}
+// "find me like 20", "is that like 18 an hour": "like" as a hedge after a verb or "so", never "jobs like this" or "I'd like".
+const LIKE_HEDGE = /\b(me|need|want|wants|find|get|got|so|is|are|r|be|for|about|maybe|than|that)\s+like\s+(?=\S)/gi;
+// "okay so ...", "so um ...": only a lead that ends in "so" (a bare "ok", "ya" or "yeah" is an answer, never filler).
+const LEAD = /^\s*(?:(?:ok(?:ay)?|alright|yeah|ya|well|hey|yo)[,\s]+)?so[,\s]+(?=\S)/i;
+
+// A correction mid-sentence: "<B> wait no not <X> i meant <R>", "<B> actually not <X>, <R>", "<B> wait no not <X>". When X is in
+// B, X is replaced by R (or dropped with its "or"/"and"/"in" when no R is given). Any other "wait" is left alone.
+const CORRECTION = /^([\s\S]*?)[,.\s]+(?:wait|actually|oops|sorry|no wait)[,\s]+(?:no[,\s]+|nvm[,\s]+|scratch that[,\s]+)*not\s+(?:in\s+)?([^,.;!?]+?)(?:[,\s]+(?:i\s+meant?|i\s+mean|make\s+it|instead|rather|just)\s+([^,.;!?]+?))?(?=[,.;!?]|$)([\s\S]*)$/i;
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function corrected(t: string): string {
+  const m = t.match(CORRECTION);
+  if (!m) return t;
+  const [, before, x, r, rest] = m;
+  const xs = x.trim();
+  if (!xs || xs.split(/\s+/).length > 4) return t;
+  const at = before.toLowerCase().lastIndexOf(xs.toLowerCase());
+  if (at < 0 || !new RegExp(`\\b${esc(xs)}\\b`, "i").test(before)) return t;
+  let b: string;
+  if (r && r.trim()) {
+    const rep = r.trim().replace(/^(?:in\s+)?anywhere\s+(?=remote\b)/i, "");
+    b = before.slice(0, at) + rep + before.slice(at + xs.length);
+    // "roles in remote" reads as "remote roles" does: "in" goes before "remote".
+    b = b.replace(/\bin\s+(remote)\b/gi, "$1");
+  } else {
+    b = before.slice(0, at).replace(/[\s,]*(?:\bor\b|\band\b|\bin\b)?\s*$/i, "") + before.slice(at + xs.length);
+  }
+  return `${b.trim()}${rest}`.trim();
+}
+
+// Numbers half spelled: "twenty seven" -> 27, "3 thousand" -> 3000, "a hundred" -> 100. A lone "one" or "two" stays a word
+// ("the second one", "one of them").
+const UNITS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 };
+const TEENS: Record<string, number> = { ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 };
+const TENS: Record<string, number> = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+function numbers(t: string): string {
+  const tens = Object.keys(TENS).join("|"), units = Object.keys(UNITS).join("|"), teens = Object.keys(TEENS).join("|");
+  let s = t.replace(new RegExp(`\\b(${tens})[\\s-]+(${units})\\b`, "gi"), (_, a, b) => String(TENS[a.toLowerCase()] + UNITS[b.toLowerCase()]));
+  s = s.replace(new RegExp(`\\b(${tens}|${teens})\\b`, "gi"), (w) => String(TENS[w.toLowerCase()] ?? TEENS[w.toLowerCase()]));
+  s = s.replace(new RegExp(`\\b(a|${units})\\s+(hundred|thousand)\\b`, "gi"), (_, a, b) => String((a.toLowerCase() === "a" ? 1 : UNITS[a.toLowerCase()]) * (b.toLowerCase() === "hundred" ? 100 : 1000)));
+  s = s.replace(/\b(\d+(?:\.\d+)?)\s+(hundred|thousand)\b/gi, (_, n, b) => String(Math.round(Number(n) * (b.toLowerCase() === "hundred" ? 100 : 1000))));
+  return s;
+}
+
+// Typos in the long words routing depends on ("anaylst", "intrnship", "recuiter"). Six letters or more only, lowercase only:
+// a short or capitalized word may be a name ("dana" is not "data").
+const LONG_VOCAB = [...new Set([...VERBS, ...ROLE_NOUNS, ...TITLE_WORDS, "recruiter", "recruiters", "interview", "interviews", "negotiate", "applications", "internships", "resume", "followup", "outreach", "deadline", "deadlines"])].filter((v) => v.length >= 6);
+function typos(t: string): string {
+  return t.replace(/\b[a-z]{6,}\b/g, (w) => {
+    if (LONG_VOCAB.includes(w)) return w;
+    if (LONG_VOCAB.some((v) => w === `${v}s` || `${w}s` === v)) return w;
+    return LONG_VOCAB.find((v) => v[0] === w[0] && slip(w, v)) ?? LONG_VOCAB.find((v) => slips2(w, v) && v[0] === w[0]) ?? w;
+  });
+}
+
+/** The routing reading of a messy message, or null when nothing in it needed reading differently. */
+export function routingReading(message: string): string | null {
+  const raw = String(message ?? "");
+  if (!raw.trim() || raw.length > 4000 || /https?:\/\//i.test(raw)) return null;
+  let t = dictation(raw);
+  t = t.replace(HESITATION, "$1");
+  t = t.replace(LEAD, "");
+  t = corrected(t);
+  t = t.replace(LIKE_HEDGE, "$1 ");
+  t = numbers(t);
+  t = typos(t);
+  t = t.replace(/\s+([,.!?])(?=\s|$)/g, "$1").replace(/,\s*\./g, ".").replace(/[ \t]+/g, " ").replace(/^[\s,.]+/, "").trim();
+  return t && t !== raw.trim() ? t : null;
+}

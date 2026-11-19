@@ -79,6 +79,7 @@ const G6_EFFECT_WRITE = /apply_jobs|apply_receipts|apply_prepared|apply_prepare|
 import { turnClock } from "./turn_clock.ts";
 let isolateTurns = 0; // D6: turns this isolate has served, so the log can tell a cold start from a warm one
 import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
+import { routingReading } from "../_shared/messy_text.ts";
 import { CODE_IN_CHAT_INTENT, CODE_IN_CHAT_REPLY, codeInChat, noteForCodeTurn } from "../_shared/career_code_in_chat.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { CARD_ANSWER_INTENT, CARD_NEEDS_REPLY_STATUS, cardIntent, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
@@ -499,6 +500,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // router's search read it as they read the plain ask. Only the routing reads it: the stored message is what was typed,
     // and the brain is given the person's own words (typedMessage).
     const typedMessage = message;
+    // Word-vomit benchmark (2026-11-18): first the talk is taken out of the routing copy (hesitations, dictated punctuation,
+    // "like" as a hedge, a mid-sentence correction applied, half-spelled numbers, typos in the long routing words;
+    // messy_text.ts routingReading), so the router searches for what was meant ("software intern roles remote"), not
+    // "software wait meant python stuff". The same rule as the canon: only routing reads it.
+    message = routingReading(message) ?? message;
     message = careerAskCanon(message) ?? message;
     const persistence = createCareerPersistence(admin);
     // POOL LOADER (Lane E, Feature Depth Program v2 — closes the gap

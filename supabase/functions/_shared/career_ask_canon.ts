@@ -42,7 +42,7 @@ function clean(s: string): string {
 // One slip of the keys (a letter dropped, doubled, added or swapped) in a word this reading depends on. Only the
 // keywords below and the common words of job titles are corrected; a name, a title as typed with capitals, a link
 // and a number are never touched.
-function slip(a: string, b: string): boolean {
+export function slip(a: string, b: string): boolean {
   if (a === b) return true;
   const la = a.length, lb = b.length;
   if (Math.abs(la - lb) > 1) return false;
@@ -55,14 +55,14 @@ function slip(a: string, b: string): boolean {
   return la > lb ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1); // one added / one dropped
 }
 // Two slips in a long word ("sicence", "analyyst" are one; "financal" is one): allowed only from 7 letters on.
-function slips2(a: string, b: string): boolean {
+export function slips2(a: string, b: string): boolean {
   if (Math.min(a.length, b.length) < 7 || Math.abs(a.length - b.length) > 2) return false;
   for (let k = 0; k < a.length; k++) if (slip(a.slice(0, k) + a.slice(k + 1), b) || slip(a, b.slice(0, k) + b.slice(k + 1))) return true;
   return false;
 }
-const VERBS = ["apply", "find", "search", "submit", "application", "please", "want", "tailor", "resume"];
-const ROLE_NOUNS = ["role", "roles", "job", "jobs", "position", "positions", "opening", "openings", "internship", "internships"];
-const TITLE_WORDS = ["analyst", "analysts", "analytics", "engineer", "engineers", "engineering", "software", "data", "science", "scientist", "financial",
+export const VERBS = ["apply", "find", "search", "submit", "application", "please", "want", "tailor", "resume"];
+export const ROLE_NOUNS = ["role", "roles", "job", "jobs", "position", "positions", "opening", "openings", "internship", "internships"];
+export const TITLE_WORDS = ["analyst", "analysts", "analytics", "engineer", "engineers", "engineering", "software", "data", "science", "scientist", "financial",
   "finance", "frontend", "backend", "developer", "designer", "design", "intern", "interns", "internship", "manager", "product", "marketing", "sales",
   "research", "business", "intelligence", "machine", "learning", "new", "grad", "graduate", "full", "stack", "operations", "consultant", "consulting",
   "accountant", "accounting", "associate", "investment", "banking", "summer", "entry", "level", "junior", "remote", "security", "quantitative",

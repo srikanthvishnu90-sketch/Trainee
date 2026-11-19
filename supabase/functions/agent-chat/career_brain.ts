@@ -318,7 +318,13 @@ export async function agentTurn(o: {
     const l0 = replyLength(o.message, o.history);
     const repair = async (x: { system: string; user: string }) => { const res = await o.model({ system: x.system, messages: [{ role: "user", content: [{ type: "text", text: x.user }] }], tools: [], max_tokens: 500, tool_choice: { type: "none" } } as any); return ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim(); };
     const names = [...new Set((o.history ?? []).filter((m: any) => typeof m?.content === "string").flatMap((m: any) => (m.content as string).match(/(?<![\p{L}])\p{Lu}[\p{L}&'-]{2,}/gu) ?? []))];
-    piped = await runReplyPipeline(result.reply, ledger!, { judge: (o.market?.judge ?? o.supportJudge ?? null), repair, own: [...(result.codeLines ?? [])], onRecord, ask: o.message, contracts: pipelineContracts((ctx.turn as any)?.contracts), names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
+    // S3 r12c (dev H022, s3sub 2789d3090 p2): "which of my skills match a data analyst role?" after "I know SQL, Excel and Tableau and
+    // did 2 years of reporting": the turn searched, so the pipeline ran, and what they had said was in no unit (the ledger holds only
+    // what they confirmed, D-007); every sentence mapping their skills to the role was dropped and only the suggestion unit stood. The
+    // person's own messages in this chat are read by the check (never put in the drafting ledger), so their words may be said back as
+    // theirs; they back no claim about an employer or a posting.
+    const said = hypo ? [] : [...(o.history ?? []).slice(-HISTORY_WINDOW).filter((m: any) => m?.role === "user").map((m: any) => String(m.content ?? "")), String(o.message ?? "")].filter((x) => x.trim());
+    piped = await runReplyPipeline(result.reply, ledger!, { judge: (o.market?.judge ?? o.supportJudge ?? null), repair, own: [...(result.codeLines ?? [])], onRecord, ask: o.message, said, contracts: pipelineContracts((ctx.turn as any)?.contracts), names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
     // Live-12 review (item 2): a link stays only when a ledger unit, a tool result or a File made this turn gave it (after the draft and
     // after the repair alike: this runs on what the pipeline returns).
     result = { ...result, reply: stripUnseenLinks(piped.text, [...(result.linksSeen ?? []), ...(result.fileLinks ?? []), ...shownBefore(o.history), ...ledger!.units.map((u) => u.url).filter((u): u is string => !!u)]) };

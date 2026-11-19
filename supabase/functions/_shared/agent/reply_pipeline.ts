@@ -22,7 +22,9 @@ export const PIPELINE = { on: true };
 export const isTagged = (t: string) => /\[E\d+(?:\s*,\s*E\d+)*\]/.test(String(t ?? ""));
 // ("suggestion": code's general career knowledge a tool result gave, such as the roles people commonly start in for a field an empty
 // search names (S3 r12, entry_routes.ts); it may hold advice about roles, never a posting, an opening or an employer)
-export type EvidenceKind = "page" | "chat" | "record" | "absent" | "suggestion";
+// ("said": a sentence of the person's own messages in this chat, S3 r12c. Never in the drafting ledger, which holds only what they
+// confirmed (D-007): verifyTagged reads them so their own words may be said back as theirs; they back no employer or posting claim)
+export type EvidenceKind = "page" | "chat" | "record" | "absent" | "suggestion" | "said";
 export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null; named?: string[]; posting?: boolean; dated?: string[] }
 
 // Units a tool added this turn (pages, posting records, counts): the turn rests on evidence only when it has one. Lines carried from
@@ -126,9 +128,17 @@ export class Ledger {
     for (const f of facts) this.add("record", f, { source: "record" });
     if (absent.length) this.add("absent", `Not on file: ${absent.join(", ")}.`, { source: "record" });
   }
+  // A copy with the person's own messages in this chat added, a sentence per unit, after every unit the draft could cite (S3 r12c,
+  // dev H022): for the check only; the drafting prompt's block is built from the ledger itself, never from this copy.
+  withSaid(messages: string[]): Ledger {
+    const l = new Ledger(this.now);
+    l.units = [...this.units];
+    for (const m of messages) for (const x of String(m ?? "").split("\n").flatMap((t) => splitSentences(t))) if (x.trim().length > 8) l.add("said", x, { source: "said", owner: null });
+    return l;
+  }
   block(ids?: string[]): string {
     const us = ids ? this.units.filter((u) => ids.includes(u.id)) : this.units;
-    return us.map((u) => `[${u.id}] (${u.kind === "page" ? `page${u.host ? ` ${u.host}` : ""}${u.source ? `, ${u.source}` : ""}` : u.kind === "chat" ? "this chat's tool result" : u.kind === "absent" ? "the person's record lacks" : u.kind === "suggestion" ? "code's general career knowledge, not a posting" : "the person's confirmed record"}) ${u.text}`).join("\n");
+    return us.map((u) => `[${u.id}] (${u.kind === "page" ? `page${u.host ? ` ${u.host}` : ""}${u.source ? `, ${u.source}` : ""}` : u.kind === "chat" ? "this chat's tool result" : u.kind === "absent" ? "the person's record lacks" : u.kind === "suggestion" ? "code's general career knowledge, not a posting" : u.kind === "said" ? "what the person said in this chat, not confirmed yet" : "the person's confirmed record"}) ${u.text}`).join("\n");
   }
 }
 const SEASON_END: Record<string, [number, number]> = { summer: [7, 31], fall: [11, 31], autumn: [11, 31], spring: [5, 30], winter: [2, 31] };
@@ -239,7 +249,7 @@ export function missingSpecifics(clause: string, units: EvidenceUnit[], strict =
 const POSTING_CLAIM = /\b(?:openings?|postings?|posted|vacanc(?:y|ies)|hiring|hires|listings?|listed|job ads?|positions? (?:open|available)|(?:is|are) open|apply (?:to|for|at)|apply you|now accepting|(?:send|submit) (?:your|my|the) (?:resume|application)s? to|available (?:near|in|around|now|right now)|(?:jobs?|roles?|positions?|work)\s+(?:\w+\s+){0,4}?(?:near|around|close to)\s+(?:you|your|me|here)|(?:near|around) (?:you|your|me)\b[^.?!]{0,40}\b(?:jobs?|roles?)|in your (?:city|area|town))\b/i;
 // (a posting denied, "not postings", "no openings", claims none)
 const NO_POSTING = /\b(?:not|no|never|nor|zero|0)\s+(?:an?\s+|any\s+)?(?:[\p{L}-]+\s+){0,2}?(?:openings?|postings?|listings?|vacanc(?:y|ies))\b/giu;
-const forClaim = (us: EvidenceUnit[], text: string) => POSTING_CLAIM.test(String(text).replace(NO_POSTING, " ")) ? us.filter((u) => u.kind !== "suggestion") : us;
+const forClaim = (us: EvidenceUnit[], text: string) => POSTING_CLAIM.test(String(text).replace(NO_POSTING, " ")) ? us.filter((u) => u.kind !== "suggestion" && u.kind !== "said") : us;
 const TAG_AFTER_STOP = /([.!?])(["'\u201d)\]]*)[ \t]*(\[E\d+(?:\s*,\s*E\d+)*\])/g;
 // "those four", "these 3", "the two": a count referring back to items
 const COUNT_REF = /\b(those|these|the)\s+(two|three|four|five|six|seven|eight|nine|ten|[2-9]|10)\b/i;
@@ -287,9 +297,10 @@ export function dropDanglingCounts(reply: string, dropped = ""): string {
   const out = lines.map((l, a) => l.filter((_, b) => !gone.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return /\p{L}/u.test(out) ? out : String(reply ?? "");
 }
-export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: SupportJudge | null; own?: string[]; onRecord?: (s: string) => boolean | null; ask?: string; carry?: string | null } = {}): Promise<Verified> {
+export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: SupportJudge | null; own?: string[]; onRecord?: (s: string) => boolean | null; ask?: string; carry?: string | null; said?: string[] } = {}): Promise<Verified> {
+  const ledger = o.said?.length ? ledger0.withSaid(o.said) : ledger0;
   // (a question to the person may name only what their own record or their ask names)
-  const allowed = [String(o.ask ?? ""), ...ledger.units.filter((u) => u.kind === "record").map((u) => u.text)].join("\n");
+  const allowed = [String(o.ask ?? ""), ...ledger.units.filter((u) => u.kind === "record" || u.kind === "said").map((u) => u.text)].join("\n");
   const own = new Set((o.own ?? []).map((x) => x.trim()));
   // (S3 r12: a tag written after the sentence's own stop, "nothing to show yet. [E2] Cashiers…", is that sentence's: the split put it
   // on the next one, so the sentence it ended went uncited and the next one carried a unit that is not about it)
@@ -340,8 +351,15 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   // other, so "It pays $60 an hour" after it never stands on another employer's unit.
   // (round 11: a name, never a capitalised function word or an imperative opener read as one: "Don't ask…", "Never…", "Politely…",
   // "Also…" name no one; a single word that opens the sentence counts only when it is none of those classes)
+  // (S3 r12c, dev H022: "With SQL, Excel and Tableau …" made "SQL" an unknown employer and "Reporting analyst: …" made "Reporting" one,
+  // so every sentence mapping the person's own skills to a role was dropped. A word the person's own lines (their record, what they
+  // said in this chat) or a suggestion unit use as a plain word, never as an employer there, names no employer here either; a record
+  // line that uses it as one, "Intern at Stripe", still makes it a subject, as round 12 B1 has it)
+  const ownWords = ledger.units.filter((u) => u.kind === "record" || u.kind === "said" || u.kind === "suggestion");
+  const plainOwnWord = (w: string) => ownWords.some((u) => nameFoundIn(w, u.text)) &&
+    !ownWords.some((u) => unitNames({ ...u, kind: "page", host: null, owner: null }, true).some((n) => nameFoundIn(w, n) || nameFoundIn(n, w)));
   const unknownIn = (t: string): string | null => unitNames({ id: "", kind: "page", text: t, host: null }, true).find((w) => {
-    if (owners.some((x) => nameFoundIn(x, w) || nameFoundIn(w, x)) || SOURCE.test(w)) return false;
+    if (owners.some((x) => nameFoundIn(x, w) || nameFoundIn(w, x)) || SOURCE.test(w) || plainOwnWord(w)) return false;
     const opens = bare(t).replace(/^["'“‘(]+/, "").toLowerCase().startsWith(w.toLowerCase());
     return !(opens && !/\s/.test(w) && FUNCTION_OPENER(w));
   }) ?? null;
@@ -381,7 +399,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (free(text)) {
       const subj = mentioned(text)[0] ?? unknownIn(text) ?? carried;
       const pool0 = forClaim(ids.length ? ids.map((id) => ledger.get(id)).filter((u): u is EvidenceUnit => !!u) : ledger.units, text);
-      const pool = pool0.filter((u) => u.source !== "an earlier reply in this chat" && (subj ? mine(u, subj) || (!unknownSubject(subj) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
+      const pool = pool0.filter((u) => u.source !== "an earlier reply in this chat" && !(u.kind === "said" && subj) && (subj ? mine(u, subj) || (!unknownSubject(subj) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
       if (ids.length) citeAt.set(`${a}:${b}`, ids);
       checks.push({ a, b, clause: text, units: pool, claim: text, subject: subj, advice: true, untagged: !ids.length });
       return carryPast(text, false);
@@ -419,7 +437,8 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
       // subject may rest on a unit that names no employer, and the judge is shown the subject)
       // (round 12: an unknown subject rests only on a unit that names it as its employer; a carried subject never rests on a posting
       // record whose employer code cannot tell, which is some other employer's posting)
-      const allowedUnits = forClaim(units, c).filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") &&
+      // (S3 r12c: the person's own words back only a clause about them, never one about an employer)
+      const allowedUnits = forClaim(units, c).filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") && !(u.kind === "said" && subject) &&
         (unknownSubject(subject) ? namesAsEmployer(u, subject!) :
           mine(u, subject) || (!!subject && !ownSubj && !u.owner && !u.posting && (anyNamed.get(u.id) ?? []).length === 0)));
       if (!allowedUnits.length) return fail(a, b, text, subject ? `no cited unit is about ${subject}` : "it names no employer, and every unit that could hold it is one employer's", subject);
@@ -429,7 +448,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   // Layer A: each clause against an index of the units it cites, a record unit read as one record (a fact per line).
   const asks: { k: number; claim: string; source: string }[] = [];
   // (round 12: a posting's state unit is read as one sentence, "… is open and closes …", so the role it names stays with its deadline)
-  const indexOf = (us: EvidenceUnit[]) => indexPages(us.map((u) => ({ text: u.posting ? u.text.replace(/; it closes /, " and closes ") : u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : u.kind === "suggestion" ? "General career knowledge" : "The person's confirmed record:", places: u.places ?? [], named: u.named ?? [], lend: u.kind === "chat" && u.owner && u.source !== "an earlier reply in this chat" ? u.owner : null, ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
+  const indexOf = (us: EvidenceUnit[]) => indexPages(us.map((u) => ({ text: u.posting ? u.text.replace(/; it closes /, " and closes ") : u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : u.kind === "suggestion" ? "General career knowledge" : u.kind === "said" ? "What the person said in this chat:" : "The person's confirmed record:", places: u.places ?? [], named: u.named ?? [], lend: u.kind === "chat" && u.owner && u.source !== "an earlier reply in this chat" ? u.owner : null, ...(u.kind === "record" || u.kind === "absent" || u.kind === "said" ? { one: true } : {}) })));
   // Round 8 of #849: the judge always reads a clause with its subject, named or carried ("PayPal: It requires a clearance").
   const withSubject = (c: { clause: string; subject?: string | null }) => `${c.subject && !nameFoundIn(c.subject, c.clause) ? `${c.subject}: ` : ""}${c.clause}`;
   checks.forEach((c, k) => {
@@ -556,7 +575,7 @@ export interface PipelineOut { text: string; repaired: boolean; dropped: Failure
 // (trunk's decide: 2 calls of 8 claims for one reply). Past the cap a claim is not asked and counts as "no": it fails closed.
 export const REPLY_JUDGE_MAX_CALLS = 4, REPLY_JUDGE_MAX_CLAIMS = 32;
 export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge?: SupportJudge | null; repair?: RepairModel | null; own?: string[]; onRecord?: (s: string) => boolean | null;
-  ask: string; contracts?: Contract[]; maxChars?: number; answers?: (text: string) => boolean; names?: string[] }): Promise<PipelineOut> {
+  ask: string; contracts?: Contract[]; maxChars?: number; answers?: (text: string) => boolean; names?: string[]; said?: string[] }): Promise<PipelineOut> {
   // Round 8 of #849: what is sent is verified as it is sent. A dropped sentence changes what the next one refers back to, so the
   // check runs again on what stood until nothing more fails (each pass only removes sentences, so it ends); the repaired sentences
   // are verified in the place they will be sent, after what stood, with its subject carried into them. The judge is asked each
@@ -605,7 +624,9 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
   if ((v1.failures.length || tooLong || miss.length) && o.repair) {
     const user = [v1.failures.length ? `FAILED SENTENCES:\n${v1.failures.map((f) => `- ${f.sentence} (code: ${f.reason}${f.subject && !f.reason.includes(f.subject) ? `; the sentence is about ${f.subject}` : ""})`).join("\n")}` : "",
       tooLong ? `LENGTH: ${tooLong}. The sentences that stood:\n${v1.text}` : "", miss.length ? `MISSING: ${miss.join("; ")}.` : "",
-      `EVIDENCE:\n${ledger.block()}`].filter(Boolean).join("\n\n");
+      `EVIDENCE:\n${ledger.block()}`,
+      // (S3 r12c: the check reads the person's own words too, so the repair sees them, as what they said and nothing more)
+      o.said?.length ? `THE PERSON'S OWN WORDS IN THIS CHAT (say them back only as what they told you, never as confirmed, never as a fact about an employer or a posting):\n${o.said.map((x) => `- ${x.replace(/\s+/g, " ").trim().slice(0, 300)}`).join("\n")}` : ""].filter(Boolean).join("\n\n");
     calls = 1;
     const out = await o.repair({ system: REPAIR_SYSTEM, user }).catch(() => "");
     if (out.trim()) {

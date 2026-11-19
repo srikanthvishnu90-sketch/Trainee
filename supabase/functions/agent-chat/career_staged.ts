@@ -648,14 +648,29 @@ export const CODE_OWNED_INTENTS: ReadonlySet<string> = new Set([
   "safety_support", "impersonation_refused", "authority_refused", "intent_refusal", "tailor_refused",
 ]);
 const NEGATED_ACTION = /\b(?:do\s+not|don'?t|dont|never|please\s+don'?t)\b[^.?!\n]{0,80}?\b(?:apply|applying|submit|submitting|send|sending|email|emailing|contact|contacting|message|messaging|reach\s+out|save|saving|store|storing)\b/i;
+// Word-vomit benchmark (2026-11-18, WV34, WV36): people text questions with no "?" and not at the start: "bluestem said 30 an
+// hour but harborlight offered 27 and its remote which one lol", "they offered me 3000 a month is that like 18 an hour or what".
+// A question clause after a comma or a joining word, or a closing "or what" / "which one", reads as the question it is.
+const EMBEDDED_QUESTION = /(?:^|[,.;:!]\s*|\s(?:and|but|so|or|like|also)\s+)(?:is\s+(?:that|it|this)|which\s+(?:one|is|should|do)|should\s+i|what\s+(?:do|should|would|can)\s+i|what\s+(?:was|were)\s+(?:the|that)|how\s+(?:do|should|much|many|bad)|am\s+i|do\s+i|would\s+(?:it|that)\s+be)\b|\bor\s+(?:what|nah|not)\b[^a-z]*(?:lol|lmao)?[^a-z]*$|\bwhich\s+one\b/i;
+export function unpunctuatedQuestion(message: string): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'").trim();
+  return !m.includes("?") && !QUESTION_LEAD.test(m) && EMBEDDED_QUESTION.test(m);
+}
 export function questionShaped(message: string): boolean {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'").trim();
   if (NEGATED_ACTION.test(m)) return true;
-  if (!(QUESTION_LEAD.test(m) || m.includes("?"))) return false;
+  if (!(QUESTION_LEAD.test(m) || m.includes("?") || EMBEDDED_QUESTION.test(m))) return false;
   return !(ASK_TO_ACT.test(m) || LIST_OR_SEND.test(m));
 }
+// A tracker reply that recorded nothing and only asks back ("no row in this thread matches it yet", "an offer lands on the tracker
+// only from your own report") is not a record read: on a question it is the brain's, with the router's answer as data
+// (WV36: "they offered me 3000 a month is that like 18 an hour or what" got "Noted — a offer landed").
+function unboundReport(intent: string, result: unknown): boolean {
+  const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
+  return intent === "tracking_status" && r.resultStatus === "awaiting_user" && !r.application && !(r.sends > 0);
+}
 export function questionTurn(message: string, intent: string | null, result: unknown): boolean {
-  if (!intent || intent === UNCLAIMED || CODE_OWNED_INTENTS.has(intent)) return false;
+  if (!intent || intent === UNCLAIMED || (CODE_OWNED_INTENTS.has(intent) && !unboundReport(intent, result))) return false;
   if (!questionShaped(message)) return false;
   // A prep or outreach ask that names a firm gets code's product for it, as an advice question does (adviceQuestion).
   if (ADVICE_INTENTS.has(intent) && namesSomeone(String(message ?? "").replace(/[\u2019`]/g, "'"))) return false;

@@ -1022,7 +1022,11 @@ export function applicationsEnforced(reply: string, look: Look, o: { message: st
   // no sentence of the model's about status, mail or Gmail stays. A turn that only used the list for something else is untouched.
   if (look.own) return asked || speaks || saysNoApplications(reply) ? heldReply(reply, look, true) : reply;
   if (look.status === "none" || look.status === "unknown") return (look.status === "none" && asked) || saysNoApplications(reply) ? heldReply(reply, look, asked || look.status === "unknown") : reply;
-  if (!asked && !speaks && o.codeRan) return reply;
+  // Word-vomit benchmark (2026-11-18, WV07, WV13): a turn that did not ask about their applications, whose reply says nothing
+  // about them, is untouched whoever ran the lookup (as a turn that only used Trainee's own list for something else is, above).
+  // Before, a lookup the model ran on its own made the hold strict, and the whole answer to "3 interviews next week, more to
+  // apply to, my resume is trash" went, leaving only code's line about an empty record.
+  if (!asked && !speaks) return reply;
   return heldReply(reply, look, strict);
 }
 // Review of #785 (fail closed): does this reply say the person has no applications, or has not applied (anywhere or somewhere)?

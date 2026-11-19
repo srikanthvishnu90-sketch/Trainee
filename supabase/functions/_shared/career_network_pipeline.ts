@@ -167,7 +167,7 @@ export async function draftFor(p: Profile, r: Ranked, o: { senderName: string; a
 export async function draftAll(p: Profile, ranked: Ranked[], o: { senderName: string; ask?: string; attachResume?: boolean }): Promise<{ drafts: Draft[]; notice: string }> {
   const drafts: Draft[] = [];
   for (const r of ranked) drafts.push(await draftFor(p, r, o));
-  return { drafts, notice: `${drafts.length} drafts are ready and held. Nothing is sent until you confirm each address and approve each email.` };
+  return { drafts, notice: `${drafts.length} drafts are ready and held. Nothing is sent until you confirm each address and say yes to the emails shown; one yes approves exactly those.` };
 }
 // The person edits a draft: the body changes, the hash follows, and any earlier approval no longer matches.
 export async function editDraft(d: Draft, body: string): Promise<Draft> {

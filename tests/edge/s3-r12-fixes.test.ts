@@ -165,7 +165,7 @@ Deno.test("S3 r12 / H010: \"next question\" never serves a bank question the bra
 
 // ---- S3 r12, architect ruling: code's next-step line after an empty search whose kept reply neither asks nor offers (next_step.ts)
 import { agentTurn } from "../../supabase/functions/agent-chat/career_brain.ts";
-import { emptySearchNextStep, nextStepLine, watchVerified } from "../../supabase/functions/_shared/agent/next_step.ts";
+import { emptySearchNextStep, nextStepLine, SEARCH_AGAIN, watchVerified } from "../../supabase/functions/_shared/agent/next_step.ts";
 import { routerWatchProbe, watchHostReady } from "../../supabase/functions/agent-chat/career_staged.ts";
 const H035 = "got anything for nurses near columbus who want days only?";
 const stub = (query: string, draft: string) => {
@@ -276,10 +276,11 @@ Deno.test("S3 r12 / H035: an empty search whose kept reply asks and offers nothi
   eq(line, 'Say "watch for registered nurse day shift roles" and I\'ll save a watch for them on your list.');
   assert(String(r.reply).endsWith(line), r.reply);
   eq(String(r.reply).split(line).length, 2, "once");
-  // (a watch code would not save as asked: no line)
+  // (a watch code would not save as asked: no watch line, the search-again line instead, once)
   for (const [q, stores] of [["registered nurse day shift Columbus", { profile: structuredClone(PROFILE) }], ["registered nurse day shift", {}], ["stop", { profile: structuredClone(PROFILE) }]] as const) {
     const n = await turn(q, `The search for ${q} returned 0 postings [E2]. Nothing has been sent or applied to.`, H035, structuredClone(stores) as any);
     assert(!/save a watch/.test(String(n.reply)), `${q}: ${n.reply}`);
+    assert(String(n.reply).endsWith(SEARCH_AGAIN) && String(n.reply).split(SEARCH_AGAIN).length === 2, `${q}: ${n.reply}`);
   }
 });
 
@@ -290,6 +291,7 @@ Deno.test("S3 r12 / H035: no line when the brain's own question or offer stood, 
   eq(nextStepLine("Nothing matched. I can look at named hospitals if you name them.", "nurse", false, yesQ), null, "an offer");
   eq(nextStepLine("Nothing matched.", "nurse", true, yesQ), null, "a search found postings");
   eq(nextStepLine("Nothing matched.", null, false, yesQ), null, "no empty search");
-  eq(nextStepLine("Nothing matched.", "nurse", false, () => false), null, "not verified");
+  eq(nextStepLine("Nothing matched.", "nurse", false, () => false), SEARCH_AGAIN, "not verified: search again");
+  eq(nextStepLine("Nothing matched. Which city should I search?", "nurse", false, () => false), null, "a question stood: nothing");
   assert(nextStepLine("Nothing matched.", "nurse", false, yesQ), "otherwise, the line");
 });

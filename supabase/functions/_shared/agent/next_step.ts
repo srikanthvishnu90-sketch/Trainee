@@ -24,8 +24,12 @@ export const asksOrOffers = (reply: string) => OFFER.test(String(reply ?? ""));
 // watch it offers is really saved for those words (`verified`, watchVerified below).
 export function nextStepLine(reply: string, emptyQuery: string | null | undefined, anyFound: boolean, verified: (query: string) => boolean = () => false): string | null {
   if (!emptyQuery || anyFound || !String(reply ?? "").trim() || asksOrOffers(reply)) return null;
-  return verified(emptyQuery) ? emptySearchNextStep(emptyQuery) : null;
+  return verified(emptyQuery) ? emptySearchNextStep(emptyQuery) : SEARCH_AGAIN;
 }
+// Ruling (S3 r12, after the review of cbea914e9): when the watch cannot be verified (no profile, a place in the words, a remapped
+// title), the next step is one that is always true and needs nothing on file: another search, wider. No command is quoted, so no
+// route has to match a phrase: whatever they reply is a new ask, and the brain searches it.
+export const SEARCH_AGAIN = "Tell me a nearby job title or a wider area and I'll search again.";
 
 // Review of ac1e068aa (REJECT): the line may promise a saved watch only when code's watch, run dry on the person's own state with the
 // exact phrase the line quotes, saves one for exactly those words. Refused: no profile on file; a command word ("stop", "cancel my

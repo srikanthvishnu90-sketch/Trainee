@@ -75,6 +75,20 @@ Deno.test("S3 r12 / H034: an empty-search reply naming the suggested roles survi
   assert(v.text.includes("Which of those sounds closest to what you want?"), v.text);
 });
 
+Deno.test("S3 r12 / H034: a tag written after the sentence's stop cites that sentence, not the next one", async () => {
+  // (probe-r12-ruling: "…nothing to show yet. [E2] Cashiers commonly…" and the repair's "…not postings. [E3]" on its own line)
+  const { l } = await emptySearch(H034, "entry level help desk support");
+  const sg = l.units.find((u) => u.kind === "suggestion")!;
+  const cited: string[][] = [];
+  const judge = async (cs: { claim: string; source: string }[]) => { for (const c of cs) cited.push([c.claim, c.source]); return cs.map(() => "yes" as const); };
+  const draft = `The search for entry level help desk support returned 0 postings. [E1] People moving into computer and IT work commonly start as IT support or help desk technician, or QA tester; this is general career knowledge, not postings. [${sg.id}]\nWhich of those sounds closest to what you want?`;
+  const v = await verifyTagged(draft, l, { ask: H034, judge });
+  eq(v.failures, [], JSON.stringify(v.failures));
+  assert(v.text.includes("returned 0 postings.") && v.text.includes("help desk technician") && !/\[E\d/.test(v.text), v.text);
+  eq(v.citeOf.find(([x]) => x.startsWith("The search"))?.[1], ["E1"]);
+  eq(v.citeOf.find(([x]) => x.startsWith("People moving"))?.[1], [sg.id]);
+});
+
 Deno.test("S3 r12 / H034: an empty-search reply that invents a posting or an employer is still dropped", async () => {
   const { l } = await emptySearch(H034, "entry level help desk support");
   const sg = l.units.find((u) => u.kind === "suggestion")!;

@@ -237,13 +237,18 @@ export function missingSpecifics(clause: string, units: EvidenceUnit[], strict =
 // Verify a tagged reply against its ledger: what stands (tags removed), and every failure with its reason.
 // (S3 r12: a clause that says something is open, posted or hiring is a posting claim; a suggestion unit never holds one)
 const POSTING_CLAIM = /\b(?:openings?|postings?|posted|vacanc(?:y|ies)|hiring|hires|listings?|listed|job ads?|positions? (?:open|available)|(?:is|are) open|apply (?:to|for|at)|now accepting)\b/i;
-const forClaim = (us: EvidenceUnit[], text: string) => POSTING_CLAIM.test(text) ? us.filter((u) => u.kind !== "suggestion") : us;
+// (a posting denied, "not postings", "no openings", claims none)
+const NO_POSTING = /\b(?:not|no|never|nor|zero|0)\s+(?:an?\s+|any\s+)?(?:[\p{L}-]+\s+){0,2}?(?:openings?|postings?|listings?|vacanc(?:y|ies))\b/giu;
+const forClaim = (us: EvidenceUnit[], text: string) => POSTING_CLAIM.test(String(text).replace(NO_POSTING, " ")) ? us.filter((u) => u.kind !== "suggestion") : us;
+const TAG_AFTER_STOP = /([.!?])(["'\u201d)\]]*)[ \t]*(\[E\d+(?:\s*,\s*E\d+)*\])/g;
 const LIST_MARK = /^\s*(?:\(?\d{1,2}[.)]|[-•*]|[a-z][.)])\s*$/i;
 export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: SupportJudge | null; own?: string[]; onRecord?: (s: string) => boolean | null; ask?: string; carry?: string | null } = {}): Promise<Verified> {
   // (a question to the person may name only what their own record or their ask names)
   const allowed = [String(o.ask ?? ""), ...ledger.units.filter((u) => u.kind === "record").map((u) => u.text)].join("\n");
   const own = new Set((o.own ?? []).map((x) => x.trim()));
-  const lines = String(reply ?? "").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : splitSentences(l).filter((x) => x.trim()));
+  // (S3 r12: a tag written after the sentence's own stop, "nothing to show yet. [E2] Cashiers…", is that sentence's: the split put it
+  // on the next one, so the sentence it ended went uncited and the next one carried a unit that is not about it)
+  const lines = String(reply ?? "").replace(TAG_AFTER_STOP, " $3$1$2").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : splitSentences(l).filter((x) => x.trim()));
   const raw = lines.map((l) => [...l]);
   const failures: Failure[] = [], kept: string[] = [];
   // (`parts`: a clause naming two or more employers, one part per employer, each with that employer's units; round 8 of #849)

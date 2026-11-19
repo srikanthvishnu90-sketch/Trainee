@@ -112,9 +112,16 @@ function payFact(r: ResultRow): string {
 const markForm = (r: ResultRow, f: ResultsFeed, kind: "dismiss" | "restore") => kind === "dismiss"
   ? `<form method="post" class="mark">${hidden(f.token, "dismiss", `<input type="hidden" name="ref" value="${esc(r.ref)}">`)}<button type="submit" class="ghost small" aria-label="Dismiss ${esc(r.job.title)} at ${esc(r.job.company)}">Dismiss</button><p class="markhelp">Hides this role from your list. Private to you, and you can bring it back. It does not touch any application.</p></form>`
   : `<form method="post" class="mark">${hidden(f.token, "restore", `<input type="hidden" name="ref" value="${esc(r.ref)}">`)}<button type="submit" class="ghost small" aria-label="Restore ${esc(r.job.title)} at ${esc(r.job.company)}">Restore</button></form>`;
+// MASS APPLY (rv-ma7): a "that I qualify for" list shows what each posting states it requires, quoted as posted, and that it
+// was not checked against the person (Trainee does not decide eligibility).
+function statedFact(stated: string[] | null | undefined): string {
+  if (!Array.isArray(stated)) return "";
+  const said = stated.length ? stated.map((s) => `“${esc(s)}”`).join("<br>") : "No citizenship, sponsorship, clearance, degree, graduation, residence, GPA, language or age requirement in its text";
+  return `<dt>Requirements as posted</dt><dd class="key">${said} <span class="src">· not checked against you: Trainee doesn't decide eligibility</span></dd>`;
+}
 function card(r: ResultRow, f: ResultsFeed): string {
   const j = r.job, link = webUrl(j.url), host = link ? hostOf(link) : "";
-  const facts = `<dl class="facts">${payFact(r)}<dt>Where</dt><dd class="key">${esc(r.place || NOT_LISTED)}</dd>${r.posted ? `<dt>Posted</dt><dd>${esc(r.posted.replace(/^Posted /, ""))}</dd>` : ""}<dt>Source</dt><dd>${esc(j.source || NOT_LISTED)}</dd><dt>Requisition ID</dt><dd>${esc(r.reqId || NOT_LISTED)}</dd><dt>Checked</dt><dd>${esc((r.checked ?? "Check time unknown").replace(/^Checked /, ""))}</dd></dl>`;
+  const facts = `<dl class="facts">${payFact(r)}<dt>Where</dt><dd class="key">${esc(r.place || NOT_LISTED)}</dd>${r.posted ? `<dt>Posted</dt><dd>${esc(r.posted.replace(/^Posted /, ""))}</dd>` : ""}<dt>Source</dt><dd>${esc(j.source || NOT_LISTED)}</dd><dt>Requisition ID</dt><dd>${esc(r.reqId || NOT_LISTED)}</dd><dt>Checked</dt><dd>${esc((r.checked ?? "Check time unknown").replace(/^Checked /, ""))}</dd>${statedFact(j.stated)}</dl>`;
   // The fit callout: one concrete reason from confirmed facts and a visible gap where the data has one. Nothing is invented.
   const gapText = r.payNote ? `Pay: ${r.payNote}.` : !r.payShown ? "Pay not listed, so it wasn't checked against what you asked." : r.openQs ? (r.guide || `${r.openQs} employer ${r.openQs === 1 ? "question needs" : "questions need"} your answer.`) : "";
   const fitLines = [r.why?.length ? `<p><b>Why it fits:</b> ${esc(r.why.slice(0, 1).join(" "))}</p>` : "", gapText ? `<p class="gap"><b>Gap:</b> ${esc(gapText)}</p>` : ""].join("");

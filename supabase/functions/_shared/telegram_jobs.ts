@@ -51,6 +51,9 @@ export interface JobView {
   // R10 WO-C: a search result's application-page check (link_check.ts) and when it ran; the results File says it beside the role.
   checked?: { state: "live" | "unknown" | "unchecked"; at: number } | null;
   submit?: { can: boolean; reason: string } | null; // R10 owner ruling: whether Trainee can submit it itself (submit_capability.ts)
+  // MASS APPLY (rv-ma7): "that I qualify for": the requirements the posting itself states (citizenship, sponsorship, clearance,
+  // degree, graduation, residence, GPA, language, age), quoted as posted, never checked against the person. [] : none stated.
+  stated?: string[] | null;
 }
 export interface PostingRow {
   job_id: string; provider?: string | null; company?: string; title?: string; location?: string | null; url?: string; description?: string | null;
@@ -85,7 +88,10 @@ export interface JobStore {
 export interface ListMeta { kind: "results"; what: string; floor: { amount: number; period: "hour" | "year" } | null; at: number;
   name?: string | null; source?: "live" | "snapshot" | null; read?: string | null; sources?: number;
   // The person's own marks on this page (private, reversible; they touch no application): roles set aside, and "Pause remaining".
-  dismissed?: string[]; paused?: { at: number } | null }
+  dismissed?: string[]; paused?: { at: number } | null;
+  // MASS APPLY (rv-ma7): a "that I qualify for" list: eligibility was not checked, so the File claims no fit and shows each
+  // posting's stated requirements as posted.
+  eligibility?: "unchecked" }
 
 export interface JobDeps {
   store: JobStore;

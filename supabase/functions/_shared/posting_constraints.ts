@@ -166,7 +166,9 @@ export function roleTextOf(text: string): string {
 }
 // A workplace the person rules out ("nothing in an office", "no office", "not onsite", "I don't want to work in an office", "never in
 // person"): remote only. Not one: "not fully onsite" (hybrid is fine) and "no more than 2 office days" (a count of days).
-export const NO_OFFICE = /\b(?:nothing|no|not|never|without|(?:i\s+)?(?:don'?t|do not|won'?t|will not)\s+(?:want|work|go)(?:\s+to\s+(?:work|be|go))?)\s+(?:(?:in|at|from|into|to)\s+)?(?:(?:an?|the|any)\s+)?(?:offices?|on[- ]?site|in[- ]office|in[- ]person|commut(?:e|es|ing))\b(?![- ]days?\b)(?:\s+(?:jobs?|roles?|work|positions?))?/;
+// S3 r12b review (PR #871): the office must be what is ruled out, at the end of its clause or before the words of the ask: "no office
+// politics", "no in-person interviews" rule out something else, and "I don't work in an office now" says what is, not what they want.
+export const NO_OFFICE = /\b(?:nothing|no|not|never|without|(?:i\s+)?(?:(?:don'?t|do not)\s+(?:want|go)|(?:won'?t|will not)\s+(?:want|work|go))(?:\s+to\s+(?:work|be|go))?)\s+(?:(?:in|at|from|into|to)\s+)?(?:(?:an?|the|any)\s+)?(?:offices?|on[- ]?site|in[- ]office|in[- ]person|commut(?:e|es|ing))\b(?![- ]days?\b)(?:\s+(?:jobs?|roles?|work|positions?))?(?=\s*(?:$|[,.;:!?)]|(?:and|or|but|please|thanks?|thank you|either|at all|ever|anymore|for me)\b))/;
 // S3 r12b review: the district words written after a city, and the places a search names besides its own.
 const PLACE_DISTRICT = "downtown|uptown|midtown|area|metro(?:politan)?(?:\\s+area)?|suburbs?|region|proper";
 const SECOND_PLACE = new RegExp(`(?:\\b(?:to|or|and|then)\\s+|[,/]\\s*)(?:${[...US_CITIES].sort((a, b) => b.length - a.length).map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")}|${Object.values(STATE_NAMES).join("|")}|${ABROAD.source})(?![\\w-])`, "g");

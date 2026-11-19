@@ -99,3 +99,25 @@ Deno.test("r12b-review-3 'ok' after Trainee's own question accepts it, and is no
   eq(replyKind("ok", [{ role: "assistant", content: "I found 3 data analyst roles in Chicago." }]), "ack");
   eq(replyKind("ok"), "ack");
 });
+
+Deno.test("r12b-review-4 'no office' is the remote-only limit only when the office is what is ruled out", () => {
+  // The office is not what is ruled out: politics, interviews, the job they have now.
+  const notRemote: [string, RegExp][] = [
+    ["no office politics, data analyst roles", /\bpolitics\b/],
+    ["data analyst roles, no in-person interviews", /^data analyst/],
+    ["I don't work in an office now but want office manager roles", /\boffice manager\b/],
+  ];
+  for (const [m, role] of notRemote) {
+    const st = searchTextOf(m);
+    eq(st.remote, false, m);
+    ok(role.test(st.role), `${m}: role ${st.role}`);
+  }
+  ok(!/\bremote\b/.test(searchTextOf("no office politics, data analyst roles").role));
+  // The office ruled out, at the end of a clause or before the words of the ask: remote only, and no word of it in the role.
+  for (const m of ["data analyst roles, nothing in an office please", "data analyst roles no commute", "data analyst roles, nothing in office jobs, thanks",
+    "data analyst roles, I won't work in an office", "data analyst roles, not on-site."]) {
+    const st = searchTextOf(m);
+    eq(st.remote, true, m);
+    ok(!/\b(?:office|commute|nothing|site)\b/.test(st.role), `${m}: role ${st.role}`);
+  }
+});

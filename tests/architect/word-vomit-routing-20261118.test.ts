@@ -15,6 +15,9 @@ Deno.test("word-vomit: the routing reading takes the talk out and keeps every an
     "find me marketing internships in new york. and also what was the name of that robotics one, the austin one");
   assertNode.equal(routingReading("they offered me 3 thousand a month is that like 18 an hour or what"), "they offered me 3000 a month is that 18 an hour or what");
   assertNode.equal(routingReading("harborlight offered twenty seven"), "harborlight offered 27");
+  // A dropped apostrophe hid the negation from every screen that reads "don't".
+  assertNode.equal(routingReading("find analyst internships but dont apply to anything"), "find analyst internships but don't apply to anything");
+  assertNode.equal(routingReading("draft it but dont send it im sending it myself"), "draft it but don't send it I'm sending it myself");
   // Answers, names and ordinary words are never changed: an approval is read as typed (D-MS-1).
   for (const m of ["ya do it", "yeah go for it", "ok", "ok go", "yes!!!", "yes but skip the second one", "the second one", "what is the pay period for this",
     "I'd like jobs like this", "i just like data", "can't wait to start", "email dana ruiz at bluestem", "one of them", "apply to 2 and 4"]) {

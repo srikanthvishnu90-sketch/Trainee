@@ -114,7 +114,8 @@ export function routingReading(message: string): string | null {
   // A pasted document (a resume, a posting, an email: several lines or a long block) is the person's own words to keep exactly,
   // and a link is read as typed; only a texted message is read here.
   if (!raw.trim() || raw.length > 600 || raw.split("\n").filter((l) => l.trim()).length > 2 || /https?:\/\//i.test(raw)) return null;
-  let t = dictation(raw);
+  // Apostrophes first: every screen reads "don't apply", "don't send it", "I'm" (a dropped one hid the negation).
+  let t = dictation(plainContractions(raw).replace(/\bi'(m|ve|d|ll)\b/g, "I'$1").replace(/\bi don't\b/g, "I don't"));
   t = t.replace(HESITATION, "$1");
   t = t.replace(LEAD, "");
   t = corrected(t);
@@ -122,5 +123,5 @@ export function routingReading(message: string): string | null {
   t = numbers(t);
   t = typos(t);
   t = t.replace(/\s+([,.!?])(?=\s|$)/g, "$1").replace(/,\s*\./g, ".").replace(/[ \t]+/g, " ").replace(/^[\s,.]+/, "").trim();
-  return t && t !== raw.trim() ? t : null;
+  return t && t !== raw.trim().replace(/[‘’ʼ`]/g, "'") ? t : null;
 }

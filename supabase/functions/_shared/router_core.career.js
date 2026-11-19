@@ -26499,7 +26499,7 @@ const CareerRender = (() => {
 
   const PDF_CONTENT_TYPE = "application/pdf";
   const DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  const HEADING_ALLOWLIST = ["EXPERIENCE", "EDUCATION", "SKILLS", "PROJECTS", "LEADERSHIP", "SUMMARY", "CERTIFICATIONS", "AWARDS", "PUBLICATIONS", "COURSEWORK", "ACTIVITIES", "RESEARCH", "ADDITIONAL"];
+  const HEADING_ALLOWLIST = ["EXPERIENCE", "EDUCATION", "SKILLS", "PROJECTS", "LEADERSHIP", "SUMMARY", "CERTIFICATIONS", "AWARDS", "PUBLICATIONS", "COURSEWORK", "ACTIVITIES", "RESEARCH", "ADDITIONAL", "RELEVANT EXPERIENCE", "ADDITIONAL EXPERIENCE"];
 
   function toBlocks(resume) {
     const blocks = [];

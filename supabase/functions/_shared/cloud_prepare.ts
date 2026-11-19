@@ -132,7 +132,19 @@ export interface PrepareBridgeDeps {
   now?: () => number;
   // WO-G: the review File links for a card's applications (application_review_links.ts); absent, the card is as before.
   review?: (user: string, preparedIds: string[]) => Promise<string | null>;
+  // MASS APPLY CONVERSATIONS: each ready application's role and what its posting states (where, pay and deadline as posted),
+  // shown on the card (career_apply_cards.ts withRoles); absent or failing, the card is as before.
+  describe?: (user: string, rows: any[]) => Promise<any[]>;
 }
+// MASS APPLY CONVERSATIONS (2026-11-17, ag/ma-10-whole-request-prep; source ag/mass-apply-10 b01849ec0; D-092 and D-094,
+// owner 2026-11-16: every posting of a request prepared in one pass; D-NO-LIMITS): the person's candidates are read whole
+// when the bounded read does not cover the request. The read was bounded at 25 per person, and the database numbers a
+// person's candidates BEFORE it drops the ones already prepared (career_apply_prepare_candidates_for: rn, then "not exists
+// prepared"), so after the first 25 were prepared the sandbox's next round read the same 25, all dropped, and stopped: a
+// request of 50 postings prepared 25, the card showed those 25, and the other 25 were never prepared, with nothing said
+// (eval MA14). CANDIDATES_READ is a sanity bound on the argument only (the function takes any number), far above any one
+// request.
+export const CANDIDATES_READ = 10000;
 const refuse = (status: number, error: string) => ({ status, body: { error } });
 // The resume one posting's application sends (R9-G2): the tailored file kept for that posting when there is one (its row
 // names the posting), else the kept resume, as before.
@@ -168,8 +180,11 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
         const name = String(body?.name ?? ""), args = body?.args && typeof body.args === "object" && !Array.isArray(body.args) ? body.args : {};
         if (name === "career_apply_prepare_candidates") {
           // Read for THIS person only (the limit counts their rows, never other people's); the filter below is defence in depth.
-          const rows = await d.rpc("career_apply_prepare_candidates_for", { p_user: user, p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
-          return { status: 200, body: (Array.isArray(rows) ? rows : []).filter((c: any) => c?.user_id === user && postings.has(String(c?.job_id))) };
+          const mine = (rows: unknown) => (Array.isArray(rows) ? rows : []).filter((c: any) => c?.user_id === user && postings.has(String(c?.job_id)));
+          let got = mine(await d.rpc("career_apply_prepare_candidates_for", { p_user: user, p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 }));
+          // Fewer than the request's postings: read again, whole (CANDIDATES_READ), so the rest of the request is prepared too.
+          if (got.length < postings.size) got = mine(await d.rpc("career_apply_prepare_candidates_for", { p_user: user, p_now: new Date(now).toISOString(), p_per_person: CANDIDATES_READ, p_limit: CANDIDATES_READ }));
+          return { status: 200, body: got };
         }
         if (PERSON_RPCS.has(name)) return { status: 200, body: await d.rpc(name, { p_user: user }) };
         if (POSTING_RPCS.has(name)) {
@@ -202,7 +217,8 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
           job_id: String(o?.job_id ?? "").slice(0, 300), outcome: String(o?.outcome ?? "").slice(0, 20), detail: String(o?.detail ?? "").slice(0, 300),
         })) : [];
         // The card the person asked for, shown now: every application this request made ready, as the card shows them.
-        const ready = await d.rpc("career_apply_prepare_request_ready", { p_id: id, p_lease: lease });
+        let ready = await d.rpc("career_apply_prepare_request_ready", { p_id: id, p_lease: lease });
+        if (d.describe && Array.isArray(ready) && ready.length) ready = await d.describe(user, ready).catch(() => ready);
         let card: string | null = null, push = "nothing_ready";
         const c = Array.isArray(ready) && ready.length ? cardFor(ready.filter((r: any) => { const one = cardFor([r]); return one !== null && "take" in one; })) : null;
         // MASS APPLY (2026-11-01): ONE card for the batch. While the person still has a question open (another posting of
@@ -215,7 +231,10 @@ export async function handlePrepareBridge(op: string, body: any, d: PrepareBridg
         const stillAsking = c && "take" in c ? await (async () => {
           const q = await d.rpc("career_apply_questions_open_as", { p_user: user, p_limit: 1 });
           if (Array.isArray(q) && q.length) return true;
-          const more = await d.rpc("career_apply_prepare_candidates_for", { p_user: user, p_now: new Date(now).toISOString(), p_per_person: 25, p_limit: 500 });
+          // Every one of the person's candidates is numbered (CANDIDATES_READ, as above: one waiting past the 25th still holds the
+          // card), but only readyNow.size + 1 rows come back: the database drops prepared ones itself, so one row not ready now
+          // is all this needs (review of ag/mass-apply-10: never 10,000 rows into memory on every finish).
+          const more = await d.rpc("career_apply_prepare_candidates_for", { p_user: user, p_now: new Date(now).toISOString(), p_per_person: CANDIDATES_READ, p_limit: readyNow.size + 1 });
           return Array.isArray(more) && more.some((x: any) => x?.user_id === user && !readyNow.has(String(x?.job_id)));
         })().catch(() => false) : false; // unreadable: pushed as before (never hold a card on a read that failed)
         // A card is one message (4,000 characters): when the batch's ready applications do not all fit, a card of the first

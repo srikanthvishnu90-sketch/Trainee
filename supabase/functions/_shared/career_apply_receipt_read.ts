@@ -38,8 +38,8 @@ const APP = "(?:(?:my |the )?(?:application|app|job application)(?: (?:to|for|at
 const ONE: RegExp[] = [
   new RegExp(`^ ${LEAD}(?:${SHOW} )?${RECEIPT} (?:for|of|from|on) ${APP}?(.+?)(?: application| app)? $`),
   new RegExp(`^ ${LEAD}(?:${SHOW} )?(?:the |my )?(.+?) (?:application |app )?(?:receipt|proof|screenshots?) $`),
-  new RegExp(`^ ${LEAD}(?:${SHOW} )?(?:me )?what (?:did )?(?:you|trainee|we|it) (?:send|sent|submit|submitted|put|fill in|filled in|answer|answered|tell|told)(?: (?:in|on) (?:my|the) application)? (?:to|for|at|with) (.+?)(?: exactly)? $`),
-  new RegExp(`^ ${LEAD}what (?:did|have) (?:you|trainee|we) (?:send|sent|submit|submitted|tell|told) (.+?)(?: exactly)? $`),
+  new RegExp(`^ ${LEAD}(?:${SHOW} )?(?:me )?(?:exactly |precisely |just )?what (?:exactly )?(?:did )?(?:you|trainee|we|it) (?:exactly )?(?:send|sent|submit|submitted|put|fill in|filled in|answer|answered|tell|told)(?: (?:in|on) (?:my|the) application)? (?:to|for|at|with) (.+?)(?: exactly)? $`),
+  new RegExp(`^ ${LEAD}(?:exactly )?what (?:did|have) (?:you|trainee|we) (?:exactly )?(?:send|sent|submit|submitted|tell|told) (.+?)(?: exactly)? $`),
   new RegExp(`^ ${LEAD}what (?:answers|information|info|details) (?:did|have) (?:you|trainee|we) (?:send|sent|submit|submitted|give|given|put)(?: (?:to|for|on|in))? (?:the |my )?(.+?)(?: application)?(?: exactly)? $`),
   new RegExp(`^ ${LEAD}what (?:was|got) (?:sent|submitted) (?:to|for|at) (.+?)(?: exactly)? $`),
   new RegExp(`^ ${LEAD}what did my application (?:to|for|at|with) (.+?) (?:say|contain|include|have in it) $`),

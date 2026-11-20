@@ -1022,3 +1022,30 @@ Failures per case over the five passes: H034 5, H029 5, H018 5, H011 4, H025 3, 
 - Noise, not fixed: H021, H035, H001, H027 (one pass each, judge disagreement, sonnet passed; H001's reply is the prompt's own
   prescribed opener; H027's flagged M&A topics are the question bank's).
 - Proof: `tests/architect/dev-reply-quality.test.ts` (offline). Re-run: pending (the lead measures).
+
+---
+
+## S3 sitting on 2789d3090 (subscription, dev, bar 37/38 per pass, D-056): H022 (both judges), H013 and H015 (split)
+Branch `ag/s3-r12c-replies`. Probes: `--subscription --brain staged --set dev --only H013,H015,H022,H002,H005`, 5 cases a pass.
+- H022 (p2, both judges): turn 2 "which of my skills match a data analyst role?" searched; the empty search made it an evidence
+  turn, so the reply pipeline ran. What they said in turn 1 was saved as drafts (not confirmed), so no ledger unit held it (the
+  ledger is confirmed facts only, D-007); "SQL" and "Reporting" were read as unknown employers; and the brain's own judgement
+  ("SQL for pulling data …") had nothing to rest on. Every mapping sentence was dropped; the repair kept the suggestion unit.
+  A traced replay also found turn 1's "BI analyst" read as an employer and carried, dropping every later sentence.
+  Lines: `reply_pipeline.ts` verifyTagged (`unknownIn`, the untagged-sentence path); `career_brain.ts` runReplyPipeline call.
+  Fix: 4875c5fea (the check, never the drafting ledger, reads the person's own messages as "said" units; they back no employer
+  or posting claim; a word their own lines use plainly is no employer) and e6284bdf7 (when every tool unit is an empty search's
+  count line, a sentence to the person naming their own words, with no employer, posting claim, unsaid figure or status claim,
+  stands; a word before a job title's singular head noun is no employer).
+- H013 (p2, sonnet): "stop, don't submit anything yet" -> list_applications -> the strict applications hold dropped the model's
+  "nothing goes out without your yes" (no allow-list word; or joined to a status clause). Line: `career_brain.ts` keptSentences.
+  Fix: b607840de, 4992ad5b7: the consent rule (Trainee's rule about what it will do, not a status claim) stays; joined to a
+  status clause, only the rule's own clause stays; a past-tense, counted, outcome or "you did" sentence is held as before.
+- H015 (p1, haiku): the people-matching stop offered "a coffee-chat email to a role at a named company" though the person named
+  Bluepeak Networks. Line: `142-career-router.js` handlePeopleMatchingStop `alt`. Fix: 9bdb0fba1: with a company named, the
+  alternative is the single-draft route for that company, for them to send themselves, quoting a command that route answers;
+  the company is read from the person's words (detypo had re-spelled "Networks" as "Network", CB-0441 class).
+- Re-run (5 cases a pass): baseline 2789d3090 5 passes: H013 fail 3/5, H022 fail 3/5, others 0. After 4992ad5b7, 6 passes:
+  H013 0/6, H015 0/6, H002 0/6, H022 1/6 (haiku only: "SQL for pulling and querying data" read as a capability not stated),
+  H005 1/6 (haiku only: "still waiting for your yes", the confirm-claim class, not touched here).
+- Proof: `tests/edge/s3-r12c-h022.test.ts`, `-h013.test.ts`, `-h015.test.ts` (offline, in gate.sh).

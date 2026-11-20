@@ -14570,7 +14570,13 @@ const CareerRouter = (() => {
     return { intent: "outreach_draft", reply, resultStatus: "awaiting_user", sends: 0, draft: gated.draft, gate: gated.gate, held_reason: "no_address_on_file" };
   }
 
-  function singleDraftTargetOf(text) {
+  function saidCompany(text, said) {
+    const own = said ? companyFromText(s(said)) : null;
+    const routed = companyFromText(s(text));
+    if (own && routed && lc(own).split(/\s+/).length === lc(routed).split(/\s+/).length) return own;
+    return routed || null;
+  }
+  function singleDraftTargetOf(text, said) {
     const raw = s(text);
     const t = lc(text);
     if (!/\b(draft|write|compose)\b/.test(t)) return null;
@@ -14580,12 +14586,12 @@ const CareerRouter = (() => {
     if (!m) return null;
     const role = m[1].trim();
     if (!/\b(analyst|banker|associate|recruiter|manager|engineer|consultant|intern|partner|director|alum)\b/i.test(role)) return null;
-    const company = companyFromText(raw) || m[2].replace(/[.?!]+$/, "").trim();
+    const company = saidCompany(raw, said) || m[2].replace(/[.?!]+$/, "").trim();
     if (!company || company.length < 3) return null;
     return { role, company };
   }
-  function handleSingleDraftAsk(text, ctx) {
-    const target = singleDraftTargetOf(text);
+  function handleSingleDraftAsk(text, ctx, said) {
+    const target = singleDraftTargetOf(text, said);
     if (!target) return null;
     const profile = ctx.profile || {};
     const facts = Array.isArray(profile.facts) ? profile.facts : [];
@@ -14615,18 +14621,24 @@ const CareerRouter = (() => {
     return { intent: "outreach_draft", reply, resultStatus: "awaiting_user", sends: 0, draft };
   }
 
-  function handlePeopleMatchingStop(text, ctx) {
+  function handlePeopleMatchingStop(text, ctx, said) {
     const t = lc(text);
     const raw = s(text);
     if (namedRecipientFromAsk(raw)) return null;
     const company = companyFromText(raw, ctx);
+    const ownCompany = company ? saidCompany(raw, said) : null;
     if (company) {
       try {
         const gs = graphStoreOf(ctx);
         if (gs && Array.isArray(gs.people) && gs.people.some((p) => p && lc(p.current_firm || p.company || "") === lc(company))) return null;
       } catch {   }
     }
-    const alt = "What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts.";
+    const roleM = /\b(alum(?:nus|na|ni)?|analyst|banker|associate|recruiter|manager|engineer|consultant|intern|partner|director)\b/.exec(t);
+    const draftRole = roleM ? (/^alum/.test(roleM[1]) ? "alum" : roleM[1]) : null;
+    const draftCmd = ownCompany && draftRole ? `draft a coffee-chat email to ${/^[aeiou]/.test(draftRole) ? "an" : "a"} ${draftRole} at ${ownCompany}` : null;
+    const alt = !ownCompany
+      ? "What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts."
+      : `What I can do instead: draft a coffee-chat email to ${draftRole ? `${/^[aeiou]/.test(draftRole) ? "an" : "a"} ${draftRole}` : "someone in the role you name"} at ${ownCompany}, written from your confirmed facts, for you to send yourself${draftCmd ? ` — say "${draftCmd}"` : ""}; or build a shortlist from sources you supply (your LinkedIn export, names you paste, your school's alumni directory), with every name carrying its source.`;
     if (/\bwho exactly would this go to\b|\bgive me their name and email\b|\bwho is this (going )?to\b/.test(t)) {
       const draft = planDraftOf(ctx);
       if (draft) {
@@ -23408,9 +23420,9 @@ const CareerRouter = (() => {
     if (namedLink) return namedLink;
     const namedApply = handleNamedRoleApply(text, c);
     if (namedApply) return namedApply;
-    const singleDraft = handleSingleDraftAsk(text, c);
+    const singleDraft = handleSingleDraftAsk(text, c, rawText);
     if (singleDraft) return singleDraft;
-    const pmStop = handlePeopleMatchingStop(text, c);
+    const pmStop = handlePeopleMatchingStop(text, c, rawText);
     if (pmStop) return pmStop;
     const earlyRecall = handleConversationRecall(text, c, { early: true });
     if (earlyRecall) return earlyRecall;

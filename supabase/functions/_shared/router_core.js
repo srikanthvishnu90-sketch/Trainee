@@ -38650,7 +38650,16 @@ const CareerRouter = (() => {
   // and the follow-up "make it shorter" had nothing to revise.
   // Campaign-scale asks (counts, lists, many firms) never match this
   // gate and keep the plan-first path.
-  function singleDraftTargetOf(text) {
+  // S3 r12c (dev H015): `said` is the person's own words. The routing copy (detypo) re-spells a company one edit from the route
+  // vocabulary (a company ending "Networks" became "... Network", the CB-0441 class), so the company a draft names is read from what they
+  // wrote whenever it names one there.
+  function saidCompany(text, said) {
+    const own = said ? companyFromText(s(said)) : null;
+    const routed = companyFromText(s(text));
+    if (own && routed && lc(own).split(/\s+/).length === lc(routed).split(/\s+/).length) return own;
+    return routed || null;
+  }
+  function singleDraftTargetOf(text, said) {
     const raw = s(text);
     const t = lc(text);
     if (!/\b(draft|write|compose)\b/.test(t)) return null;
@@ -38660,12 +38669,12 @@ const CareerRouter = (() => {
     if (!m) return null;
     const role = m[1].trim();
     if (!/\b(analyst|banker|associate|recruiter|manager|engineer|consultant|intern|partner|director|alum)\b/i.test(role)) return null;
-    const company = companyFromText(raw) || m[2].replace(/[.?!]+$/, "").trim();
+    const company = saidCompany(raw, said) || m[2].replace(/[.?!]+$/, "").trim();
     if (!company || company.length < 3) return null;
     return { role, company };
   }
-  function handleSingleDraftAsk(text, ctx) {
-    const target = singleDraftTargetOf(text);
+  function handleSingleDraftAsk(text, ctx, said) {
+    const target = singleDraftTargetOf(text, said);
     if (!target) return null;
     const profile = ctx.profile || {};
     const facts = Array.isArray(profile.facts) ? profile.facts : [];
@@ -38707,18 +38716,28 @@ const CareerRouter = (() => {
   // by the 135 handlers downstream) are carved out: when the graph
   // on the turn actually names people at the asked company, this
   // handler stands down and the graph answers.
-  function handlePeopleMatchingStop(text, ctx) {
+  function handlePeopleMatchingStop(text, ctx, said) {
     const t = lc(text);
     const raw = s(text);
     if (namedRecipientFromAsk(raw)) return null; // a named person is the draft family's ask
     const company = companyFromText(raw, ctx);
+    const ownCompany = company ? saidCompany(raw, said) : null;
     if (company) {
       try {
         const gs = graphStoreOf(ctx);
         if (gs && Array.isArray(gs.people) && gs.people.some((p) => p && lc(p.current_firm || p.company || "") === lc(company))) return null;
       } catch { /* no graph: the stop stands */ }
     }
-    const alt = "What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts.";
+    // S3 r12c (dev H015, s3sub 2789d3090 p1: an introduction ask that named the company got the alternative "draft a coffee-chat
+    // email to a role at a named company", though they had named one): when the ask names the company, the alternative
+    // is the draft route for THAT company, and the command it quotes is one the single-draft route really answers (a role it reads,
+    // the company as they wrote it). Sending stays off, so the draft is one they send themselves.
+    const roleM = /\b(alum(?:nus|na|ni)?|analyst|banker|associate|recruiter|manager|engineer|consultant|intern|partner|director)\b/.exec(t);
+    const draftRole = roleM ? (/^alum/.test(roleM[1]) ? "alum" : roleM[1]) : null;
+    const draftCmd = ownCompany && draftRole ? `draft a coffee-chat email to ${/^[aeiou]/.test(draftRole) ? "an" : "a"} ${draftRole} at ${ownCompany}` : null;
+    const alt = !ownCompany
+      ? "What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts."
+      : `What I can do instead: draft a coffee-chat email to ${draftRole ? `${/^[aeiou]/.test(draftRole) ? "an" : "a"} ${draftRole}` : "someone in the role you name"} at ${ownCompany}, written from your confirmed facts, for you to send yourself${draftCmd ? ` — say "${draftCmd}"` : ""}; or build a shortlist from sources you supply (your LinkedIn export, names you paste, your school's alumni directory), with every name carrying its source.`;
     // The standing draft's recipient: an identity demand about a
     // draft that exists gets the truth about THAT draft.
     if (/\bwho exactly would this go to\b|\bgive me their name and email\b|\bwho is this (going )?to\b/.test(t)) {
@@ -51235,11 +51254,11 @@ const CareerRouter = (() => {
     // LANE A v2 ITEM 4 (CB-0247): a single named-company draft ask
     // materializes ONE draft here, before the campaign-plan family
     // can read it as list-building.
-    const singleDraft = handleSingleDraftAsk(text, c);
+    const singleDraft = handleSingleDraftAsk(text, c, rawText);
     if (singleDraft) return singleDraft;
     // LANE A v2 ITEM 5: people-matching asks end in the plain honest
     // stop here, before recommendations/fallback can claim them.
-    const pmStop = handlePeopleMatchingStop(text, c);
+    const pmStop = handlePeopleMatchingStop(text, c, rawText);
     if (pmStop) return pmStop;
     // LANE A v2 ITEM 1 (CB-0443): a memory question that resolves
     // against the stated record is claimed HERE — with a profile

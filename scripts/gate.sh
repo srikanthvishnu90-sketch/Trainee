@@ -118,6 +118,9 @@ edge_tests=(
   tests/edge/model-errors.test.ts
   tests/edge/agent-guards.test.ts
   tests/edge/s3-r12-fixes.test.ts
+  tests/edge/s3-r12c-h022.test.ts
+  tests/edge/s3-r12c-h013.test.ts
+  tests/edge/s3-r12c-h015.test.ts
   tests/edge/eval-support-judge.test.ts
   tests/edge/conversation-hardening.test.ts
   tests/edge/career-ingest.test.ts

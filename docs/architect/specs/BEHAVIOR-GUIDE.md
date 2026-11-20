@@ -62,7 +62,8 @@ The owner named six things that had distorted earlier results:
 
 ## D-066 scoring
 
-`evals/mirror/score-conversation.ts` (`SCORER_VERSION` `wa-1/d066`) scores a conversation this way.
+`evals/mirror/score-conversation.ts` (`SCORER_VERSION` `wa-1/d066-ask`; `wa-1/d066` until 2026-11-13, when answers-first
+began to be given the turn's ask, as the rubric requires) scores a conversation this way.
 
 - **Coverage.** A turn is scored only when it ran under Instinct's conditions. These are excluded and reported as gaps:
   - `not_run`: the run stopped before the turn.

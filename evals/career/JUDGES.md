@@ -9,6 +9,7 @@ Owner directive 2026-11-02: Trainee is Claude only, judges included. No OpenAI c
 
 - Pass rule: an item passes only when A passes, B passes and the code-counted state check holds. Disagreement is a failure until both pass; a judge that errors fails the item and makes the pass NOT A SCORE.
 - Judge B's `pass` is derived by code from its checks; a met line needs a quote that really occurs in the reply or the end state (case and spacing aside), except a met must_not line, whose evidence is an absence.
+- An unmet must_not line (a claimed violation) needs a quote of the offending text that occurs in the reply; without one it is not a violation (owner decision 2026-11-07, after judge B marked must_not lines unmet with no quote while its own note said the reply passed: S3 release 8). Judge A still grades every must_not line. The fingerprint (models, prompts, token limits, pass rule) is unchanged; S3 baselines are re-measured with this rule.
 - Every result records `judge_prompt_sha` (the fingerprint below) and `judge_disagreement` (A/B split items and rate). Over 15% the pair is treated as unreliable (threshold to be ratified by the owner).
 - Independence limit, stated plainly: two Claude judges share training data and blind spots. Agreement between them is weaker evidence than agreement between two model families. The code-counted state checks, the task eval (judged by rows) and an owner spot check are the model-free anchors.
 

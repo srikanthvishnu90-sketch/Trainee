@@ -424,6 +424,13 @@ const CareerAssign = (() => {
       url: posting.url,
       source: posting.source,
       posted_at: posting.posted_at || null,
+      // MI-106 (Spec 2 §2.5): a first-seen posting the source dates >60 days
+      // old is flagged possibly-stale IN the reminder; a repost is flagged
+      // reposted. Both come from 121's verdict on the posting/alert record —
+      // never re-derived here from the raw date alone.
+      possibly_stale: posting.possibly_stale === true,
+      reposted: posting.reposted === true,
+      repost_count: posting.repost_count || 0,
       detected_at: new Date(now).toISOString(),
       deadline: extractDeadline(posting),
       fit: { score, bucket, lines: fitLines, matched_fact_ids: factIds },
@@ -439,7 +446,8 @@ const CareerAssign = (() => {
     const who = r.company_stated ? r.company : "an employer whose name is not stated in the posting";
     const dl = r.deadline ? ` Deadline, in the posting's own words: "${r.deadline.text}".` : "";
     const fit = r.fit && r.fit.lines && r.fit.lines.length ? ` ${r.fit.lines[0]}.` : "";
-    return `New ${r.role_title} posting: ${r.title} at ${who}${r.location ? ` — ${r.location}` : ""}.${fit}${dl} Apply: ${r.url}`;
+    const stale = r.possibly_stale ? " Possibly stale: this posting was first seen today but its source dates it more than 60 days old." : "";
+    return `New ${r.role_title} posting: ${r.title} at ${who}${r.location ? ` — ${r.location}` : ""}.${fit}${dl}${stale} Apply: ${r.url}`;
   }
 
   // ---- reminder queue (the delivery contract) ----------------------------------
@@ -680,6 +688,10 @@ const CareerAssign = (() => {
         // extractDeadline see an empty string (deadline null on every
         // alert-fed reminder) and removed roleMatch's JD-head leg.
         jd_text: c.jd_text || "",
+        // MI-106: 121's repost/stale verdicts ride the alert record (151) —
+        // preserve them so the reminder can flag a possibly-stale posting.
+        reposted: c.reposted === true, repost_count: c.repost_count || 0,
+        possibly_stale: c.possibly_stale === true, first_seen_at: c.first_seen_at || null,
         _inherited_fit: c.fit || null, _inherited_fit_lines: c.fit_lines || [], _inherited_fact_ids: c.matched_fact_ids || [],
       };
     }

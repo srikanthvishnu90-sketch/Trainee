@@ -1058,7 +1058,7 @@ function keptSentences(reply: string, strict: boolean, own: string): string {
       const ok: boolean = stays(x) && !(dropped && !soleConsent(tidy(x).replace(/\*+/g, "")) && /^\W*(?:that|this|it|those|these|which|so)\b|\b(?:it|them)\b/i.test(x));
       // (S3 r12c, the probes after b607840de: the rule joined to a status clause, "Nothing was submitted, and nothing will go out
       // without your yes to the card that shows it", went with it; the rule's own clause, the model's words, stays on its own)
-      const rule = !ok && strict ? consentClause(x) : null;
+      const rule: string | null = !ok && strict ? consentClause(x) : null;
       if (ok) kept.push(x); else if (rule) kept.push(rule); else if (/:\s*$/.test(x)) headGone = true;
       dropped = !ok && !rule;
     }

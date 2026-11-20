@@ -1048,4 +1048,13 @@ Branch `ag/s3-r12c-replies`. Probes: `--subscription --brain staged --set dev --
 - Re-run (5 cases a pass): baseline 2789d3090 5 passes: H013 fail 3/5, H022 fail 3/5, others 0. After 4992ad5b7, 6 passes:
   H013 0/6, H015 0/6, H002 0/6, H022 1/6 (haiku only: "SQL for pulling and querying data" read as a capability not stated),
   H005 1/6 (haiku only: "still waiting for your yes", the confirm-claim class, not touched here).
+- Review of #871 (independent, REJECT high on 4312fcc9d) and the fix 159735b0d/eadd752e8/c3f636b07: e6284bdf7's empty-search
+  path is REMOVED. It stood a you/your sentence sharing one word with the person's messages without the support judge (invented
+  skills, degrees and outcomes; "12" from "2012"; a pasted job post or a friend's resume read as theirs; flipped negations).
+  Now every sentence goes to the support judge with the person's own words as evidence (`ownStatements`: first-person, non-question,
+  non-negated sentences of their own messages; pasted, quoted or third-party text excluded); a figure only a said unit holds must
+  match as a whole number; a sentence using a name as an employer never rests on a said unit (`saidBarred`, B2). The strict
+  applications hold keeps only Trainee's own consent rule (no status word, application noun, name, or "nothing else/new/more", B3).
+  The people stop names a company only when the ask names one to reach (two companies or hearsay: the general alternative).
+  Re-run at c3f636b07 (5 cases a pass): 4 passes, 20/20.
 - Proof: `tests/edge/s3-r12c-h022.test.ts`, `-h013.test.ts`, `-h015.test.ts` (offline, in gate.sh).

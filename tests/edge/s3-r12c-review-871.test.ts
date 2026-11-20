@@ -1,8 +1,9 @@
-// Review of PR #871 (B1, B2; B3 below): the person's own words in this chat never let a sentence past the support judge, and they back only
+// Review of PR #871 (B1, B2): the person's own words in this chat never let a sentence past the support judge, and they back only
 // what the person said about themselves, in the first person. Every probe below stood on 4312fcc9d.
 // Run: deno test -A --no-check tests/edge/s3-r12c-review-871.test.ts
 import { Ledger, ownStatements, verifyTagged } from "../../supabase/functions/_shared/agent/reply_pipeline.ts";
 import { careerTools } from "../../supabase/functions/_shared/agent/career_tools.ts";
+import { consentRule, heldReply, type Look } from "../../supabase/functions/agent-chat/career_brain.ts";
 
 function assert(v: unknown, m = "assertion failed"): asserts v { if (!v) throw new Error(m); }
 const NOW = Date.UTC(2026, 9, 19, 15);
@@ -88,3 +89,26 @@ Deno.test("Review #871 B2: where the name is a plain word of theirs it still cle
   assert(!v.failures.length, JSON.stringify(v.failures));
 });
 
+// ---------------------------------------------------------------------------------------------------------------- B3
+const ownEmpty: Look = { tried: true, ok: true, status: "complete", what: [], read: [], found: [], own: true };
+const NONE = "Trainee's saved record shows no applications of yours.";
+const B3: [string, RegExp][] = [
+  ["Your Stripe application is queued and won't be submitted without your yes.", /Stripe|queued|submitted/],
+  ["Your application to Acme is ready and will only go out after your approval.", /Acme|ready|approval/],
+  ["Your Acme draft won't go out without your yes.", /Acme|draft|without your yes/],
+  ["I submitted two applications, and nothing else goes out without your yes.", /submitted|two applications|nothing else|without your yes/i],
+];
+for (const [draft, leak] of B3) Deno.test(`Review #871 B3: after code's empty record line the strict hold keeps no status claim: "${draft}"`, () => {
+  const out = heldReply(draft, ownEmpty, true);
+  assert(out.startsWith(NONE), out);
+  assert(!leak.test(out.replace(NONE, "")), `a false status claim stood: ${out}`);
+  assert(!consentRule(draft), draft);
+});
+Deno.test("Review #871 B3: the rule as Trainee's own still stands, and the reply is never emptied", () => {
+  const out = heldReply("Nothing goes out without your yes to the card that shows it.", ownEmpty, true);
+  assert(out.startsWith(NONE) && out.includes("Nothing goes out without your yes to the card that shows it."), out);
+  for (const bad of ["Nothing new goes out without your yes.", "Nothing more will go out without your yes.", "Nothing further goes out without your approval.", "Nothing other than that goes out without your yes.",
+    "No Stripe application goes out without your yes.", "Nothing goes to Acme without your yes.", "I won't send the draft without your yes."])
+    assert(!consentRule(bad), bad);
+  for (const [draft] of B3) assert(/\p{L}/u.test(heldReply(draft, ownEmpty, true)), draft);
+});

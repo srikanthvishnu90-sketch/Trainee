@@ -1019,7 +1019,18 @@ const BULLET = /^\s*(?:[-*•]|\d+[.)])\s+/;
 const CONSENT_RULE = /\b(?:without|until|after)\s+(?:you(?:r)?\s+)?(?:(?:explicit|clear|own)\s+)?(?:yes|approval|approve|say(?:-so)?|go-ahead|ok|okay|permission)\b/i;
 const CONSENT_FUTURE = /\b(?:will|won'?t|never|goes|go|gets?|only|can|can't|cannot|nothing\s+(?:is|gets?)\s+(?:sent|submitted))\b/i;
 const CONSENT_PAST = /\b(?:was|were|has\s+been|have\s+been|had\s+been|went|got\s+(?:sent|submitted))\b/i;
-export const consentRule = (t: string) => CONSENT_RULE.test(t) && CONSENT_FUTURE.test(t) && !CONSENT_PAST.test(t) && !/\d/.test(t) && !OUTCOME.test(t) && !YOU_DID.test(t) && !IDIOM_NAMED.test(t);
+// (review of PR #871, B3: only the rule as Trainee's own: its subject is nothing, no, I, we, anything or everything; no word of status
+// (HELD_STATUS: "application", "submitted", "sent", ...); no application or draft named; no name ("Your Stripe application is queued
+// and won't be submitted without your yes", "Your Acme draft won't go out without your yes" are status claims); and never "nothing
+// else/new/more/further/other", which says something already went out)
+const CONSENT_SUBJECT = /^\W*(?:nothing|no\b|i\b|i'll|i\s+will|i\s+won't|we\b|we'll|anything|everything)/i;
+const CONSENT_NOUN = /\b(?:appl(?:y|ied|ies|ying|ications?)|apps?|drafts?|submissions?|resumes?|cover\s+letters?|emails?|messages?|cards?\s+(?:for|to)\s+\p{Lu})\b/iu;
+const CONSENT_MORE = /\bnothing\s+(?:else|new|more|further|other)\b|\b(?:no|any|anything)\s+(?:other|more|further|new|else)\b/i;
+export const consentRule = (t0: string) => {
+  const t = tidy(t0).replace(/\*+/g, "").replace(BULLET, "").trim();
+  return CONSENT_SUBJECT.test(t) && CONSENT_RULE.test(t) && CONSENT_FUTURE.test(t) && !CONSENT_PAST.test(t) && !HELD_STATUS.test(t) && !CONSENT_NOUN.test(t) && !CONSENT_MORE.test(t) &&
+    !/\p{Lu}/u.test(t.replace(/^\W*[\p{L}']+/u, "").replace(/(?<![\p{L}])I(?:'(?:ll|m|ve|d))?(?![\p{L}])/gu, "")) && !/\d/.test(t) && !OUTCOME.test(t) && !YOU_DID.test(t) && !IDIOM_NAMED.test(t);
+};
 // A sentence that is the consent rule and nothing else (one clause); one that also states something is cut to the rule's clause.
 const soleConsent = (t: string) => consentRule(t) && t.replace(/[.!]+$/, "").split(CLAUSE_SPLIT).filter((x) => x.trim()).length === 1;
 // The consent rule's own clause in a sentence that also states something else, as a sentence of its own, or null.

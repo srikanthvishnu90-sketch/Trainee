@@ -15,8 +15,11 @@ Deno.test("S3 r12c / H013: on a held applications turn the rule that nothing goe
   assert(out.startsWith("Trainee's saved record shows no applications of yours.") && out.includes(OWN_RECORD_NOTE), out);
   assert(out.includes("Nothing goes out without your yes to the card that shows it."), out);
   assert(!/You have no applications on file/.test(out), "the model's own status sentence is still code's to state");
-  for (const ok of ["Nothing will be submitted without your yes.", "I won't submit anything until you approve it.", "Nothing gets sent without your explicit yes.", "I'll only submit after your yes to that exact application."])
+  for (const ok of ["I won't submit anything until you approve it.", "Nothing goes out without your yes.", "Nothing will go out until you approve it."])
     assert(consentRule(ok), ok);
+  // (review of PR #871, B3: a word of status, an application or a draft named, is held even in the rule's shape)
+  for (const held of ["Nothing will be submitted without your yes.", "Nothing gets sent without your explicit yes.", "I'll only submit after your yes to that exact application."])
+    assert(!consentRule(held), held);
 });
 
 Deno.test("S3 r12c / H013: a status report dressed as the rule is still held", () => {

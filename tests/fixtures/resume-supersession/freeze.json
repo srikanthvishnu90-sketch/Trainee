@@ -1,0 +1,13 @@
+{
+  "base": "e66e39cf9e30044341773298c9896007fc12663c",
+  "reportedReplacement": "382b6e37bd03c0d0dd11b03cbc3fe32ad5157052",
+  "contracts": [
+    "One explicit owned new resume can supersede a confirmed earlier correction: 2028 -> 2033 -> 2030. Fact identity is stable; each actual update adds one version/audit entry with the previous active value.",
+    "A unique explicit source outranks historical embedded resume labels. Missing, conflicting, multi-date or ambiguously targeted explicit sources cause no mutation and never fall back to historical labels.",
+    "Repeated current source delivery is a no-op; identical previously adopted and superseded source bytes cannot replay an earlier correction. Freshness is not inferred from numeric graduation year.",
+    "Active resolution annotations reflect only the latest selected value; prior values stay in the audit and cannot become current again through legacy APIs.",
+    "Quoted, hypothetical or conditional text is not a direct correction instruction.",
+    "Exact staged handler keeps repeated corrections atomic, owner-scoped and stable-key replayable. Failed saves and foreign/default-ID collisions cannot transfer source authority or corrected values.",
+    "No new persistence system, migration, credential, paid provider call or browser task."
+  ]
+}

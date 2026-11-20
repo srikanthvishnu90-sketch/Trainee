@@ -75,6 +75,9 @@ shared_tests=(
   tests/deploy-provenance.test.cjs
   tests/outbox-kinds.test.cjs
   tests/career-bundle-data.test.cjs
+  tests/correction-authority-privacy.test.cjs
+  tests/resume-supersession.test.cjs
+  tests/resume-supersession-entry.test.cjs
   tests/depth-CAREER-WRITING.test.cjs
   tests/extension-package.test.cjs
   tests/extension-package-agent.test.cjs

@@ -45,7 +45,9 @@ export function disconnectOf(message: string): MailboxId | null {
   if (m[1] === "remove" && !m[2] && !m[3] && !m[5] && !m[6] && (m[4] === "google" || m[4] === "microsoft")) return null;
   return GOOGLE.has(m[4]) ? "gmail" : "outlook";
 }
-const GMAIL_CONNECT = /^(connect|link|add|hook up|set up|reconnect|relink)( my| the)? (gmail|google mail|google)( account| email| inbox| mail)?( to trainee)?$/;
+// D-062: "connect another gmail", "add my second gmail account", "link one more google account too": the same connect (a
+// second address is added beside the first, career_google_accounts).
+const GMAIL_CONNECT = /^(connect|link|add|hook up|set up|reconnect|relink)( my| the| another| a second| my second| second| one more| my other| an other| a new)? (gmail|google mail|google)( account| email| inbox| mail)?( to trainee)?( too| as well| also)?$/;
 export function gmailConnectOf(message: string): boolean {
   const m = GMAIL_CONNECT.exec(askWords(message));
   if (!m) return false;

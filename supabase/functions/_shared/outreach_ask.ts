@@ -50,3 +50,22 @@ export function namesRecipient(message: string): boolean {
 
 // An ask to write to a person or a role at a firm, read loosely (typos, Spanish, Hindi in Latin script).
 export const outreachAsk = (message: string) => writesToSomeone(message) && namesRecipient(message);
+
+// MIRROR-1000 (2026-11-11): an ask to DRAFT a message to a named person ("write to Yusuf Demir, an alum ... asking for 15
+// minutes", "draft a referral request to Lena Kowalski. Say I can share my resume", "ask my friend Leo for a referral to
+// JPMorgan") was claimed by the router from a keyword: "share my resume" got "no resume has been tailored", "an alum ... at
+// Tesla" got the alumni list ("You have no contacts at Tesla yet"), "a recruiter at Microsoft" got "Which do you mean, and
+// who should it go to?" with the name in the message. A draft to a named person is the brain's drafting turn (draft_outreach;
+// nothing is sent until the person approves the exact message, D-MN-2). Only who answers is decided here.
+// The verb takes the message as its object ("write to", "draft a note"); "Draft only: send it to Lena" names no message.
+const DRAFT_VERB = /\b(?:draft|write|compose)\s+(?:(?:me|up)\s+)?(?:to|a|an)\b|\b(?:cold note|first message|short message|referral request|intro(?:duction)? (?:note|email|message)|alumni outreach)\b|\bask (?:my )?(?:friend|classmate|contact|cousin|old manager|mentor) \p{Lu}[\p{L}'’-]+ for a referral\b/iu;
+// A person by name: two capitalized words ("Maya Okafor"), or a relation and a first name ("my friend Maya"), or a role at a firm.
+const PERSON = /\b\p{Lu}[\p{L}'’-]+\s+\p{Lu}[\p{L}'’-]+\b(?!\s+(?:University|College|Institute|School|Sachs|Permanente|Health|Data|Analytics))|\bmy (?:friend|classmate|contact|cousin|mentor|old manager) \p{Lu}[\p{L}'’-]+|\b(?:recruiter|hiring manager|whoever runs)\b/u;
+const NOT_A_DRAFT = /\b(?:resume|cv|cover letter|essay|summary|bullet)\b[^.;!?]{0,20}\b(?:for|to)\b(?!\s+\p{Lu})/u;
+export function namedDraftAsk(message: string): boolean {
+  const m = String(message ?? "");
+  if (!m || m.length > 600) return false;
+  // "write my cover letter for ..." is a document, not a message to a person.
+  if (/\b(?:write|draft)\s+(?:my|a|the)\s+(?:resume|cv|cover letter|essay|summary)\b/i.test(m) || NOT_A_DRAFT.test(m) && !/\b(?:note|message|email|referral|outreach)\b/i.test(m)) return false;
+  return DRAFT_VERB.test(m) && PERSON.test(m);
+}

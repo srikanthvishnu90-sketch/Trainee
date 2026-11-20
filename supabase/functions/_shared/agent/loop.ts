@@ -5,9 +5,11 @@
 //   external   touches the world (send, submit, message); NEVER runs here. It becomes a pending approval the
 //              person approves on its exact payload (WO-005), and the model is told it is waiting.
 // Messages use the Anthropic block shape (text / tool_use / tool_result); _shared/model_gateway.ts converts to OpenAI.
-import { bracketUntraced, factSources, missingAck, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, smallTalkPitch, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
+import { stripRemoved } from "../mail_security.ts";
+import { bracketUntraced, credentialAsks, factSources, missingAck, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, misquotedAsks, smallTalkPitch, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
 import { urlsIn } from "../channel_shape.ts";
 import { STANDING_REFUSED, standingRefusal } from "./memory.ts";
+import { type CallRec, labelOf, missingInputResult, missingRequired, notRunLine, refusedBefore, unrunCalls } from "./not_run.ts";
 export type Effect = "read" | "write_own" | "external";
 // `turn` is this turn's own record, filled by runAgentTurn: the person's message (a confirmation must come from it) and
 // the ids of facts added during the turn (a fact can never be confirmed in the turn that added it).
@@ -16,7 +18,7 @@ export type Effect = "read" | "write_own" | "external";
 // (WO-038's contract): the same text as separate messages, so a texting channel delivers each whole and in order.
 // `before` (WO-091b): the previous turn's reply as the person saw it ("" on a first turn), so a tool can check that "the
 // first one" is a posting that reply showed. Undefined only for a caller that runs a tool without the loop's history.
-export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[] }; typed?: string; askOnly?: boolean } }
+export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; paySources?: PaySource[]; guard?: (text: string) => string[]; seen?: string[]; withheld?: Set<string>; show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> }; typed?: string; askOnly?: boolean; draft?: { label: string; body: string; recheck: (body: string) => boolean }; counts?: { applied: number }; record?: { status: "complete" | "partial" | "failed"; could_not_read: string[]; read?: string[]; found?: string[]; nomail?: boolean; connect?: string | null; changes?: string[]; researched?: { company: string; role: string | null }[] }; emptySearch?: string } }
 export interface ToolSpec {
   name: string;
   description: string;
@@ -29,31 +31,68 @@ export interface ToolSpec {
 }
 export type ModelFn = (payload: { system: string; messages: any[]; tools: { name: string; description: string; input_schema: unknown }[]; max_tokens: number; tool_choice?: { type: "none" } }) =>
   Promise<{ content: any[]; stop_reason: string; usage?: unknown }>;
+// D-070: a posting whose pay a tool returned this turn, with the link it was read from.
+// D-073: `place`, the posting's own location as the tool returned it (payWithSource names it beside its pay).
+export interface PaySource { company: string | null; title: string | null; pay: string; url: string; place?: string | null }
+export function payPostingsOf(out: unknown): PaySource[] {
+  const o = out && typeof out === "object" ? out as any : null;
+  if (!o) return [];
+  const one = (x: any, url: unknown, inner?: any): PaySource | null => {
+    const pay = typeof inner?.pay === "string" && inner.pay.trim() ? inner.pay : typeof x?.pay === "string" && x.pay.trim() ? x.pay : null;
+    const byPlace = Array.isArray(inner?.pay_by_place) ? inner.pay_by_place.map((r: any) => `${r?.place ?? ""}: ${r?.pay ?? ""}`).join("; ") : "";
+    const u = String(url ?? "");
+    const place = String(inner?.location ?? x?.location ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+    return (pay || byPlace) && /^https:\/\//.test(u) ? { company: (inner?.company ?? x?.company ?? null) || null, title: (inner?.title ?? x?.title ?? null) || null, pay: (pay && byPlace && byPlace.split("; ").every((x: string) => pay.replace(/\s+/g, "").includes(x.replace(/\s+/g, ""))) ? [pay] : [pay, byPlace]).filter(Boolean).join("; ") /* live-10 C11: a by-place list the pay already gives is not given twice */, url: u, ...(place ? { place } : {}) } : null;
+  };
+  const xs: (PaySource | null)[] = [];
+  if (Array.isArray(o.postings)) for (const p of o.postings.slice(0, 50)) xs.push(one(p, p?.url));
+  if (o.posting && typeof o.posting === "object") xs.push(one(o, o.url ?? o.posting.url, o.posting));
+  else xs.push(one(o, o.url));
+  return xs.filter(Boolean) as PaySource[];
+}
 export interface TurnResult {
   reply: string;
   steps: number;
   // WO-080: a failed call carries `error`, its reason cleaned by scrubError; a call that ran carries none.
-  tool_calls: { name: string; ok: boolean; effect: Effect | null; error?: string }[];
+  // D-071 (live-8 C1: NVIDIA's remote posting was not returned and the trace held no search words): what a search or research
+  // call asked (argsOf), recorded in the turn's meta.
+  tool_calls: { name: string; ok: boolean; effect: Effect | null; error?: string; args?: Record<string, unknown> }[];
   pending_approvals: { tool: string; input: unknown; summary: string }[];
   stopped: "final" | "max_steps" | "model_error" | "incomplete_reply";
   // Meta only, never changes the reply: a final draft that still asked several things or promised an alert after the one rewrite.
   flags?: string[];
-  show?: { intent: string; text: string; parts?: string[] };
+  show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> };
   // JOB CARDS: the postings the turn's last successful search_jobs returned, for channels that show them as cards.
   postings?: unknown[];
   // REPLY SHAPE: the documents the turn staged with attach_document (each passed the fact guards), and the URLs the turn may
   // show (those a tool returned or the person typed).
   attachments?: { filename: string; content: string }[];
   linksSeen?: string[];
+  paySources?: PaySource[]; // D-070: postings a tool read this turn that state pay, each with its link
+  // 2026-11-14 (research support check on): what code wrote into the reply itself (a closed posting's note) and what a tool read
+  // from a posting this turn (its requirements, the read-only boundary, that its questions are behind a sign-in). The brain's
+  // support check keeps code's lines as they are and checks the model's sentences against the read lines too.
+  codeLines?: string[];
+  readLines?: string[];
+  // Gap #5 (D-024): the calls refused for a missing input that never ran this turn, by label (never a tool name), for the meta.
+  not_run?: { label: string; failed: boolean }[];
+  notRunText?: string; // the not-run lines code put at the head of the reply (and of a shown text), for a pass that rebuilds that text
+  notRunLines?: string[]; // the same lines one by one (not_run.ts withNotRun puts them back after any later rewrite)
+  fileTexts?: string[]; // the text of a File made this turn that passed its fact guard (file_tool.ts)
   fileLinks?: string[]; // FILE KINDS: links to the files create_file made this turn, minted by code; the channel sends them, the model never writes them
 }
 
+// D-073: how the process check starts its ask when a create_file call was refused (career_brain.ts processCheck).
+export const REFUSED_FILE_TODO = "Your create_file call was refused";
 export const MAX_STEPS_REPLY = "I couldn't finish that in one reply because it needed more steps than one reply allows, so I stopped partway. Nothing was sent or submitted. Tell me which part to do first.";
 export const MODEL_ERROR_REPLY = "I can't answer right now because the AI service isn't responding. Nothing was sent, saved or submitted. Try again in a minute.";
 // When a turn saved something before it stopped, it says so: "nothing saved" would be false.
 export const MAX_STEPS_AFTER_SAVE_REPLY = "I couldn't finish all of that because it needed more steps than one reply allows; what you told me is saved. Nothing was sent or submitted. Tell me which part to do next.";
 export const MODEL_ERROR_AFTER_SAVE_REPLY = "I couldn't finish because the AI service stopped responding; what you told me is saved. Nothing was sent or submitted. Try again in a minute.";
 export const INCOMPLETE_REPLY = "I couldn't produce a complete answer because the AI's reply came back unfinished, so I stopped. Nothing was sent, saved or submitted. Please try again.";
+// D-067 (live-6 C9, D-024): a reply that came out empty after code's checks is never sent blank; it says the turn did not finish.
+export const EMPTY_REPLY = "I couldn't finish this answer, so I stopped here. Nothing was sent or submitted. Ask me again and I'll pick it up.";
+export const EMPTY_AFTER_SAVE_REPLY = "I couldn't finish this answer, so I stopped here; what you told me is saved. Nothing was sent or submitted. Ask me again and I'll pick it up.";
 export const INCOMPLETE_AFTER_SAVE_REPLY = "I couldn't produce a complete answer because the AI's reply came back unfinished; what you told me is saved. Nothing was sent or submitted. Please try again.";
 // WO-077: a reply never claims a change that did not happen this turn (battery run 39485101366, T12: "Kept for good" after
 // only a read). Each kind of claim names the tools that make it true. WO-091a (audit chat-brain F5; battery run
@@ -67,7 +106,17 @@ export const CLAIM_UNBACKED_REPLY = "I didn't change anything this time.";
 export const SECRET_DROPPED_REPLY = "I can't share keys, tokens or passwords because they never go through chat, and I didn't change anything.";
 const ALERT_NOUN = "(?:(?:an?|your|the|new|these|those|\\d+) )?(?:(?:job|daily|instant|new) )?(?:alerts?|job watch(?:es)?)\\b";
 const I_HAVE = "\\bi(?:'ve| have)? (?:just |now |also )?";
-const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write" }[] = [
+// D-066 (P5/P6, the owner's Behavior Guide: "a claim without an artifact is a hard fail"): a reply that says a file, page, PDF or
+// tracker was made or is attached needs a tool that made one this turn and succeeded: create_file, export_tracker, tailor_resume,
+// attach_document, or a research tool that published a File (its effect, from its result, is write_own). Otherwise the claim goes
+// back to the model once, like every claim here; the link itself is always code's (file_tool.ts), never the model's.
+// A backed file claim is the deliverable itself (its link rides the answer), never a bare receipt (missingAnswerBody).
+const FILE_CLAIM = "a file made";
+// D-072 (files reachable): open_record_file makes a record-backed File family page (file_family_make.ts); only a made one backs a claim.
+export const FILE_MAKERS = ["create_file", "open_record_file", "export_tracker", "tailor_resume", "attach_document", "research_market", "research_company", "research_career_question"];
+const FILE_NOUN = "(?:file|pdf|page|tracker|spreadsheet|sheet|doc(?:ument)?|word (?:file|copy)|resume|cv|cover letter)";
+const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write"; wrote?: string[] }[] = [
+  { kind: FILE_CLAIM, by: FILE_MAKERS, wrote: ["research_market", "research_company", "research_career_question"], said: new RegExp(`${I_HAVE}(?:made|created|built|generated|put together|attached|uploaded|exported)(?: you)? (?:a|an|the|your|this)(?: [\\w-]+){0,3} ${FILE_NOUN}\\b|\\b(?:your|the|this)(?: [\\w-]+){0,3} ${FILE_NOUN} (?:is|are) (?:attached|ready|made|linked|below|done)\\b|^(?:here(?:'s| is) (?:your|the)(?: [\\w-]+){0,3} ${FILE_NOUN})\\b|\\battached (?:is|are|here)\\b|^attached\\b`, "i") },
   { kind: "an alert set", by: ["set_job_alerts"], said: new RegExp(`${I_HAVE}(?:set|created|turned on|switched on|enabled|added)(?: up)? ${ALERT_NOUN}|\\balerts? (?:is|are) now (?:set|on|live|active)\\b|\\balerts? (?:has|have) been (?:set|turned on|switched on|created|enabled)\\b|^(?:done|all set)\\b.{0,40}\\balerts?\\b`, "i") },
   { kind: "postings queued", by: ["queue_applications"], said: new RegExp(`\\b(?:were|was|have been|has been|are now|is now) queued\\b|${I_HAVE}queued\\b|^queued\\b|(?:^|${I_HAVE})added (?:\\d+|them|it|these|those|all)\\b[^.]{0,30}\\bto your (?:apply )?queue`, "i") },
   { kind: "an application tracked", by: ["track_application"], said: new RegExp(`\\bi(?:'m| am) (?:now )?tracking\\b|\\bnow tracking\\b|(?:^|${I_HAVE})added (?:it|this|that|them)\\b[^.]{0,20}\\bto your (?:tracker|applications)|\\b(?:is|are) now (?:on|in) your tracker|${I_HAVE}(?:tracked|logged)\\b|^tracked\\b`, "i") },
@@ -75,6 +124,11 @@ const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write" }[] = [
   // ADVERSARIAL ROUND 2 (2026-10-30): "I've confirmed your GPA 4.0" when no confirmation ran (a posting told the model to
   // mark it confirmed) is a false record: only confirm_profile_fact, on the person's own yes, confirms a fact.
   { kind: "a fact confirmed", by: ["confirm_profile_fact"], said: new RegExp(`${I_HAVE}(?:confirmed|verified|marked (?:(?:it|that|this|them|your [\\w ]{1,30}) )?(?:as )?(?:confirmed|verified))\\b|\\b(?:has|have) been (?:confirmed|verified)\\b|\\b(?:is|are) now (?:confirmed|verified)\\b`, "i") },
+  // D-067 (owner, must-fix (e): "no 'made' or 'attached' without the File arriving"): a page, File, tracker, PDF or brief said to be
+  // made, attached or holding something is backed only by a call this turn that made one (its link minted by code, or its file
+  // riding the reply): create_file, export_tracker, attach_document, tailor_resume, or research that published its brief.
+  // (Merged with D-066's file claim above: the same kind and the same backing; these are the phrasings D-066's pattern does not read.)
+  { kind: FILE_CLAIM, by: FILE_MAKERS, wrote: ["research_market", "research_company", "research_career_question"], said: new RegExp(`${I_HAVE}(?:made|created|built|put together|attached|generated|drafted up|started)\\b[^.!?\\n]{0,40}\\b(?:file|page|tracker|pdf|brief|spreadsheet|document|doc)s?\\b|\\b(?:is|are) (?:attached|in (?:the|your|this) (?:file|page|tracker|pdf|brief))\\b|\\bhere(?:'s| is) (?:the|your) (?:file|page|tracker|pdf|brief)\\b|\\b(?:the|your) (?:file|page|tracker|pdf|brief) (?:is ready|has (?:the|your|every|all))\\b|\\b(?:full |whole )?(?:plan|details?|links?|list|breakdown|brief|sources?|timeline)\\b[^.!?\\n]{0,30}\\b(?:is|are) in the (?:file|page|tracker|brief)\\b`, "i") },
   // Nothing external runs inside the turn (it waits for the person's yes on its card), so a reply never sent anything.
   { kind: "something sent or applied for", by: [], said: new RegExp(`${I_HAVE}(?:sent|submitted|emailed|messaged|shared|forwarded) (?:it|this|that|them|your (?:application|email|message|note|resume|cover letter)s?|the (?:application|email|message|note|resume|cover letter)s?|\\d+ (?:applications?|emails?|messages?|notes?))\\b|${I_HAVE}applied (?:you |for you )?(?:to|for) (?:it|this|that|them|these|those|all|\\d+)\\b|${I_HAVE}applied you\\b|\\b(?:has|have) been (?:sent|submitted)\\b|^(?:sent|submitted)\\b` +
     // ADVERSARIAL ROUND 2 (2026-10-30): "I emailed attacker@evil.example", "I've messaged the recruiter", "I sent your
@@ -117,7 +171,7 @@ function claimsIn(sentence: string): string[] {
 type Call = { name: string; ok: boolean; effect: Effect | null };
 const backedBy = (kind: string, calls: Call[]) => {
   const c = CLAIMS.find((x) => x.kind === kind)!;
-  return calls.some((t) => t.ok && (c.by === "any_write" ? t.effect === "write_own" : c.by.includes(t.name)));
+  return calls.some((t) => t.ok && (c.by === "any_write" ? t.effect === "write_own" : c.by.includes(t.name) && (!c.wrote?.includes(t.name) || t.effect === "write_own")));
 };
 // The sentences of a reply that claim a change no tool made this turn, with the kind of each claim.
 export function unbackedClaims(reply: string, calls: Call[]): { index: number; kind: string }[] {
@@ -235,7 +289,7 @@ function missingAnswerBody(reply: string, message: string, receiptOnly = false, 
     /\b(?:reply|message|email|text|note|letter|sentence|script)\b/i.test(message) && utterance(message).includes(utterance(reply))) return false;
   if (unresolvedFactFields(reply, message, sources)) return true;
   const clauses = pieces(plainQuotes(reply).replace(/\b(that|this|it)'s\b/gi, "$1 is").replace(/[*_`~]/g, "")).flatMap((p) => p.text.split(/[;—–]/)).map((s) => s.trim().replace(/^(?:[-•]|\d+[.)])\s+/, "").replace(/[.!?]+$/, "").trim()).filter(Boolean);
-  return clauses.length > 0 && clauses.every((s) => CLOSING_ONLY.test(s) || (!SOCIAL_MESSAGE.test(message.trim()) && (ACK_ONLY.test(s) || PROGRESS_ONLY.test(s))) || (receiptOnly && claimsIn(s).length > 0));
+  return clauses.length > 0 && clauses.every((s) => CLOSING_ONLY.test(s) || (!SOCIAL_MESSAGE.test(message.trim()) && (ACK_ONLY.test(s) || PROGRESS_ONLY.test(s))) || (receiptOnly && claimsIn(s).some((k) => k !== FILE_CLAIM)));
 }
 // REPLY SHAPE: what the turn staged and which links it may show ride the result, whichever way the turn ended.
 // The flag-only reply checks of a turn (missing_ack, many_asks, unbacked_promise), as the meta the career handler saves with
@@ -246,19 +300,76 @@ export function replyFlagsMeta(turn: { flags?: unknown } | null | undefined): { 
 }
 
 export async function runAgentTurn(o: Parameters<typeof runAgentTurnInner>[0]): Promise<TurnResult> {
-  const r = await runAgentTurnInner(o);
+  let r = await runAgentTurnInner(o);
+  // Gap #5 (D-024, architect ruling 2026-11-16): a call refused for a missing input that never ran ALWAYS gets code's line, on
+  // every way the turn ends and whatever the reply says. No sentence is removed or judged by its words here: a claim that needs
+  // a refused call's result has no support in the reply verifier (PR #849), since a refused call contributes no evidence.
+  // Per call (review rv3): wherever the turn's text goes out, the reply and a shown text with its parts (a texting channel sends
+  // the parts), so no channel drops it.
+  const unrun = unrunCalls((o.ctx.turn as { calls?: CallRec[] } | undefined)?.calls ?? []);
+  const notRunLines = unrun.map((c) => notRunLine(c.name, c.failed, c.args));
+  if (unrun.length) {
+    const lead = notRunLines.join(" "), withLead = (t: unknown) => [lead, String(t ?? "")].filter((x) => x.trim()).join("\n\n");
+    const show = r.show ? { ...r.show, text: withLead(r.show.text), ...(Array.isArray(r.show.parts) ? { parts: [lead, ...r.show.parts] } : {}) } : undefined;
+    r = { ...r, reply: withLead(r.reply), ...(show ? { show } : {}), notRunText: lead, notRunLines, not_run: unrun.map((c) => ({ label: labelOf(c.name), failed: c.failed })) };
+  }
+  // The output guard (mail_security.ts): a code, password or link token that this turn removed from the person's mail, or that
+  // sat in a security email Trainee did not read, never reaches the chat reply, whatever the model wrote.
+  const withheld = o.ctx.turn?.withheld;
+  if (withheld?.size && typeof r.reply === "string") r = { ...r, reply: stripRemoved(r.reply, withheld) };
   const attachments = o.ctx.turn?.attachments ?? [];
   const seen = o.ctx.turn?.seen ?? [];
   const typed = [o.said ?? o.message, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
-  const fileLinks = o.ctx.turn?.fileLinks ?? [];
-  return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
+  const fileLinks = o.ctx.turn?.fileLinks ?? [], paySources = o.ctx.turn?.paySources ?? [];
+  const { codeLines: lines0, readLines } = turnLines(seen);
+  const fileTexts = ((o.ctx.turn as any)?.fileTexts ?? []) as string[];
+  const codeLines = [...notRunLines, ...lines0];
+  return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), ...(paySources.length ? { paySources } : {}), ...(codeLines.length ? { codeLines } : {}), ...(readLines.length ? { readLines } : {}), ...(fileTexts.length ? { fileTexts } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
+}
+// The closed-posting notes code would write for this turn's results, and the posting lines a tool read (see TurnResult.codeLines).
+export function turnLines(seen: string[]): { codeLines: string[]; readLines: string[] } {
+  const codeLines: string[] = [], readLines: string[] = [];
+  for (const t of seen) {
+    let v: any = null;
+    try { v = JSON.parse(t); } catch { continue; }
+    for (const p of Array.isArray(v) ? v : [v]) {
+      if (!p || typeof p !== "object") continue;
+      if (p.closed === true && typeof p.company === "string") codeLines.push(...closedNotes(p.company, [JSON.stringify(p)]));
+      const req = p.requirements && typeof p.requirements === "object" ? p.requirements : null;
+      if (req) for (const k of ["required", "preferred"]) for (const x of Array.isArray(req[k]) ? req[k] : []) if (typeof x === "string" && x.trim()) readLines.push(x.trim());
+      if (typeof p.boundary === "string" && p.boundary.trim()) { readLines.push(p.boundary.trim()); codeLines.push(p.boundary.trim()); }
+      const co = typeof p.posting?.company === "string" ? p.posting.company : typeof p.company === "string" ? p.company : "the employer";
+      if (p.sign_in_required === true) readLines.push(`To apply, the person signs in to, or creates, their own account on ${co}'s ${typeof p.board === "string" ? `${p.board} ` : ""}careers site themselves; ${co}'s own application questions are behind that sign-in, so they were not read.`);
+      // Live-11 C11: what the tool read of the posting itself (open or closed, its deadline) is a source too.
+      if (p.posting && typeof p.posting === "object") {
+        const st = typeof p.posting.state === "string" ? p.posting.state : typeof p.status === "string" ? p.status : "";
+        const dl = [p.posting.deadline, p.posting.closes, p.posting.close_date, p.deadline].find((x) => typeof x === "string" && x.trim());
+        if (st || dl) readLines.push(`${co}'s posting${p.posting.title ? ` ${p.posting.title}` : ""} is ${st || "listed"}${dl ? `; it closes ${dl}` : ""}.`);
+      }
+    }
+  }
+  return { codeLines: [...new Set(codeLines)], readLines: [...new Set(readLines)] };
 }
 const COMPLETENESS_REPAIR = "The previous draft did not contain an answer body after output validation. Answer the person's original request using only the conversation and successful tool results already available. Give the requested content, or ask a concrete question for missing information. A generic acknowledgement, action receipt, closing confirmation or unresolved fill-in field is not the requested answer. Keep placeholders only in a draft or template the person requested. Do not invent personal facts or claim actions. Tools are disabled for this single repair; do not repeat any action.";
 
 // `said` (ADVERSARIAL ROUND 2, 2026-10-30): the person's own words when `message` also carries what code appended to them
 // (an attached file's name and text). The model reads `message`; every tool check that asks "did the person say this"
 // (a confirmation, a kept instruction, a fact, a contact) reads `said`, and the appended text rides `turn.attached`.
-async function runAgentTurnInner(o: { system: string; history: any[]; message: string; said?: string; tools: ToolSpec[]; model: ModelFn; ctx: ToolCtx; maxSteps?: number }): Promise<TurnResult> {
+// `shown` (D-070, live-7 C22): pay lines Trainee's own earlier replies showed (turn_notes.ts shownPayOf), each from the posting or
+// source it named then: a figure on one of them may be said again (D-067 (10)); the reply carries its link (career_brain.ts).
+// `process` (D-065): the turn's process check. Given the model's draft reply and the calls made so far, it returns what the turn
+// still has to do (call the draft tool, search before the plan, cover a part they asked about) or null. Put to the model once,
+// with its tools, the same way as the reply guards' review; whatever stands after that is kept and flagged (process_unmet).
+// D-071: the words a search or research call used (no person's data: a search query, a company, research queries), for the trace.
+const ARGS_OF: Record<string, string[]> = { search_jobs: ["query", "limit"], research_market: ["companies", "queries", "format"], research_company: ["company", "role", "focus"] };
+export function argsOf(name: string, input: unknown): Record<string, unknown> | null {
+  const keys = ARGS_OF[name], i = input && typeof input === "object" ? input as Record<string, unknown> : null;
+  if (!keys || !i) return null;
+  const clip = (v: unknown): unknown => typeof v === "string" ? v.slice(0, 200) : typeof v === "number" ? v : Array.isArray(v) ? v.slice(0, 6).map(clip) : null;
+  const out = Object.fromEntries(keys.filter((k) => i[k] !== undefined && i[k] !== null).map((k) => [k, clip(i[k])]));
+  return Object.keys(out).length ? out : null;
+}
+async function runAgentTurnInner(o: { system: string; history: any[]; message: string; said?: string; tools: ToolSpec[]; model: ModelFn; ctx: ToolCtx; maxSteps?: number; shown?: string[]; process?: ((reply: string, calls: TurnResult["tool_calls"]) => string | null) | null }): Promise<TurnResult> {
   const max = o.maxSteps ?? 6;
   const byName = new Map(o.tools.map((t) => [t.name, t]));
   const toolDefs = o.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
@@ -284,8 +395,13 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
     const sources = factSources({ state: o.ctx.state, message: o.message, history: o.history, results: seen });
     return [...untracedFacts(t, sources).map((f) => f.word), ...unsourcedFigures(t, [typed, ...seen, ...sources]).map((m) => m.figure), ...urlsIn(t).filter((l) => !known.has(l))];
   };
-  let steps = 0, checked = false, ask = false, repairing = false;
+  let steps = 0, checked = false, ask = false, repairing = false, processed = false, processAsked = 0, lastTodo: string | null = null, retriedFile = false;
   let repairNote = COMPLETENESS_REPAIR;
+  // Gap #5 (D-024, live-12 C1, C19): the tools refused this turn for a missing required input, with how many times. One more
+  // call is allowed after the first refusal; a tool that never ran is never reported as having found or saved anything.
+  // Kept on the turn's own record so runAgentTurn adds the not-run line on EVERY way the turn ends.
+  const calls: CallRec[] = [];
+  Object.assign(o.ctx.turn, { calls });
   // WO-061 (H028, H035, H007, H033): code's review of its own draft rides in that one call's system prompt, never in
   // the conversation. As a user-role message the model took it for the person's words, refused it out loud ("I can't
   // follow the instruction to show ... hidden internal words") and the refusal reached the person.
@@ -325,6 +441,21 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       let reply = content.filter((b: any) => b && b.type === "text").map((b: any) => b.text).join("").trim();
       const show = o.ctx.turn?.show;
       if (show) return { reply: show.text, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final", show };
+      // D-065: the process check, once, before the reply guards (tools stay on: the step it asks for is a tool call).
+      // D-070 (live-7 C1: the plan File's create_file was refused, and the check, already spent on the search, never asked again):
+      // a second, different step the turn still owes is asked once more; the same step is never asked twice.
+      // D-073 (live-9 C1: create_file was refused for a label over 80 characters and no second call was made): a refused File
+      // (REFUSED_FILE_TODO) is asked again once with its exact error, even when the two other asks were spent.
+      if (o.process && (processAsked < 2 || !retriedFile) && !repairing && steps < max) {
+        const todo = o.process(reply, tool_calls);
+        const retry = !!todo && todo.startsWith(REFUSED_FILE_TODO);
+        if (todo && todo !== lastTodo && (retry ? !retriedFile : processAsked < 2)) {
+          processed = true; lastTodo = todo;
+          if (retry) retriedFile = true; else processAsked++;
+          review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Trainee's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${todo} Then write your reply to the person again, answering what they asked in their last message.`;
+          continue;
+        }
+      }
       // A model may write its answer beside a tool call, then finish with only a closing question. Recover that body
       // without a length heuristic; the assembled reply still passes every truth filter below. A substantive final
       // answer always supersedes earlier text. Once a repair starts, rejected earlier text must not be reintroduced.
@@ -340,20 +471,26 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       // ADVERSARIAL ROUND 2: a GPA traces only to the person's own words and facts, never to what a tool read this turn.
       const personal = factSources({ state: o.ctx.state, message: said, history: o.history, results: [] });
       const claims = unbackedClaims(reply, tool_calls), promises = unbackedPromises(reply, tool_calls), leaks = leakedWords(reply, leak), facts = untracedFacts(reply, sources, personal);
-      const money = unsourcedFigures(reply, [typed, ...seen, ...sources]);
+      const money = unsourcedFigures(reply, [typed, ...seen, ...sources, ...(o.shown ?? [])]);
+      // D-067 (C20, D-007): a number said to be what the person asked for is in their own words.
+      const theirs = [said, ...(o.history ?? []).filter((m) => m.role === "user").map((m) => String(m.content ?? ""))];
+      const misquote = misquotedAsks(reply, theirs);
       const waiver = waiverSolicits(reply, standingRefusal, o.message);
       // FLAG ONLY (#540: code never cuts the model's answer): asked once; a draft that still violates is kept as written.
       const manyAsks = multiAsk(reply) || promises.length > 0;
       const noAck = missingAck(said, reply);
       // D-054 (R03): small talk answered with a pitch (an introduction, a list of what Trainee does, an ask for a role).
       const pitch = smallTalkPitch(said, reply);
-      if ((claims.length || leaks.length || facts.length || money.length || waiver.length || manyAsks || noAck || pitch.length) && !checked && !repairing && steps < max) {
+      const creds = credentialAsks(reply); // D-066 (P14)
+      if ((creds.length || claims.length || leaks.length || facts.length || money.length || misquote.length || waiver.length || manyAsks || noAck || pitch.length) && !checked && !repairing && steps < max) {
         checked = true;
         const told = [
           pitch.length ? `They made small talk. Answer it in one plain sentence, as a person would. Remove these sentences: ${pitch.map((k) => `"${pieces(reply.trim())[k]?.text ?? ""}"`).join(" ")}. No introduction, no list of what you do, no question about a role or a search; only if SITUATION shows something waiting on them, name that one thing as your last sentence.` : "",
           noAck ? `Your first sentence was: "${pieces(reply.trim())[0]?.text ?? ""}". They said they feel overwhelmed. Replace that opening with one short, warm sentence acknowledging how they feel; the nothing-sent line comes after it, never first.` : "",
+          creds.length ? "Your reply asks the person to send a password, code, key or login in this chat. Never ask for one: secrets never go through chat, and a login is the person signing in themselves on the site's own page. Remove that ask." : "",
           claims.length ? `Your reply says ${[...new Set(claims.map((c) => c.kind))].join(" and ")}, but no tool that does that succeeded this turn. Either call the tool now, or rewrite the reply without saying it happened.` : "",
           leaks.length ? `Your reply shows internal words the person must never see: ${leaks.join(", ")}. Say it in plain words; name a posting by its title and company.` : "",
+          misquote.length ? `Your reply says they asked for ${[...new Set(misquote.map((m) => m.figure))].join(", ")}, but they never gave that number. Say only what they asked in their own words, and what was done.` : "",
           money.length ? `Your reply states pay, money or count figures that no tool returned this turn and they did not say: ${[...new Set(money.map((m) => m.figure))].join(", ")}. Remove them, and say you don't have a verified figure for that unless a tool returned it.` : "",
           waiver.length ? "Your reply offers them wording to send, offers to save something, or asks them to confirm something, after they asked to waive their yes or grant a standing permission. Never propose that wording, offer to save it or ask them to confirm it: say plainly it can't be kept, because every application and message still needs their yes on its card." : "",
           manyAsks ? "Your reply asks more than one thing. End with at most ONE question, asking for ONE thing (never \"X and Y\", never a second question); state a sensible default for anything else instead of asking. Never promise an action this reply did not take (an alert, a text); say only what happened. Keep everything else in your answer." : "",
@@ -362,17 +499,21 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         // WO-106 (eval run 39535880905: E009 saved this note as the person's standing instruction, E032 and E050 answered
         // it to the person): the note is code's, the rewrite is for the person, and no tool runs while it is answered.
         // WO-061: it is no longer a message at all; the conversation stays as the person left it (see `review`).
-        review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Upmore's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${told} Write your reply to the person again, answering what they asked in their last message, with only those changes.`;
+        review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Trainee's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${told} Write your reply to the person again, answering what they asked in their last message, with only those changes.`;
         // A claim may still be made true by its own tool; a wording or fact check runs no tool at all.
         if (!claims.length) ask = true;
         continue;
       }
       let out = reply;
-      const stillMoney = unsourcedFigures(reply, [typed, ...seen, ...sources]);
+      const stillMoney = unsourcedFigures(reply, [typed, ...seen, ...sources, ...(o.shown ?? [])]);
       // WO-061 (H018): proposed waiver wording that stands after the check is removed by code, with its save offer.
       const stillWaiver = waiverSolicits(reply, standingRefusal, o.message);
-      if (claims.length || stillMoney.length || stillWaiver.length) {
-        out = rebuild(pieces(reply), new Set([...claims.map((c) => c.index), ...stillMoney.map((m) => m.index), ...stillWaiver]));
+      // D-066 (P14): an ask for a password, code, key or login in chat that stands after the review is removed by code.
+      const stillCreds = credentialAsks(reply);
+      const stillMisquote = misquotedAsks(reply, theirs);
+      if (stillCreds.length && !(claims.length || stillMoney.length || stillWaiver.length || stillMisquote.length)) { out = rebuild(pieces(reply), new Set(stillCreds)); if (!/[A-Za-z0-9]/.test(out)) out = SECRET_DROPPED_REPLY; }
+      if (claims.length || stillMoney.length || stillWaiver.length || stillMisquote.length) {
+        out = rebuild(pieces(reply), new Set([...stillCreds, ...claims.map((c) => c.index), ...stillMoney.map((m) => m.index), ...stillWaiver, ...stillMisquote.map((m) => m.index)]));
         if (!/[A-Za-z0-9]/.test(out) && ((stillWaiver.length && !claims.length) || !ANSWER_REQUEST.test(o.message))) return { reply: stillWaiver.length && !claims.length ? STANDING_REFUSED : CLAIM_UNBACKED_REPLY, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final" };
         // WO-061 (H018 p1): after a waiver strip the refusal must still be there; if the person asked to waive their yes
         // and nothing left says it is still needed, code says it first.
@@ -395,7 +536,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         if (!out.trim()) repairNote = "Your last answer was empty. " + COMPLETENESS_REPAIR;
         continue;
       }
-      const flags = [...(missingAck(said, out) ? ["missing_ack"] : []), ...(multiAsk(out) ? ["many_asks"] : []), ...(unbackedPromises(out, tool_calls).length ? ["unbacked_promise"] : []), ...(smallTalkPitch(said, out).length ? ["small_talk_pitch"] : [])];
+      const flags = [...(processed && o.process?.(out, tool_calls) ? ["process_unmet"] : []), ...(missingAck(said, out) ? ["missing_ack"] : []), ...(multiAsk(out) ? ["many_asks"] : []), ...(unbackedPromises(out, tool_calls).length ? ["unbacked_promise"] : []), ...(smallTalkPitch(said, out).length ? ["small_talk_pitch"] : [])];
       return { reply: out, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), ...(flags.length ? { flags } : {}), stopped: "final" };
     }
     const pre = content.filter((b: any) => b && b.type === "text").map((b: any) => String(b.text ?? "")).join("").trim();
@@ -404,18 +545,34 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
     const results: any[] = [];
     for (const u of uses) {
       const t = byName.get(u.name);
-      const fail = (effect: Effect | null, msg: string, why: unknown = msg) => { tool_calls.push({ name: u.name, ok: false, effect, error: scrubError(why as string) }); results.push({ type: "tool_result", tool_use_id: u.id, is_error: true, content: msg }); };
+      const args = argsOf(u.name, u.input);
+      const fail = (effect: Effect | null, msg: string, why: unknown = msg) => { tool_calls.push({ name: u.name, ok: false, effect, error: scrubError(why as string), ...(args ? { args } : {}) }); results.push({ type: "tool_result", tool_use_id: u.id, is_error: true, content: msg }); };
       if (!t) { fail(null, `unknown tool: ${u.name}`); continue; }
       const input = u.input && typeof u.input === "object" ? u.input : {};
-      const missing = (t.input_schema.required || []).filter((k) => input[k] === undefined || input[k] === null || input[k] === "");
-      if (missing.length) { fail(t.effect, `missing required input: ${missing.join(", ")}`); continue; }
+      const missing = missingRequired(input, t.input_schema.required || []);
+      const rec: CallRec = { name: t.name, input: JSON.parse(JSON.stringify(input)), outcome: "refused", missing };
+      // Review rv4: the one retry is per CALL, not per tool. The earlier refusals this call repeats (same tool, no argument both
+      // carry disagrees: unrunCalls' retry rule) count; a call to the same tool about something else has its own retry.
+      const before = refusedBefore(calls, rec);
+      calls.push(rec);
+      if (missing.length || before >= 2) {
+        const n = before + 1;
+        fail(t.effect, missingInputResult(t, missing, n), missing.length ? `missing required input: ${missing.join(", ")}` : "not run: refused twice for a missing input this turn");
+        continue;
+      }
       if (t.effect === "external") {
         pending_approvals.push({ tool: t.name, input: JSON.parse(JSON.stringify(input)), summary: t.description });
+        // Review of #790: one yes never means two things. A question code asked about a set-aside fact (its marker is restore_ask)
+        // is not shown in a turn that also asks for an approval, and tools see that one is waiting.
+        if (o.ctx.turn) { (o.ctx.turn as { pendingApprovals?: number }).pendingApprovals = pending_approvals.length; if (o.ctx.turn.show?.meta?.restore_ask) o.ctx.turn.show = undefined; }
+        rec.outcome = "ok";
         tool_calls.push({ name: t.name, ok: true, effect: t.effect });
         results.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify({ status: "needs_approval", note: "Nothing has been sent. The person must approve this exact action first." }) });
         continue;
       }
       try {
+        // (what a File tool adds to the turn while it runs: its link and its text, for the ledger; CodeRabbit on #849)
+        const fl0 = (o.ctx.turn?.fileLinks ?? []).length, ft0 = (((o.ctx.turn as any)?.fileTexts ?? []) as string[]).length;
         const out = await t.run(input, o.ctx);
         // REPLY SHAPE: a staged document passes the same guards as a reply (facts about the person, money, links) or the model is told why not.
         const att = u.name === "attach_document" && out && typeof out === "object" ? (out as any).attachment : null;
@@ -427,11 +584,21 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
           if (bad.length) { throw new Error(`not attached: the file states things no tool returned this turn and the person did not say: ${[...new Set(bad)].slice(0, 8).join(", ")}. Remove them or mark them "not verified", then attach again.`); }
           o.ctx.turn!.attachments!.push({ filename: att.filename, content: att.content });
         }
-        tool_calls.push({ name: t.name, ok: true, effect: t.effectOf ? t.effectOf(out) : t.effect });
-        results.push({ type: "tool_result", tool_use_id: u.id, content: resultText(out) });
+        rec.outcome = "ok";
+        tool_calls.push({ name: t.name, ok: true, effect: t.effectOf ? t.effectOf(out) : t.effect, ...(args ? { args } : {}) });
+        // REPLY PIPELINE: with the evidence ledger on, the units this result adds ride it, numbered, for the draft to cite.
+        const led = (o.ctx as any).ledger as { fromToolResult: (n: string, x: unknown, f?: { fileUrl?: string | null; fileTexts?: string[] }) => string[]; block: (ids?: string[]) => string } | undefined;
+        const evIds = led ? led.fromToolResult(u.name, out, { fileUrl: (o.ctx.turn?.fileLinks ?? []).slice(fl0).at(-1) ?? null, fileTexts: (((o.ctx.turn as any)?.fileTexts ?? []) as string[]).slice(ft0) }) : [];
+        // (inside the result's own JSON, as one more field, so the result reads as it always did)
+        const withEv = evIds.length && out && typeof out === "object" && !Array.isArray(out) ? { ...(out as Record<string, unknown>), evidence: led!.block(evIds).split("\n") } : out;
+        results.push({ type: "tool_result", tool_use_id: u.id, content: resultText(withEv) });
         seen.push(resultText(out));
         if (u.name === "search_jobs" && out && Array.isArray((out as any).postings)) found = (out as any).postings.slice(0, 50);
-      } catch (e) { if (e instanceof AskPerson) ask = true; fail(t.effect, e instanceof Error ? e.message : String(e), e); }
+        // D-070 (live-7 C11): every posting a tool read this turn with its stated pay and link (get_posting, inspect_apply_flow,
+        // check_posting_open, search_jobs), so a reply that gives that pay carries that posting's link (career_brain.ts payWithSource).
+        const ps = payPostingsOf(out);
+        if (ps.length && o.ctx.turn) (o.ctx.turn.paySources ??= []).push(...ps);
+      } catch (e) { if (e instanceof AskPerson) ask = true; rec.outcome = e instanceof AskPerson ? "asked" : "threw"; fail(t.effect, e instanceof Error ? e.message : String(e), e); }
     }
     messages.push({ role: "user", content: results });
   }

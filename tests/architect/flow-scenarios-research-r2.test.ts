@@ -156,7 +156,10 @@ Deno.test({
 
       // ------------------------------------------------------------------------------------------ C: open questions, staged brain
       Deno.env.set("CAREER_BRAIN", "staged");
-      Deno.env.set("CAREER_KNOWLEDGE", "on");
+      // Architect amendment (D-060; owner, 2026-11-11, "Web research"): research is ON in production, measured through the real
+      // handler in tests/architect/web-research-d060.test.ts. "Research dark" is now its rollback, CAREER_KNOWLEDGE=off, and this
+      // step holds the rollback to the same bars.
+      Deno.env.set("CAREER_KNOWLEDGE", "off");
       Deno.env.set("ANTHROPIC_API_KEY", "sk-test-not-real");
       Deno.env.set("TRAINEE_FILE_BASE_URL", FILE_BASE);
       Deno.env.set("TRAINEE_FILE_LINK_SECRET", "test-file-link-secret-0123456789abcdef");

@@ -1,0 +1,7 @@
+Citadel new grad software engineer interview process
+  -> 1 search(es), 9 result page(s), 10 cited passage(s), $0.0436, 6956 ms, stop end_turn, shape text server_tool_use:web_search web_search_tool_result text text[web_search_result_location] text text[web_search_result_location] text text[web_search_result_location] text text[web_search_result_location] text text[web_search_result_location] text text[web_search_result_location] text text[web_search_result_location] text text[web_search_result_location] text text[web_search_result_location] text text[web_search_result_location] text
+     cited https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/: "There are four steps in the process."
+     cited https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/: "This 45-minute interview will cover both technical and behavioral skills."
+     cited https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/: "We’ll focus on coding, data structures and algorithms and problem-solving."
+     cited https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/: "During your scheduled interview, you can expect to meet with a few people from each firm. The interview process is the same for both firms."
+verdict=proven searches=1 spent_usd=0.043640

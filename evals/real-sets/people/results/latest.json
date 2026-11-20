@@ -1,0 +1,806 @@
+{
+ "at": "2026-11-12T07:29:04.082Z",
+ "line": "REAL-SET PEOPLE ($0, scripted search answers with fictional people): 20 real school x employer asks; leads kept 40 (expected 40), dropped 120 (expected 120); one_search 20/20, guard 20/20, caveat 20/20, nobody_contacted 20/20, sorted 20/20; PASS 20/20 (bar 19/20) MEETS",
+ "results": [
+  {
+   "id": "P01",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Avery Fixture",
+     "role": "software engineer",
+     "employer": "Google",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p01/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Avery Fixture, who graduated from University of Illinois Urbana-Champaign, is a software engineer at Google.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Quinn Placeholder",
+     "role": null,
+     "employer": "Google",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p01/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Quinn Placeholder works on the payments team at Google.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P02",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Quinn Testwood",
+     "role": "software engineer",
+     "employer": "Microsoft",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p02/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Quinn Testwood, who graduated from Georgia Institute of Technology, is a software engineer at Microsoft.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Rowan Mockford",
+     "role": null,
+     "employer": "Microsoft",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p02/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Rowan Mockford works on the payments team at Microsoft.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P03",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Rowan Demoray",
+     "role": "software engineer",
+     "employer": "Dell Technologies",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p03/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Rowan Demoray, who graduated from The University of Texas at Austin, is a software engineer at Dell Technologies.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Sasha Dummitt",
+     "role": null,
+     "employer": "Dell Technologies",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p03/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Sasha Dummitt works on the payments team at Dell Technologies.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P04",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Sasha Placeholder",
+     "role": "software engineer",
+     "employer": "Stripe",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p04/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Sasha Placeholder, who graduated from University of Michigan, is a software engineer at Stripe.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Emerson Sampleton",
+     "role": null,
+     "employer": "Stripe",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p04/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Emerson Sampleton works on the payments team at Stripe.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P05",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Emerson Mockford",
+     "role": "software engineer",
+     "employer": "Jane Street",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p05/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Emerson Mockford, who graduated from Carnegie Mellon University, is a software engineer at Jane Street.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Harper Stubley",
+     "role": null,
+     "employer": "Jane Street",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p05/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Harper Stubley works on the payments team at Jane Street.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P06",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Harper Dummitt",
+     "role": "software engineer",
+     "employer": "Figma",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p06/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Harper Dummitt, who graduated from University of California, Berkeley, is a software engineer at Figma.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Indigo Fixture",
+     "role": null,
+     "employer": "Figma",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p06/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Indigo Fixture works on the payments team at Figma.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P07",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Indigo Sampleton",
+     "role": "software engineer",
+     "employer": "Caterpillar",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p07/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Indigo Sampleton, who graduated from Purdue University, is a software engineer at Caterpillar.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Jules Testwood",
+     "role": null,
+     "employer": "Caterpillar",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p07/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Jules Testwood works on the payments team at Caterpillar.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P08",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Jules Stubley",
+     "role": "software engineer",
+     "employer": "Amazon",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p08/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Jules Stubley, who graduated from University of Washington, is a software engineer at Amazon.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Avery Demoray",
+     "role": null,
+     "employer": "Amazon",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p08/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Avery Demoray works on the payments team at Amazon.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P09",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Avery Fixture",
+     "role": "software engineer",
+     "employer": "Wayfair",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p09/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Avery Fixture, who graduated from Northeastern University, is a software engineer at Wayfair.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Quinn Placeholder",
+     "role": null,
+     "employer": "Wayfair",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p09/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Quinn Placeholder works on the payments team at Wayfair.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P10",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Quinn Testwood",
+     "role": "software engineer",
+     "employer": "JPMorgan Chase",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p10/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Quinn Testwood, who graduated from The Ohio State University, is a software engineer at JPMorgan Chase.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Rowan Mockford",
+     "role": null,
+     "employer": "JPMorgan Chase",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p10/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Rowan Mockford works on the payments team at JPMorgan Chase.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P11",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Rowan Demoray",
+     "role": "software engineer",
+     "employer": "Johnson & Johnson",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p11/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Rowan Demoray, who graduated from Rutgers University, is a software engineer at Johnson & Johnson.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Sasha Dummitt",
+     "role": null,
+     "employer": "Johnson & Johnson",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p11/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Sasha Dummitt works on the payments team at Johnson & Johnson.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P12",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Sasha Placeholder",
+     "role": "software engineer",
+     "employer": "Intel",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p12/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Sasha Placeholder, who graduated from Arizona State University, is a software engineer at Intel.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Emerson Sampleton",
+     "role": null,
+     "employer": "Intel",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p12/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Emerson Sampleton works on the payments team at Intel.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P13",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Emerson Mockford",
+     "role": "software engineer",
+     "employer": "Snap",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p13/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Emerson Mockford, who graduated from University of California, Los Angeles, is a software engineer at Snap.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Harper Stubley",
+     "role": null,
+     "employer": "Snap",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p13/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Harper Stubley works on the payments team at Snap.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P14",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Harper Dummitt",
+     "role": "software engineer",
+     "employer": "Goldman Sachs",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p14/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Harper Dummitt, who graduated from New York University, is a software engineer at Goldman Sachs.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Indigo Fixture",
+     "role": null,
+     "employer": "Goldman Sachs",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p14/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Indigo Fixture works on the payments team at Goldman Sachs.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P15",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Indigo Sampleton",
+     "role": "software engineer",
+     "employer": "Lockheed Martin",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p15/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Indigo Sampleton, who graduated from Penn State University, is a software engineer at Lockheed Martin.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Jules Testwood",
+     "role": null,
+     "employer": "Lockheed Martin",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p15/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Jules Testwood works on the payments team at Lockheed Martin.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P16",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Jules Stubley",
+     "role": "software engineer",
+     "employer": "Epic Systems",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p16/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Jules Stubley, who graduated from University of Wisconsin-Madison, is a software engineer at Epic Systems.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Avery Demoray",
+     "role": null,
+     "employer": "Epic Systems",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p16/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Avery Demoray works on the payments team at Epic Systems.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P17",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Avery Fixture",
+     "role": "software engineer",
+     "employer": "Datadog",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p17/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Avery Fixture, who graduated from Boston University, is a software engineer at Datadog.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Quinn Placeholder",
+     "role": null,
+     "employer": "Datadog",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p17/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Quinn Placeholder works on the payments team at Datadog.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P18",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Quinn Testwood",
+     "role": "software engineer",
+     "employer": "Capital One",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p18/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Quinn Testwood, who graduated from Virginia Tech, is a software engineer at Capital One.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Rowan Mockford",
+     "role": null,
+     "employer": "Capital One",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p18/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Rowan Mockford works on the payments team at Capital One.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P19",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Rowan Demoray",
+     "role": "software engineer",
+     "employer": "Chewy",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p19/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Rowan Demoray, who graduated from University of Florida, is a software engineer at Chewy.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Sasha Dummitt",
+     "role": null,
+     "employer": "Chewy",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p19/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Sasha Dummitt works on the payments team at Chewy.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P20",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 6,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "Sasha Placeholder",
+     "role": "software engineer",
+     "employer": "ExxonMobil",
+     "school_match": "shown",
+     "url": "https://alumni.example.edu/p20/news-1",
+     "title": "Alumni news 1",
+     "excerpt": "Sasha Placeholder, who graduated from Texas A&M University, is a software engineer at ExxonMobil.",
+     "page_age": "March 3, 2026",
+     "verified": false
+    },
+    {
+     "name": "Emerson Sampleton",
+     "role": null,
+     "employer": "ExxonMobil",
+     "school_match": "not shown",
+     "url": "https://alumni.example.edu/p20/news-2",
+     "title": "Alumni news 2",
+     "excerpt": "Emerson Sampleton works on the payments team at ExxonMobil.",
+     "page_age": null,
+     "verified": false
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  }
+ ]
+}

@@ -18,7 +18,7 @@ import { type DraftDeps, draftEssay, MIN_FACTS, whatWouldHelp } from "./essay_dr
 import { hashApplyPayload } from "./career_apply_store.ts";
 import { onEmployerDomain, roleOverlap, sameCompany } from "./career_mail.ts";
 import { ONE_ADDRESS, type OutMail, type SendResult } from "./career_mail_gmail.ts";
-import { RESUME_BUCKET, resumePath, type TailorDeps, tailorForPosting } from "./career_tailor.ts";
+import { confirmedEmails, RESUME_BUCKET, resumeFileContactProblems, resumePath, type TailorDeps, tailorForPosting } from "./career_tailor.ts";
 
 export const EMAIL_INTENT = "career_apply_email";
 export const EMAIL_CARD_KEY = "career:email-card";
@@ -165,6 +165,8 @@ const REFUSED: Record<string, string> = {
   company_cooldown: "you applied to them in the last 30 days",
   duplicate_job: "this posting is already in your applications (sent, or approved and waiting to go), and each posting goes at most once",
   changed_since_yes: "the email changed after you saw it, so your yes was not for this version",
+  // D-075 (20261113140000 career_apply_facts_email_guard): the card was shown before a fact its email states was set aside or corrected.
+  fact_changed: "an answer in it changed after you saw it, so your yes was not for what is on file now; ask for the email again and I'll draft it from your current answers",
   no_resume: "I have no confirmed resume on file for you, so nothing goes without one",
 };
 const RESUME_UNREAD_EMAIL = "I couldn't check your resume on file just now, so nothing was drafted or sent. Ask again in a minute.";
@@ -341,7 +343,8 @@ export function supabaseResumes(admin: any, o: { profile: () => any; tailor?: Ta
           .catch((e) => { console.error("email apply: tailoring failed", e instanceof Error ? e.message : String(e)); return null; });
         if (t && t.ok) {
           const bytes = await download(resumePath(u, t.sha256));
-          if (bytes && (await sha(bytes)) === t.sha256) return { filename: t.filename, bytes, sha256: t.sha256, tailored: true, mime: "application/pdf" };
+          // Defence in depth: the file's own text is read; a missing or placeholder email or phone is no resume for a card.
+          if (bytes && (await sha(bytes)) === t.sha256 && !(await resumeFileContactProblems(bytes, { confirmed: confirmedEmails(o.profile()) })).length) return { filename: t.filename, bytes, sha256: t.sha256, tailored: true, mime: "application/pdf" };
         }
       }
       return null;
@@ -349,7 +352,8 @@ export function supabaseResumes(admin: any, o: { profile: () => any; tailor?: Ta
     async attachment(u: string, sha256: string): Promise<Resume | null> {
       if (!/^[a-f0-9]{64}$/.test(sha256)) return null;
       const tailored = await download(resumePath(u, sha256));
-      return tailored && (await sha(tailored)) === sha256 ? { filename: "resume.pdf", bytes: tailored, sha256, tailored: true, mime: "application/pdf" } : null;
+      // The submit gate: at the yes the stored file is read again; one whose contact is not confirmed is not sent.
+      return tailored && (await sha(tailored)) === sha256 && !(await resumeFileContactProblems(tailored, { confirmed: confirmedEmails(o.profile()) })).length ? { filename: "resume.pdf", bytes: tailored, sha256, tailored: true, mime: "application/pdf" } : null;
     },
   };
 }

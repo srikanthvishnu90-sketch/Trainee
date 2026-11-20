@@ -77,12 +77,14 @@ Deno.test("contact turn: the asks and yeses it reads, the address rule, and ever
   ok(addressProblem({ ...c, email: { ...c.email, email: "no-reply@acme.io" } }), "a no-reply sender");
   // Off, an ask is not claimed and no store is read; a yes with no card shown is not claimed either.
   const boom = () => { throw new Error("a store was read"); };
-  const deps: any = { env: () => undefined, contacts: { get: boom, suppressed: boom, byName: boom }, model: boom, senderFacts: boom, signature: boom, mailboxes: boom,
+  // Architect amendment (D-062): both flags are release flags (on when unset); "off" is the rollback this case means.
+  const deps: any = { env: (k: string) => (k === "CAREER_PEOPLE_SEARCH" || k === "CAREER_CONTACT_OUTREACH" ? "off" : undefined), contacts: { get: boom, suppressed: boom, byName: boom }, model: boom, senderFacts: boom, signature: boom, mailboxes: boom,
     lastCard: async () => null, store: {}, rail: {}, limits: memorySendLimits() };
   eq(await contactTurn({ message: "email Jane Doe", userId: "u", now: Date.now(), deps }), null, "off: the ask is not this turn's");
   eq(await contactTurn({ message: "yes", userId: "u", now: Date.now(), deps }), null, "no card shown: the yes is not this turn's");
+  // Architect amendment (D-062; owner, 2026-11-11, accepts D-043): both moved into RELEASE_FLAGS, each rolled back with its own "off".
   for (const f of ["CAREER_PEOPLE_SEARCH", "CAREER_CONTACT_OUTREACH"]) {
-    ok(RELEASE_NEVER_ON.includes(f) && !(f in RELEASE_FLAGS), `${f} stays in RELEASE_NEVER_ON`);
+    ok(!RELEASE_NEVER_ON.includes(f) && RELEASE_FLAGS[f] === "on", `${f} is a release flag (D-062)`);
   }
 });
 
@@ -260,17 +262,17 @@ Deno.test({ name: "R10 contact outreach through the real handler: card, yes, rai
       const asked = await say(chat, "email Jane Poe");
       ok(asked.intent !== "career_contact_card", "off: no card is shown");
       Deno.env.set("CAREER_CONTACT_OUTREACH", "on");
-      Deno.env.delete("CAREER_PEOPLE_SEARCH"); // OUTREACH off is off; PEOPLE_SEARCH off is off for a contact found by search
+      Deno.env.set("CAREER_PEOPLE_SEARCH", "off"); // Architect amendment (D-062): "off", the release flag's rollback. OUTREACH off is off; PEOPLE_SEARCH off is off for a contact found by search
       eq((await say(chat, "yes")).intent === "career_contact_send", false, "no card waiting");
       Deno.env.set("CAREER_PEOPLE_SEARCH", "on");
       eq((await say(chat, "email Jane Poe")).resultStatus, "shown");
-      Deno.env.delete("CAREER_PEOPLE_SEARCH");
+      Deno.env.set("CAREER_PEOPLE_SEARCH", "off"); // Architect amendment (D-062): the rollback value
       eq((await say(chat, "yes")).resultStatus, "off", "CAREER_PEOPLE_SEARCH off refuses a contact found by search");
       Deno.env.set("CAREER_PEOPLE_SEARCH", "on");
       eq(await queued(u), 0);
       // D-048 option (a): with only CAREER_CONTACT_OUTREACH on, a recipient the person supplied (a page they gave) is sent to,
       // in test mode here so the mail goes only to the test recipient.
-      Deno.env.delete("CAREER_PEOPLE_SEARCH");
+      Deno.env.set("CAREER_PEOPLE_SEARCH", "off"); // Architect amendment (D-062): the rollback value
       Deno.env.set("CAREER_CONTACT_TEST_RECIPIENTS", "owner.r10@trainee.example");
       const own = resolved("June Poe", "june.poe@acme.io");
       await save(u, { ...own, person: { ...own.person, supplied_by: "person" } } as any);

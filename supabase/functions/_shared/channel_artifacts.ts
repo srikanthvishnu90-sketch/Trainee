@@ -60,6 +60,9 @@ export interface TurnDocument {
   mime: string;
   base64: string;
   sha256: string | null;
+  // D-072 (files writers): what a tailored resume or cover letter was made for and what changed, set by its producer, so the
+  // delivered file is written as a version on the Materials File (career_material_writer.ts). Never sent to a channel.
+  material?: Record<string, unknown> | null;
 }
 
 function asDocument(d: any): TurnDocument | null {
@@ -72,6 +75,7 @@ function asDocument(d: any): TurnDocument | null {
     mime: typeof d.mime === "string" ? d.mime : (typeof d.contentType === "string" ? d.contentType : "application/pdf"),
     base64: d.base64,
     sha256: typeof d.sha256 === "string" ? d.sha256 : null,
+    ...(d.material && typeof d.material === "object" && !Array.isArray(d.material) ? { material: d.material } : {}),
   };
 }
 
@@ -109,7 +113,7 @@ export interface ArtifactRef { kind: "document"; ref: string; filename: string; 
 export async function materializeArtifacts(
   admin: any,
   args: { userId: string; threadId: string; documents: TurnDocument[]; now?: number; ttlMs?: number },
-): Promise<{ artifacts: ArtifactRef[]; failed: number }> {
+): Promise<{ artifacts: ArtifactRef[]; failed: number; stored: boolean[] }> {
   const now = args.now ?? Date.now();
   const expires = new Date(now + (args.ttlMs ?? ARTIFACT_TTL_MS)).toISOString();
   const artifacts: ArtifactRef[] = [];
@@ -141,7 +145,9 @@ export async function materializeArtifacts(
     }
   }
   for (const a of made) if (a) artifacts.push(a);
-  return { artifacts, failed };
+  // stored: which of the turn's documents were stored (delivered), in the turn's order (D-072 files writers: only a delivered file
+  // is written as a document version).
+  return { artifacts, failed, stored: made.map((a) => a !== null) };
 }
 
 function b64ToBytes(b64: string): Uint8Array {

@@ -13,7 +13,7 @@
 //                     it again). Nothing is sent here: the rail's worker sends later, and this page says Sent only from the draft's row.
 // The rail is injected. Tests pass a recording outbox (no worker, no Gmail): nothing is ever sent from a test.
 import { automatedInbox } from "./automated_inbox.ts";
-import { blockedAddresses, messageOf, type OutreachDraft, type OutreachStore, payloadHash, supabaseOutreachStore } from "./career_outreach.ts";
+import { blockedAddresses, isMailReply, messageOf, type OutreachDraft, type OutreachStore, payloadHash, supabaseOutreachStore } from "./career_outreach.ts";
 import { type OutreachDeps, queueApprovedOutreach } from "./career_send_rail.ts";
 import type { Act } from "./file_family.ts";
 import type { MessageReview } from "./file_family_apply.ts";
@@ -52,7 +52,8 @@ export async function messageView(d: OutreachDraft): Promise<MessageReview> {
 
 // The F-12 FamilyRecords (the S0 hook): the view is the draft's own row, read now; null when it can't be read (the C.24 error page).
 export function messageRecords(o: MessageDeps): FamilyRecords {
-  const draftOf = async (u: string, rec: FamilyRec) => { const id = rec.data.ref?.draft_id ?? ""; return id ? (await o.store.drafts(u, [id]))[0] ?? null : null; };
+  // A reply to an email in the person's inbox is not an outreach message: it has no File and no approval here (its own card only).
+  const draftOf = async (u: string, rec: FamilyRec) => { const id = rec.data.ref?.draft_id ?? ""; const d = id ? (await o.store.drafts(u, [id]))[0] ?? null : null; return d && !isMailReply(d) ? d : null; };
   return {
     async load(u, rec) { const d = await draftOf(u, rec); return d && d.id === rec.data.ref?.draft_id ? { view: await messageView(d), asOf: d.sent_at ?? d.approved_at ?? d.created_at ?? null } : null; },
     post: {
@@ -75,7 +76,7 @@ export async function approveSendPost(o: MessageDeps, userId: string, draftId: s
   const no = (status: number, why: Extract<SendResult, { ok: false }>["why"], title: string, ...lines: string[]): SendResult => ({ ok: false, status, why, title, lines: [...lines, NOTHING] });
   if (!o.rail) return no(503, "off", "Sending isn't switched on", "Sending from your account isn't switched on yet.");
   const [d] = await o.store.drafts(userId, [draftId]).catch(() => []);
-  if (!d || d.id !== draftId) return no(404, "not_found", "This message isn't here", "It is not one of your drafts any more.");
+  if (!d || d.id !== draftId || isMailReply(d)) return no(404, "not_found", "This message isn't here", "It is not one of your drafts any more.");
   const h = await payloadHash(messageOf(d));
   // D-MN-2: the yes approves exactly the words the page showed. A page drawn before the words changed carries the old hash.
   if (!/^[0-9a-f]{64}$/.test(postedHash) || postedHash !== h || d.hash !== h) {

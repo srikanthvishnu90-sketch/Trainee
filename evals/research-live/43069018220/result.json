@@ -1,0 +1,173 @@
+{
+  "kind": "research-live",
+  "approval": "D-060",
+  "mode": "live",
+  "model": "claude-sonnet-5-5",
+  "tool": "web_search_20250305",
+  "run_id": "43069018220",
+  "sha": "f25d893b906fd42c77d46d68be76e3900639fc00",
+  "at": "2026-11-11T17:31:57.951Z",
+  "budget_usd": 0.28,
+  "searches": 1,
+  "spent_usd": 0.04364,
+  "verdict": "proven",
+  "problems": [],
+  "calls": [
+    {
+      "query": "Citadel new grad software engineer interview process",
+      "ms": 6956,
+      "searches": 1,
+      "cost_usd": 0.04364,
+      "cost_check_usd": 0.04364,
+      "stop_reason": "end_turn",
+      "shape": [
+        "text",
+        "server_tool_use:web_search",
+        "web_search_tool_result",
+        "text",
+        "text[web_search_result_location]",
+        "text",
+        "text[web_search_result_location]",
+        "text",
+        "text[web_search_result_location]",
+        "text",
+        "text[web_search_result_location]",
+        "text",
+        "text[web_search_result_location]",
+        "text",
+        "text[web_search_result_location]",
+        "text",
+        "text[web_search_result_location]",
+        "text",
+        "text[web_search_result_location]",
+        "text",
+        "text[web_search_result_location]",
+        "text",
+        "text[web_search_result_location]",
+        "text"
+      ],
+      "errors": [],
+      "usage": {
+        "input_tokens": 13720,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 620,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "service_tier": "standard",
+        "inference_geo": "global",
+        "speed": "standard",
+        "server_tool_use": {
+          "web_search_requests": 1,
+          "web_fetch_requests": 0
+        }
+      },
+      "results": [
+        {
+          "url": "https://www.glassdoor.co.in/Interview/Citadel-Software-Engineer-New-Grad-Interview-Questions-EI_IE14937.0,7_KO8,34.htm",
+          "title": "Citadel Software Engineer New Grad Interview Questions",
+          "page_age": null
+        },
+        {
+          "url": "https://www.jointaro.com/interviews/companies/citadel/experiences/software-engineer-united-states-october-20-2024-declined-offer-positive-453525fb/",
+          "title": "Citadel Software Engineer Interview Experience - United States",
+          "page_age": "752 days ago"
+        },
+        {
+          "url": "https://www.glassdoor.com/Interview/Citadel-Software-Engineer-Interview-Questions-EI_IE14937.0,7_KO8,25.htm",
+          "title": "Citadel Software Engineer Interview Experience & Questions",
+          "page_age": "68 days ago"
+        },
+        {
+          "url": "https://www.glassdoor.co.in/Interview/Citadel-Software-Engineer-Interview-Questions-EI_IE14937.0,7_KO8,25.htm",
+          "title": "Citadel Software Engineer Interview Questions",
+          "page_age": "1440 days ago"
+        },
+        {
+          "url": "https://www.glassdoor.co.in/Interview/Citadel-Software-Developer-Interview-Questions-EI_IE14937.0,7_KO8,26.htm",
+          "title": "Citadel Software Developer Interview Questions",
+          "page_age": null
+        },
+        {
+          "url": "https://www.glassdoor.co.in/Interview/Citadel-Software-Engineer-Intern-Interview-Questions-EI_IE14937.0,7_KO8,32.htm",
+          "title": "Citadel Software Engineer Intern Interview Questions",
+          "page_age": null
+        },
+        {
+          "url": "https://www.glassdoor.co.in/Interview/Citadel-Securities-Software-Engineer-Interview-Questions-EI_IE1443495.0,18_KO19,36.htm",
+          "title": "Citadel Securities Software Engineer Interview Questions",
+          "page_age": "152 days ago"
+        },
+        {
+          "url": "https://www.glassdoor.co.in/Interview/Citadel-Software-Engineering-Intern-Interview-Questions-EI_IE14937.0,7_KO8,35.htm",
+          "title": "Citadel Software Engineering Intern Interview Questions",
+          "page_age": "366 days ago"
+        },
+        {
+          "url": "https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/",
+          "title": "Our Campus Engineering Interview Process - Citadel",
+          "page_age": "71 days ago"
+        }
+      ],
+      "citations": [
+        {
+          "url": "https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/",
+          "title": "Our Campus Engineering Interview Process - Citadel",
+          "cited_text": "There are four steps in the process."
+        },
+        {
+          "url": "https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/",
+          "title": "Our Campus Engineering Interview Process - Citadel",
+          "cited_text": "This 45-minute interview will cover both technical and behavioral skills."
+        },
+        {
+          "url": "https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/",
+          "title": "Our Campus Engineering Interview Process - Citadel",
+          "cited_text": "We\u2019ll focus on coding, data structures and algorithms and problem-solving."
+        },
+        {
+          "url": "https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/",
+          "title": "Our Campus Engineering Interview Process - Citadel",
+          "cited_text": "During your scheduled interview, you can expect to meet with a few people from each firm. The interview process is the same for both firms."
+        },
+        {
+          "url": "https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/",
+          "title": "Our Campus Engineering Interview Process - Citadel",
+          "cited_text": "We do not assess fit for a specific team during the first and second rounds of the process."
+        },
+        {
+          "url": "https://www.glassdoor.co.in/Interview/Citadel-Software-Engineer-New-Grad-Interview-Questions-EI_IE14937.0,7_KO8,34.htm",
+          "title": "Citadel Software Engineer New Grad Interview Questions",
+          "cited_text": "**Online assessment followed by technical phone screen followed by 3 hours onsite**."
+        },
+        {
+          "url": "https://www.jointaro.com/interviews/companies/citadel/experiences/software-engineer-united-states-october-20-2024-declined-offer-positive-453525fb/",
+          "title": "Citadel Software Engineer Interview Experience - United States",
+          "cited_text": "- Software Engineer \u2022 October 22, 2025 Virtual HackerRank with multiple-choice questions as the first round. Two coding problems and then ten multiple..."
+        },
+        {
+          "url": "https://www.jointaro.com/interviews/companies/citadel/experiences/software-engineer-united-states-october-20-2024-declined-offer-positive-453525fb/",
+          "title": "Citadel Software Engineer Interview Experience - United States",
+          "cited_text": "I was asked questions on standard LeetCode problems and several follow-up questions related to low-level OS optimizations, such as predictive branchin..."
+        },
+        {
+          "url": "https://www.glassdoor.co.in/Interview/Citadel-Software-Engineering-Intern-Interview-Questions-EI_IE14937.0,7_KO8,35.htm",
+          "title": "Citadel Software Engineering Intern Interview Questions",
+          "cited_text": "Had a superday that was 3 back to back 45 min technicals."
+        },
+        {
+          "url": "https://www.glassdoor.co.in/Interview/Citadel-Software-Engineer-Intern-Interview-Questions-EI_IE14937.0,7_KO8,32.htm",
+          "title": "Citadel Software Engineer Intern Interview Questions",
+          "cited_text": "Content of interviews can vary greatly depending on interviewer."
+        }
+      ],
+      "answer": "I'll search for information on this.**Official process:** Citadel's campus page says there are four steps in the process, and that a 45-minute interview covers both technical and behavioral skills, with a focus on coding, data structures and algorithms and problem-solving. You meet people from both Citadel and Citadel Securities, and the process is the same for both firms. Team fit isn't assessed in the first and second rounds. The page excerpt I saw did not spell out all four steps. **Anecdotes (Glassdoor/Taro, anonymous):** - One new grad described an online assessment, then a technical phone screen, then a 3-hour onsite. - A recent report described a HackerRank first round with two coding problems and ten multiple-choice questions on topics like caching. - Another new grad was asked standard LeetCode problems plus follow-ups on low-level OS optimizations. - Intern reports (a related pipeline, not new grad) mention a superday of three back-to-back 45-minute technicals. Reviewers' experiences vary, and one noted that interview content can vary greatly depending on the interviewer."
+    }
+  ],
+  "recorded_from": "the run log of GitHub Actions run 43069018220 (the artifact store is not reachable from this session); the run printed result.json verbatim"
+}

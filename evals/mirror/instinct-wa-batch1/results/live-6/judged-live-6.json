@@ -1,0 +1,98 @@
+{
+ "C1": {
+  "ok": false,
+  "why": "a plan from a real search (1 posting: PayPal), GPA fix first; no File, 1 posting where Instinct named 5 (the world's board holds PayPal and a remote NVIDIA posting, and the search returned only PayPal)"
+ },
+ "C2": {
+  "ok": true,
+  "why": "a referral draft with [Name], [Chicago/remote], [team] placeholders, not sent"
+ },
+ "C3": {
+  "ok": false,
+  "why": "1 posting (PayPal) and its results File; Instinct named 5 live postings (the remote NVIDIA posting in the world was not returned)"
+ },
+ "C4": {
+  "ok": true,
+  "why": "name and contacts, school line, GPA left off, a proof line, one cited guide; it adds an objective line Instinct did not"
+ },
+ "C5": {
+  "ok": true,
+  "why": "one Python question (first repeated value; Instinct: first unique), approach and complexity first"
+ },
+ "C6": {
+  "ok": false,
+  "why": "'No, nothing on record yet': the stub Gmail holds 9 confirmations and was not read; Instinct listed them"
+ },
+ "C5f1": {
+  "ok": true,
+  "why": "reviews the actual answer: catches that it solves a different problem than the one Trainee asked (C5's question differed from Instinct's), gives the fix, pushes a follow-up"
+ },
+ "C5f2": {
+  "ok": false,
+  "why": "no code review: the reply is the length condenser's own meta-answer ('there was no text to rewrite ... If you meant to send a career assistant's message, please paste it')"
+ },
+ "C7": {
+  "ok": true,
+  "why": "compare after rent, taxes and benefits; the five factors; ask Chicago to move; nothing saved"
+ },
+ "C8": {
+  "ok": true,
+  "why": "every role with its source and the gaps (Harbor dates, Crestline name, Rallyup customers)"
+ },
+ "C9": {
+  "ok": false,
+  "why": "the reply is empty: nothing reached the person (Instinct: four sourced messages)"
+ },
+ "C10": {
+  "ok": true,
+  "why": "a PayPal PDF (and Word) review draft with [your email], the open flags, nothing submitted"
+ },
+ "C11": {
+  "ok": true,
+  "why": "what it needs (own careers sign-in, work authorization, return to school, the resume), the questions behind sign-in, the boundary; plus the deadline"
+ },
+ "C12": {
+  "ok": true,
+  "why": "won't promise 50; what it would take; a 5 to 10 batch first; nothing queued"
+ },
+ "C13": {
+  "ok": true,
+  "why": "a casual comp-range draft, not sent"
+ },
+ "C14": {
+  "ok": true,
+  "why": "C2's draft, shorter and less formal, placeholder kept, not sent"
+ },
+ "C15": {
+  "ok": true,
+  "why": "projects, outreach, wider targets, tracking for the hypothetical person; nothing saved"
+ },
+ "C16": {
+  "ok": true,
+  "why": "the tracker File (link on the answer, D-065 fixed): 9 applications from Gmail, PayPal as research; the C6 mistake corrected out loud"
+ },
+ "C17": {
+  "ok": true,
+  "why": "a reusable answer from confirmed facts, with [brackets] for what it does not know"
+ },
+ "C18": {
+  "ok": true,
+  "why": "checked live on Workday: open, applications through December 6, the link, nothing applied"
+ },
+ "C19": {
+  "ok": false,
+  "why": "no leads: the search found no public page naming an alum (Instinct gave 3 leads)"
+ },
+ "C20": {
+  "ok": false,
+  "why": "a v2 review draft, but Pixelforge was dropped, not condensed, and Waypoint got 1 line (Instinct: one Pixelforge bullet, three Waypoint bullets)"
+ },
+ "C21": {
+  "ok": true,
+  "why": "asks the question, sets up the roast"
+ },
+ "C22": {
+  "ok": false,
+  "why": "'no verified number to give you', though PayPal's posted Chicago pay ($28-$49, read in C11) was in the thread; Instinct gave a benchmark, PayPal's range and 3 self-reported figures"
+ }
+}

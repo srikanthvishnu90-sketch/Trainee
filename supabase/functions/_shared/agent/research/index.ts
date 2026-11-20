@@ -17,7 +17,8 @@ import { directAnswer, shortFor } from "./shorts.ts";
 // nothing else in this pipeline changes. The link is inserted into the chat reply by code (reply.ts), never by the model.
 export interface BriefFile { name: string; kind: "research_brief"; subject: string; markdown: string }
 export type Publisher = (file: BriefFile) => Promise<{ url: string }>;
-export interface ResearchDeps { search: GroundSearch; cache?: GroundCache; publish?: Publisher; derive?: DeriveFn; onResult?: (r: ResearchResult, message: string) => void }
+// onAdvice: a specific advice question's result (advice.ts, D-063), for the reply's source line.
+export interface ResearchDeps { search: GroundSearch; cache?: GroundCache; publish?: Publisher; derive?: DeriveFn; onResult?: (r: ResearchResult, message: string) => void; onAdvice?: (r: import("./advice.ts").AdviceResult) => void }
 export type ResearchResult =
   | { status: "need_field"; ask: string; note: string }
   | { status: "ok"; brief_markdown: string; file_name: string; file_url: string | null; verdict: { now: string; later: string }; short?: { now: string; later: string; act: string }; name?: string; answer?: string | null; lead?: string; first_action: string; ask: string | null; assumptions: string[];

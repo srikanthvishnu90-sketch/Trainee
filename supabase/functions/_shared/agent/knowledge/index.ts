@@ -1,18 +1,20 @@
-// The knowledge and context layer for the agent brain (flag CAREER_KNOWLEDGE=on, off by default): the Person Context Pack
+// The knowledge and context layer for the agent brain (flag CAREER_KNOWLEDGE; a release flag since D-060, served on, rolled back with =off): the Person Context Pack
 // plus the 1 to 3 situation playbooks that fit it, as one block for the system prompt. Method only: playbooks never carry
 // real companies, pay, dates or statistics (the lint test enforces it); those come from tools or are said to be unverified.
 import { buildContextPack, contextPackBlock, type ContextPack, type PackInput } from "./context_pack.ts";
 import { PLAYBOOKS } from "./playbooks.generated.ts";
 import type { Playbook } from "./parse.ts";
 import { selectPlaybooks } from "./retrieve.ts";
+import { releaseFlagOn } from "../../../agent-chat/release_config.ts";
 
-export const knowledgeOn = (env: { get(k: string): string | undefined }) => env.get("CAREER_KNOWLEDGE") === "on";
+// D-060: CAREER_KNOWLEDGE is a release flag (release_config.ts RELEASE_FLAGS): on unless the environment rolls it back.
+export const knowledgeOn = (env: { get(k: string): string | undefined }) => releaseFlagOn(env, "CAREER_KNOWLEDGE");
 export const KNOWLEDGE_BUDGET = 12500;
 
 const HOW = [
   "HOW TO USE THIS. The goal is an answer only this person could have been given: their facts named, a realistic read of their situation, concrete steps they can start this week, and one next action.",
   "The playbooks below are METHOD, written for anyone in a similar spot. Take what fits this person, drop what does not, and put it in your own words with their facts. Never paste a playbook or its headings.",
-  "Playbooks name no real company, program, deadline, pay figure or statistic, and neither do you unless search_jobs, get_posting or the person gave it. Where a step needs a specific (which programs, which firms, when applications open), say how they find and verify it. You have no live outside information.",
+  "Playbooks name no real company, program, deadline, pay figure or statistic, and neither do you unless search_jobs, get_posting or the person gave it. Where a step needs a specific (which programs, which firms, when applications open), say how they find and verify it. You have no live outside information except what a research tool returns this turn.",
   "Write any email or message the step calls for in full, with [brackets] for facts you lack. The person sends it; you never do. Honor \"Do not claim\" in each playbook.",
 ].join("\n");
 

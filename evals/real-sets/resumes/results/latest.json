@@ -1,0 +1,1584 @@
+{
+ "at": "2026-11-12T07:41:05.824Z",
+ "base": "a0d1cc5c",
+ "line": "REAL-SET RESUMES: postings 35 (greenhouse 14, lever 6, ashby 6, smartrecruiters 5, workday 4) x persona Alex Testcase (TEST); made 35/35; files 70: opens 70/70, copies 70/70, downloads 70/70, pages 70/70, target 70/70, invented 70/70; invented facts 0; postings with a confirmed skill to carry 24/35; PASS 35/35 (bar 34/35, invented 0) MEETS; reported: loop_rule (skillEvidence) target met 35/35, its unprinted skills none",
+ "cases": [
+  {
+   "job_id": "greenhouse:stripe:7230921",
+   "company": "Stripe",
+   "title": "Risk Operations Analyst",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [],
+   "loopWanted": [],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:airbnb:8380007",
+   "company": "Airbnb",
+   "title": "Advanced Analytics Intern",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [
+    "Python",
+    "Statistics"
+   ],
+   "loopWanted": [
+    "Python",
+    "Statistics"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:figma:5551532004",
+   "company": "Figma",
+   "title": "Software Engineer - Machine Learning",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [
+    "Python",
+    "Go"
+   ],
+   "loopWanted": [
+    "Python",
+    "Go"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:robinhood:7263592",
+   "company": "Robinhood",
+   "title": "Software Engineer 2, Backend",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [
+    "Python",
+    "Go",
+    "Kubernetes",
+    "AWS"
+   ],
+   "loopWanted": [
+    "Python",
+    "Go",
+    "Kubernetes",
+    "AWS"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:coinbase:7254275",
+   "company": "Coinbase",
+   "title": "Complaints Analyst III",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [],
+   "loopWanted": [],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:datadog:7172466",
+   "company": "Datadog",
+   "title": "Customer Success Associate - Boston",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [],
+   "loopWanted": [],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:duolingo:8881612002",
+   "company": "Duolingo",
+   "title": "AI Research Engineer, New PhD Graduate ",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [],
+   "loopWanted": [],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:brex:8366850002",
+   "company": "Brex",
+   "title": "Data Engineer",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [
+    "Python"
+   ],
+   "loopWanted": [
+    "Python"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:affirm:7749755003",
+   "company": "Affirm",
+   "title": "Software Engineer II, Fullstack (Capital Orchestration)",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [
+    "Python",
+    "JavaScript",
+    "React"
+   ],
+   "loopWanted": [
+    "Python",
+    "React",
+    "JavaScript"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:gusto:7656216",
+   "company": "Gusto, Inc.",
+   "title": "Data Scientist, Risk ",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [
+    "Python"
+   ],
+   "loopWanted": [
+    "Python"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:discord:8865033002",
+   "company": "Discord",
+   "title": "Strategic Finance Analyst",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [
+    "Excel",
+    "Financial Modeling"
+   ],
+   "loopWanted": [
+    "Excel",
+    "Financial Modeling"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:dropbox:6330377",
+   "company": "Dropbox",
+   "title": "Infrastructure Software Engineer",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [
+    "Python",
+    "Go"
+   ],
+   "loopWanted": [
+    "Python",
+    "Go"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:chime:8594959002",
+   "company": "Chime Financial, Inc",
+   "title": "Software Engineer, Financial Platform",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [
+    "Python",
+    "Go",
+    "AWS"
+   ],
+   "loopWanted": [
+    "Python",
+    "Go",
+    "AWS"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "greenhouse:toast:8224111",
+   "company": "Toast",
+   "title": "Software Engineer II, Frontend ",
+   "provider": "greenhouse",
+   "made": true,
+   "wanted": [
+    "React",
+    "AWS"
+   ],
+   "loopWanted": [
+    "React",
+    "AWS"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "lever:palantir:09846827-b931-4a9f-bd64-c3bb8860187b",
+   "company": "palantir",
+   "title": "Privacy and Civil Liberties Software Engineer, Internship",
+   "provider": "lever",
+   "made": true,
+   "wanted": [],
+   "loopWanted": [],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "lever:palantir:0a838e66-1ab0-4fc4-b4d3-4671c0352278",
+   "company": "palantir",
+   "title": "Software Engineer, New Grad - Defense",
+   "provider": "lever",
+   "made": true,
+   "wanted": [
+    "Go",
+    "React"
+   ],
+   "loopWanted": [
+    "Go",
+    "React"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "lever:spotify:1bbaf909-5ff3-4ed6-87ca-f7ff007a169c",
+   "company": "spotify",
+   "title": "Data Scientist - Music Mission",
+   "provider": "lever",
+   "made": true,
+   "wanted": [
+    "Algorithms"
+   ],
+   "loopWanted": [
+    "Algorithms"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "lever:spotify:56ea6f2e-f20b-4e46-ab94-d3eb0a89482d",
+   "company": "spotify",
+   "title": "Data Scientist - Music Promotion",
+   "provider": "lever",
+   "made": true,
+   "wanted": [
+    "Algorithms"
+   ],
+   "loopWanted": [
+    "Algorithms"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "lever:zoox:0168ad29-2fd8-4c91-865c-b9fff8aa30c1",
+   "company": "zoox",
+   "title": "AI Workflows Intern [Summer 2027]",
+   "provider": "lever",
+   "made": true,
+   "wanted": [],
+   "loopWanted": [],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "lever:zoox:082ed20c-b8e1-4b1c-9c22-4738ad94055d",
+   "company": "zoox",
+   "title": "Embedded Software Engineer - Battery Management Systems",
+   "provider": "lever",
+   "made": true,
+   "wanted": [
+    "Algorithms"
+   ],
+   "loopWanted": [
+    "Algorithms"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "ashby:ramp:09360e92-fc95-4ba6-9611-dfefd60b13ce",
+   "company": "ramp",
+   "title": "Software Engineer, Forward Deployed, Enterprise Product",
+   "provider": "ashby",
+   "made": true,
+   "wanted": [],
+   "loopWanted": [],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "ashby:ramp:198150d6-789a-4ef8-999f-93a49656d4f1",
+   "company": "ramp",
+   "title": "Software Engineer, Engineering Platform",
+   "provider": "ashby",
+   "made": true,
+   "wanted": [
+    "Python",
+    "Go"
+   ],
+   "loopWanted": [
+    "Python",
+    "Go"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "ashby:notion:06c2599d-4dd5-4f97-843f-7194b546f042",
+   "company": "notion",
+   "title": "Software Engineer, Web Infrastructure",
+   "provider": "ashby",
+   "made": true,
+   "wanted": [
+    "JavaScript",
+    "React"
+   ],
+   "loopWanted": [
+    "React",
+    "JavaScript"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "ashby:notion:1fc309c8-da20-4ff2-84c7-8b863ece2b0a",
+   "company": "notion",
+   "title": "Software Engineer, AI Connections (Developer Platform)",
+   "provider": "ashby",
+   "made": true,
+   "wanted": [],
+   "loopWanted": [],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "ashby:plaid:1bcfe93d-97bd-4618-b81e-dc308ef69d30",
+   "company": "plaid",
+   "title": "Fraud Intelligence Analyst",
+   "provider": "ashby",
+   "made": true,
+   "wanted": [
+    "Python"
+   ],
+   "loopWanted": [
+    "Python"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "ashby:plaid:361c4725-ab72-4895-a3aa-9b642f4927a9",
+   "company": "plaid",
+   "title": "Data Scientist - Fraud",
+   "provider": "ashby",
+   "made": true,
+   "wanted": [
+    "Python"
+   ],
+   "loopWanted": [
+    "Python"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "smartrecruiters:servicenow:744000161204235",
+   "company": "ServiceNow",
+   "title": "Assoc Information Security Engineer Intern",
+   "provider": "smartrecruiters",
+   "made": true,
+   "wanted": [],
+   "loopWanted": [],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "smartrecruiters:servicenow:744000161209600",
+   "company": "ServiceNow",
+   "title": "Assoc AI Engineering (Cloud Security Automation) Intern",
+   "provider": "smartrecruiters",
+   "made": true,
+   "wanted": [],
+   "loopWanted": [],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "smartrecruiters:experian:744000160737719",
+   "company": "Experian",
+   "title": "Payroll Tax Consulting Associate",
+   "provider": "smartrecruiters",
+   "made": true,
+   "wanted": [
+    "Excel"
+   ],
+   "loopWanted": [
+    "Excel"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "smartrecruiters:experian:744000161185369",
+   "company": "Experian",
+   "title": "Expert Data Scientist, AI Fraud Applications",
+   "provider": "smartrecruiters",
+   "made": true,
+   "wanted": [
+    "Python",
+    "Statistics"
+   ],
+   "loopWanted": [
+    "Python",
+    "Statistics"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "smartrecruiters:wise:744000160933600",
+   "company": "Wise",
+   "title": "Graduate Data Scientist",
+   "provider": "smartrecruiters",
+   "made": true,
+   "wanted": [
+    "Python",
+    "Go",
+    "Statistics",
+    "Probability",
+    "Algorithms"
+   ],
+   "loopWanted": [
+    "Python",
+    "Go",
+    "Statistics",
+    "Probability",
+    "Algorithms"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "workday:paypal:R0138587",
+   "company": "PayPal",
+   "title": "Cybersecurity Intern - Summer 2027",
+   "provider": "workday",
+   "made": true,
+   "wanted": [],
+   "loopWanted": [],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "workday:paypal:R0138582",
+   "company": "PayPal",
+   "title": "Data Scientist Intern - Summer 2027",
+   "provider": "workday",
+   "made": true,
+   "wanted": [
+    "Algorithms"
+   ],
+   "loopWanted": [
+    "Algorithms"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "workday:paypal:R0137491-1",
+   "company": "PayPal, Inc.",
+   "title": "Software Engineer",
+   "provider": "workday",
+   "made": true,
+   "wanted": [
+    "Python",
+    "Go",
+    "Kubernetes"
+   ],
+   "loopWanted": [
+    "Python",
+    "Go",
+    "Kubernetes"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  },
+  {
+   "job_id": "workday:paypal:R0138295-1",
+   "company": "PayPal, Inc.",
+   "title": "Software Engineer",
+   "provider": "workday",
+   "made": true,
+   "wanted": [
+    "Data Structures",
+    "Algorithms"
+   ],
+   "loopWanted": [
+    "Data Structures",
+    "Algorithms"
+   ],
+   "loopMissing": [],
+   "files": [
+    {
+     "kind": "pdf",
+     "filename": "Alex_Testcase_Resume.pdf",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    },
+    {
+     "kind": "docx",
+     "filename": "Alex_Testcase_Resume.docx",
+     "pages": 1,
+     "checks": {
+      "opens": true,
+      "copies": true,
+      "downloads": true,
+      "pages": true,
+      "target": true,
+      "invented": true
+     },
+     "notes": []
+    }
+   ],
+   "pass": true
+  }
+ ]
+}

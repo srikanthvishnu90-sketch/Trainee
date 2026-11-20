@@ -160,15 +160,19 @@ Deno.test("contact facts and sources: professional only, data never instructions
   eq((await discover(null, "Jane Doe", "Acme")).run.status, "not_wired", "no search provider: discovery is not wired, nothing invented");
   assertNode.throws(() => contactUserAgent(""), "a User-Agent without a contact is refused");
   const env = (m: Record<string, string>) => ({ get: (k: string) => m[k] });
-  eq(contactOutreachOn(env({})), false, "off in production");
-  eq(contactOutreachOn(env({ CAREER_PEOPLE_SEARCH: "on" })), false);
-  eq(contactOutreachOn(env({ CAREER_CONTACT_OUTREACH: "on" })), false, "OUTREACH only: no resolution, no search (architect amendment, D-048 option a)");
-  eq([contactSendOn(env({ CAREER_CONTACT_OUTREACH: "on" }), "person"), contactSendOn(env({ CAREER_CONTACT_OUTREACH: "on" }), "search"), contactSendOn(env({ CAREER_CONTACT_OUTREACH: "on" }), undefined)],
+  // Architect amendment (D-062; owner, 2026-11-11: "find alumni, do all of it"; accepts D-043): both flags are release flags now,
+  // on in production and each rolled back with its own =off. Every bar below is kept, stated with the rollback values.
+  eq(contactOutreachOn(env({})), true, "D-062: on in production");
+  eq(contactOutreachOn(env({ CAREER_PEOPLE_SEARCH: "on", CAREER_CONTACT_OUTREACH: "off" })), false);
+  eq(contactOutreachOn(env({ CAREER_CONTACT_OUTREACH: "on", CAREER_PEOPLE_SEARCH: "off" })), false, "OUTREACH only: no resolution, no search (architect amendment, D-048 option a)");
+  const only = env({ CAREER_CONTACT_OUTREACH: "on", CAREER_PEOPLE_SEARCH: "off" });
+  eq([contactSendOn(only, "person"), contactSendOn(only, "search"), contactSendOn(only, undefined)],
     [true, false, false], "OUTREACH only: on for person-supplied recipients, off for any contact found by search");
-  eq(contactSendOn(env({ CAREER_PEOPLE_SEARCH: "on" }), "person"), false, "PEOPLE_SEARCH alone sends nothing");
+  eq(contactSendOn(env({ CAREER_PEOPLE_SEARCH: "on", CAREER_CONTACT_OUTREACH: "off" }), "person"), false, "PEOPLE_SEARCH alone sends nothing");
   eq(contactSendOn(env({ CAREER_PEOPLE_SEARCH: "on", CAREER_CONTACT_OUTREACH: "on" }), "search"), true);
   eq(contactOutreachOn(env({ CAREER_PEOPLE_SEARCH: "on", CAREER_CONTACT_OUTREACH: "on" })), true);
-  ok(RELEASE_NEVER_ON.includes("CAREER_CONTACT_OUTREACH") && !("CAREER_CONTACT_OUTREACH" in RELEASE_FLAGS), "the new flag is off until the owner accepts D-042");
+  eq(contactOutreachOn(env({ CAREER_PEOPLE_SEARCH: "off", CAREER_CONTACT_OUTREACH: "off" })), false, "the rollback turns it all off");
+  ok(!RELEASE_NEVER_ON.includes("CAREER_CONTACT_OUTREACH") && RELEASE_FLAGS.CAREER_CONTACT_OUTREACH === "on", "D-062: the owner accepted D-043");
   const decisions = await Deno.readTextFile(new URL("../../docs/architect/DECISIONS.md", import.meta.url));
   ok(/\| D-043 \|[^\n]*CAREER_PEOPLE_SEARCH[^\n]*proposed/.test(decisions), "D-043 proposes turning CAREER_PEOPLE_SEARCH on, for the owner");
 });

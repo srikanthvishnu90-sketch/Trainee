@@ -39,8 +39,11 @@ import { planCareerTaskIntent, normalizeCareerTaskRequest, createCareerBoardFor,
 import { CareerHost } from "../_shared/career_host.js";
 import { CareerPool } from "../_shared/career_pool.js";
 import { createCareerPersistence, careerRequestHash } from "../_shared/career_persistence.js";
-import { holdUnsent, notConfirmedReply, pauseReply, readControl, reconcile, resumeReply, storeSentReply, unsavedStopReply, workflowReply, type Hold, type StopControl } from "../_shared/career_stop_truth.ts";
-import { callModel as callModelUncapped, newMeter, turnLedger, WEB_SEARCH_AVAILABLE } from "../_shared/model_gateway.ts";
+import { alongsideHoldLine, holdUnsent, notConfirmedReply, pauseReply, readControl, reconcile, resumeReply, storeSentReply, unsavedStopReply, workflowReply, type Hold, type StopControl } from "../_shared/career_stop_truth.ts";
+import { callModel as callModelUncapped, newMeter, turnLedger, webSearch } from "../_shared/model_gateway.ts";
+import { claudeWebProvider, memoryWebCache, recheckPosting, webResearchOn, withWebSearch } from "../_shared/research_web.ts"; // D-060
+import { readWorkdayPosting } from "../_shared/workday_posting.ts"; // D-062
+import { readApplyFlow } from "../_shared/posting_requirements.ts"; // D-062
 import { careerModelConfig } from "./release_model.ts";
 // LAUNCH READINESS (2026-10-26): the per-turn model wrapper (no per-person cap since D-046), the per-person turn order, the pool read only when used.
 import { spendCap } from "../_shared/career_spend_cap.ts";
@@ -48,28 +51,44 @@ import { enterTurnGate, type TurnGate } from "../_shared/career_turn_gate.ts";
 import { CONFLICT_CODES, CONFLICT_REPLY, countSend, newTurnEffects, refusedSaveReply, trackTurnEffects } from "../_shared/career_save_replies.ts";
 import { poolNeeded } from "./career_pool_need.ts";
 import { linkChecker } from "../_shared/link_check.ts";
+import { asAsked, fetchAsAsked } from "../_shared/posting_fetch.ts"; // the posting readers' transport: the platform fetch, a redirect it followed kept checkable
 import { knowledgeOn } from "../_shared/agent/knowledge/index.ts";
 import { fileKindPublisher } from "../_shared/agent/research/file_publisher.ts";
 import { modelDerive } from "../_shared/agent/research/derive.ts";
+import { RESEARCH_DRAFT_MAX_TOKENS } from "../_shared/agent/research/draft_json.ts";
+import { SUPPORT_JUDGE_TIMEOUT_MS, supportJudgeVia } from "../_shared/agent/research/support.ts";
 import { replyFlagsMeta } from "../_shared/agent/loop.ts"; // flag-only reply checks saved with the turn (Greptile on #566)
+import { withNotRun } from "../_shared/agent/not_run.ts"; // Gap #5: code's not-run lines lead the reply after every rewrite
 import { gatewayGroundSearch, memoryGroundCache } from "../_shared/agent/research/ground.ts";
 const researchCache = memoryGroundCache();
+const webResearchCache = memoryWebCache(); // D-060: per instance, like researchCache
+const peopleSearchCache = new Map<string, { at: number; out: AlumniResult }>(); // D-062: per instance, 24 hours (career_alumni_search.ts)
 // Review of #589 (DNS rebinding): at startup, can this runtime resolve names (Deno.resolveDns)? Logged once (research_dns_probe);
 // when it cannot, the research reader reads nothing (fails closed) instead of fetching without the resolved-address check.
 if (researchReplyOn(Deno.env)) void dnsProbe();
-import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
-import { brainMode, draftContinuation, FOLLOWUP_INTENT, researchOverAction, stagedRoute, stagedToolPolicy } from "./career_staged.ts";
+import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, nonEmptyReply, summaryFor } from "./career_brain.ts";
+import { brainMode, draftContinuation, FOLLOWUP_INTENT, questionShaped, researchOverAction, stagedRoute, stagedToolPolicy } from "./career_staged.ts";
+import { BOUNDARY_LINE, BOUNDARY_SAID, boundaryOf, correctionOf, hypotheticalOf, plainAnswer } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G6, G8, G9
+import { severalAsks } from "../_shared/ask_language.ts"; // D-061 G13
+// D-061 G6: a write that moves toward an external effect (a queued or prepared application, a receipt, an email on the rail).
+// D-061 G1: an ask to make, change, send or export a document.
+const G1_MAKE_ASK = /\b(?:make|build|write|tailor|create|update|edit|change|fix|redo|rewrite|send|give me|generate|export|download|turn|convert|shorten|cut|add|remove|swap|use)\b/i;
+// D-061 G10: an ask to write something ("draft a note to ...", "write a short intro message ...").
+const G1_WRITE_ASK = /\b(?:draft|write|compose|rewrite|redo)\s+(?:me\s+|up\s+)?(?:a|an|the|my|that|this|short|quick|cold|brief)\b/i;
+const G6_EFFECT_WRITE = /apply_jobs|apply_receipts|apply_prepared|apply_prepare|apply_wanted|send_queue|outbox|contact_sends|outlook_sends|card_answer|batch_approv/;
 import { turnClock } from "./turn_clock.ts";
 let isolateTurns = 0; // D6: turns this isolate has served, so the log can tell a cold start from a warm one
 import { CRISIS_INTENT, crisisReply } from "./crisis.ts";
 import { CODE_IN_CHAT_INTENT, CODE_IN_CHAT_REPLY, codeInChat, noteForCodeTurn } from "../_shared/career_code_in_chat.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { CARD_ANSWER_INTENT, CARD_NEEDS_REPLY_STATUS, cardIntent, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
+import { supabaseSendRoutes } from "../_shared/career_apply_send_route.ts";
 import { billingTurn, PAY_BY_CHECKOUT, stripeFromEnv, supabaseBillingStore } from "../_shared/career_billing.ts";
 import { mockPassNote, mockTurn, supabaseMockStore as supabaseMockStoreUncapped } from "../_shared/career_mock.ts";
 import { hiredSourceFromEnv } from "../_shared/career_hired.ts";
 import { askNextOpenQuestion, QUESTIONS_INTENT, questionsTurn, supabaseQuestionStore } from "../_shared/career_apply_questions.ts";
 import { applicationsTurn, supabaseApplications } from "../_shared/career_apply_status.ts";
+import { handoffTurn, supabaseHandoffStore } from "../_shared/career_apply_handoff.ts";
 import { emailStatusAsk, outreachStatusTurn } from "../_shared/career_send_rail.ts"; // "where are my emails"
 import { standingTurn, supabaseStanding } from "../_shared/career_standing.ts";
 // FEATURE 14: receipts
@@ -110,11 +129,18 @@ import { sendProviders } from "../_shared/mail_providers.ts";
 import { repliesTurn, supabaseRepliesStore } from "../_shared/career_outreach_replies.ts"; // MASS NETWORKING M5
 import { dohMx, hunterVerifier, supabaseCheckCache } from "../_shared/career_contacts.ts";
 import { GMAIL_SEND_SCOPE } from "../_shared/career_outreach_gmail.ts";
-import { missingIntegration } from "../_shared/agent/integrations.ts";
+import { connectUrl, missingIntegration } from "../_shared/agent/integrations.ts";
+// D-062: Gmail read and send, the tracker, public people search (agent/capability_tools.ts).
+import { capabilityTools } from "../_shared/agent/capability_tools.ts";
+import { supabaseCapabilityStores } from "../_shared/career_capability_stores.ts";
+import { type AlumniResult, enforcePeopleReply } from "../_shared/career_alumni_search.ts";
+import { inboxReader, sentFinder } from "../_shared/career_mail_reply.ts";
+import { accountToken, googleAccounts, ownSendToken } from "../_shared/career_google_accounts.ts"; // D-062: several Google accounts
+import { CAREER_READ_SCOPE as GMAIL_READONLY } from "../_shared/career_mail_gmail.ts";
 import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.ts";
 import { scoredN } from "../_shared/career_search.ts";
 import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, searchReplyParts, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
-import { blockerAsk, widenedAsk } from "../_shared/search_widen.ts"; // R10 WO-C
+import { blockerAsk, METRO, widenedAsk } from "../_shared/search_widen.ts"; // R10 WO-C
 // R10 WO-D: router outcomes that are not an answer to the message (its catch-alls and the company-intel fallback that sent the
 // graduation-window template on production): at a limit these are replaced by the held reply.
 const NOT_AN_ANSWER_AT_LIMIT = new Set(["unclaimed", "career_catchall", "career_fallback", "company_intel", "honest_unavailable"]);
@@ -140,11 +166,16 @@ import { careerGrant, followupTurn, gmailReadGrant, gmailReadNow, mailNow, supab
 import { gmailSender } from "../_shared/career_outreach_gmail.ts";
 import { fileUploadFor, isUploadedResumeText } from "../_shared/channel_resume_upload.ts"; // FEATURE 16
 import { replacedResumeLines, replacedResumeStops } from "../_shared/career_resume_replace.ts"; // ONBOARDING ROUND 4
+import { staleFactChanges, staleFactLines, stopStaleFacts, untoldFactStopLine, untoldFactStops } from "../_shared/career_apply_stale_facts.ts"; // D-075
 import { outlookAsk, outlookChatTurn } from "../_shared/outlook_connector.ts"; // M4: Outlook
 import { shapeForTurn } from "../_shared/channel_shape.ts"; // REPLY SHAPE
 import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a pasted link or "apply to this" -> one line + one Apply button
 import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, personFacingError, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
+import { supabaseFamilyMaker } from "../_shared/file_family_make_supabase.ts"; // D-072 (files reachable)
+import { supabaseMaterialWriter, withLetterVersions, writeTurnMaterials } from "../_shared/career_material_writer.ts"; // D-072 (files writers)
+import { supabaseSearchPlanWriter, writeSearchPlan } from "../_shared/career_search_plan_writer.ts"; // D-072 (files writers)
+import { supabasePathStore } from "../_shared/career_path_comparisons.ts"; // D-072 (files writers)
 import { researchBriefOn, researchReplyOn } from "../_shared/research_reply.ts"; // R9-C
 import { dnsProbe } from "../_shared/research_dns.ts";
 import { researchSearchFor } from "../_shared/research_free_sources.ts";
@@ -157,16 +188,24 @@ import { summaryFacts } from "../_shared/apply_status_summary.ts"; // SPEC 6.5
 import { resultsFile, whatOf } from "../_shared/role_results.ts"; // ROLE + PAY RESULTS PAGE
 import { supabaseAccountStamp, supabaseConfirmedFacts, supabaseJobStore, type JobDeps } from "../_shared/telegram_jobs.ts";
 import { APPLY_ALL_INTENT, type ApplyAllOffer, applyAllYesTurn, isApplyAllYes, isConditionalYes, liveOfferRow, readOffer, supabaseStoppedAt } from "../_shared/apply_all_yes.ts"; // apply all by yes
-import { applyAllYesOn } from "./release_config.ts";
+import { applyAllYesOn, releaseFlagOn } from "./release_config.ts";
 import { supabaseTapStore } from "../_shared/channel_card_tap.ts";
 import { feedUrlsFor } from "../_shared/file_link.ts";
 import { fileCard, fileCardOn, rolesCardSource } from "../_shared/file_card.ts"; // SPEC C.2 / D-049: the chat File card
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 import { reminderTurn, supabaseReminderStore } from "../_shared/career_reminders.ts"; // REQS DOC 2: reminders
 import { overviewTurn } from "../_shared/career_overview.ts"; // REQS DOC 2: "any update?", "what's waiting on me?"
-import { supabaseReviewLinks } from "../_shared/application_review_links.ts"; // WO-G: the review File of each application on a card
+import { supabaseBatchFile, supabaseReviewLinks } from "../_shared/application_review_links.ts"; // WO-G: the review File of each application on a card
 
 // WO-033: whether the person's career Google grant carries a scope (gmail.send for outreach). Read failures say "no".
+// D-072 (files writers): after the person's watch changed, their search plan carries the watch as it is now saved (a new version only
+// when it differs). Never fails the turn.
+async function searchPlanAfterWatch(admin: any, userId: string): Promise<void> {
+  try {
+    const row = await supabaseAlertStore(admin).get(userId);
+    await writeSearchPlan(supabaseSearchPlanWriter(admin), userId, { watch: row, now: Date.now() });
+  } catch (e) { console.error("search plan: watch not written:", (e as Error)?.message ?? e); }
+}
 async function careerGrantHas(admin: any, userId: string, scope: string): Promise<boolean> {
   const { data, error } = await admin.from("user_oauth_connections").select("scopes").eq("user_id", userId).eq("provider", "google_career").maybeSingle();
   if (error || !data) return false;
@@ -621,7 +660,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // router path. A model failure falls back to the router so an outage never leaves the person with nothing.
       let out: CareerTurnResult;
       let agentMeta: Record<string, unknown> | null = null;
-      const turnDocuments: { format: string; filename: string; mime: string; base64: string; sha256: string | null }[] = []; // tailor_resume's files, this turn only
+      const turnDocuments: { format: string; filename: string; mime: string; base64: string; sha256: string | null; material?: Record<string, unknown> }[] = []; // tailor_resume's files, this turn only
       let turnAttachments: unknown[] = [], turnLinks: string[] | null = null, turnFileLinks: string[] = []; // REPLY SHAPE: what the agent staged; the URLs it may show
       let turnPostings: unknown[] = []; // JOB CARDS: what the turn's search found, for channels that show cards
       const events = supabaseEventStore(admin);
@@ -643,7 +682,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const tapIn = tapRaw ? { qid: String(tapRaw.qid ?? ""), answer: String(tapRaw.answer ?? "") } : null;
       // R10 F.3: a stop in plain words (career_host.js stopControlOf, which also makes it a host turn), and the pause as it
       // stood before this turn: a narrower stop never leaves a pause behind that the reply would not mention.
-      const stopAsk = !tapIn && !careerTask && !careerBatch ? ((host as any).stopControlOf?.(message) ?? null) as { kind: "account" | "workflow"; workflows: string[]; boundary: boolean; outstanding: string | null } | null : null;
+      const stopAsk = !tapIn && !careerTask && !careerBatch ? ((host as any).stopControlOf?.(message) ?? null) as { kind: "account" | "workflow"; workflows: string[]; boundary: boolean; outstanding: string | null; alongside?: boolean } | null : null;
       const pauseBefore = (ctx as any).globalPause ? JSON.parse(JSON.stringify((ctx as any).globalPause)) : undefined;
       const accountPausedBefore = (loaded.account as any)?.paused === true;
       // M4: Outlook (Microsoft Graph) as a peer of Gmail, from any channel: "connect my outlook" / "use my work email" makes a
@@ -679,10 +718,31 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // CodeRabbit #1 on #634 (architect, round 5): after "don't apply" is the resume task's limit, "Send this one" or a bare yes
       // never approves an open card here; the resume task (or the held reply below) asks which is meant.
       const cardHold = holdsCardApproval((ctx as any).profile, message, Date.now());
-      const card0 = !cardHold && !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      // D-072 (item 4, round 2): the hand-off at a kept wall (career_apply_handoff.ts). "done" after the person finished the one step
+      // at the employer's page re-checks it in Trainee's own browser; "done" again shows the exact answers the page holds as a card;
+      // a yes while that card is this thread's last word submits exactly that card (its hash), never anything else. It answers only
+      // those words, only when a hand-off is waiting, and stands in the card's place (every turn the card turn guards is skipped).
+      // Review of #800: it is held exactly as any other card's yes is. After "don't apply" (cardHold) a bare yes approves nothing
+      // here either: the held reply below asks which is meant. And a turn another reply answers before the card's place in the
+      // order below (the Outlook connector, crisis text) records neither a done nor a yes: the hand-off turn does not run on it
+      // (hold: it returns before it reads or writes anything).
+      const handoffHeld = cardHold || !!outlookAns
+        || (brainMode(Deno.env) === "staged" && !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx) && !!crisisReply(message));
+      const handoffAns = !tapIn && !connAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+        ? await handoffTurn({ message, userId: user.id, threadId: tid, store: supabaseHandoffStore(admin), hold: handoffHeld })
+          .catch((e) => { console.error("hand-off turn:", (e as Error)?.message ?? e); return null; })
+        : null;
+      const card0 = handoffAns ? ({ reply: handoffAns.reply, status: "handoff", handoff: handoffAns } as any) : !cardHold && !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
         ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id),
-          review: (shown) => supabaseReviewLinks(admin, Deno.env)(user.id, shown.map((p) => p.id)), store: supabaseCardStore(admin), events })
+          review: (shown) => supabaseReviewLinks(admin, Deno.env)(user.id, shown.map((p) => p.id)),
+          // D-094: "show my applications" of a batch that would page: a summary plus the File of every application.
+          batchFile: (shown) => supabaseBatchFile(admin, Deno.env)(user.id, shown),
+          // The yes says what happens to EACH approved application (career_apply_send_route.ts): the cloud's switches are the
+          // release flags and the database's rows, read as the submission claim reads them (chat_switches.ts liveSwitches).
+          routes: (ids) => supabaseSendRoutes(admin, user.id, ids, { now: Date.now(),
+            cloudOn: async () => liveSwitches(Deno.env, { settings: await readSubmitSettings(admin), cloudOptIn: "on", gmailSend: null }).employerSubmit }),
+          store: supabaseCardStore(admin), events })
         : null;
       const card = card0 && offerLastWord && card0.status === CARD_NEEDS_REPLY_STATUS ? null : card0;
       // WO-025: the text mock interview, code's like the card: "mock me for <role> at <company>", "end mock", and the answers
@@ -721,8 +781,21 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // R10 (spec A.2 resume T3, F.2): "don't apply", "leave the job search" is a boundary on this message. No apply turn
       // runs on it, and an apply run the router plans on it is undone below (the run the thread held before is kept).
       const noApply = noApplyAsk(message);
+      // D-061 G1, G8, G9, G13 (docs/architect/specs/MIRROR-RULINGS.md): a hypothetical, a correction of what Trainee said, or a
+      // message with several asks is the brain's, whatever words code's flows below match: those flows (networking drafts, the
+      // offer turn, the record reads) stand down on it, and the router's answer reaches the brain as data (career_staged.ts
+      // g1CodeAnswers). Payload intents, approvals, the account's controls and bare answers to code's questions run before.
+      // D-064 (G13: several messages while work runs): the turn gate (career_turn_gate.ts) is the per-conversation in-flight marker,
+      // taken at turn start and given back after the reply's commit. A turn that had to wait on it arrived while the person's previous
+      // turn was still running: it is a second ask, the brain's, which answers it and says whether it shares the previous deliverable.
+      const whileWorking = !careerTask && !careerBatch && (gate?.outcome === "waited" || gate?.outcome === "timed_out");
+      if (whileWorking) (ctx as any)._whileWorking = true;
+      const g1Brain = !careerTask && !careerBatch && (whileWorking || hypotheticalOf(message) !== null || correctionOf(message) === "trainee" || severalAsks(message));
       const batchBefore = JSON.stringify((ctx as any).batchApplyState ?? null);
-      const resumeAns = !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      // D-061 G1: a question about resumes in general ("is one page still the rule for nursing?"), with no resume task open and no
+      // ask to make, change or send one, is the brain's question, not code's resume build.
+      const g1ResumeQuestion = !(ctx as any)?.profile?._resumeTask && questionShaped(message) && !G1_MAKE_ASK.test(message);
+      const resumeAns = !g1ResumeQuestion && !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await resumeTaskTurn({ message, ctx, userId: user.id, now: Date.now(), deps: {
             // An unknown word in the stated target may be an employer in the pool ("the quillstone ... role"): read it then.
             loadPool: () => readPool(message, true),
@@ -1032,8 +1105,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // APPLY HERE (apply_here.ts, Telegram): the link(s) or "apply to this" resolved and screened, no queueing; the tap on the one Apply
       // button queues or approves the exact payload. CAREER_APPLY_HERE=off turns off ONLY this intake (the one-line reply and the Apply button): the applyTurn below then answers as before.
       // It does NOT bring back attachments: the no-download default (attach_tool.ts, research_reply.ts attach) is separate and stays on.
-      const hereOut = !noApply && Deno.env.get("CAREER_APPLY_HERE") !== "off" && writerChannel((body as any)?.channel) === "telegram" && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
-        ? await applyHereTurn({ message, now: Date.now(), db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init), { timeoutMs: 8000 }),
+      // D-061 G1: a posting link with a question beside it ("is this still open? <link>") is the brain's to read, not the apply
+      // intake; a bare "apply here <link>" or a pasted link alone stays code's.
+      const g1LinkQuestion = questionShaped(message.replace(/https?:\/\/\S+/gi, " "));
+      const hereOut = !noApply && !g1LinkQuestion && Deno.env.get("CAREER_APPLY_HERE") !== "off" && writerChannel((body as any)?.channel) === "telegram" && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+        ? await applyHereTurn({ message, now: Date.now(), db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init).then(asAsked), { timeoutMs: 8000, personLink: true }),
+          readWorkday: (u) => readWorkdayPosting(u, { fetch: fetchAsAsked(), userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }), // D-062
             apps: () => supabaseApplications(admin)(user.id), facts: screenFacts,
             last: (() => { const l = (loaded.snapshot as any)?.stores?.discovery?.lastShortlist; return Array.isArray(l) && l.length === 1 ? l[0] : null; })() })
           .catch((e) => { console.error("apply here:", (e as Error)?.message ?? e); return null; })
@@ -1077,13 +1154,13 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           }
         }
       }
-      const queued: any = hereOut ? { reply: hereOut.reply, intent: APPLY_QUEUE_INTENT, status: hereOut.status } : !noApply && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const queued: any = hereOut ? { reply: hereOut.reply, intent: APPLY_QUEUE_INTENT, status: hereOut.status } : !noApply && !hypotheticalOf(message) && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await applyTurn({
           ...feature1.apply,
           // FEATURE E2E: a pasted posting link (or a role at a registered board) read from the ATS's public API on demand
           // and stored as the ingest stores it (career_apply_link.ts). CAREER_APPLY_LINK=off turns the read off.
           link: Deno.env.get("CAREER_APPLY_LINK") === "off" ? null
-            : { db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init), { timeoutMs: 8000 }) },
+            : { db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init).then(asAsked), { timeoutMs: 8000, personLink: true }) },
           message: reach?.apply ?? tailorApply?.apply ?? message, userId: user.id, now: Date.now(), postings: supabasePostingsDb(admin), wants: supabaseWantStore(admin),
           apps: () => supabaseApplications(admin)(user.id),
           facts: screenFacts,
@@ -1091,13 +1168,28 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           shortlist: (loaded.snapshot as any)?.stores?.discovery?.lastShortlist ?? null,
           limits: paceReader(admin, user.id),
           employerAnswers: () => employerAsk.answers(tid),
+          // R10 fix 12: "the top three" from a shorter list: the thread's last city search, one step wider (its metro area),
+          // each role re-checked open on its own page; named beside the list, never queued (career_apply_chat.ts nearby).
+          nearby: async (want, listed) => {
+            const prev = (loaded.snapshot as any)?.stores?.discovery?.lastAsk;
+            if (!prev || typeof prev.role !== "string" || !prev.place || prev.area || prev.remoteOnly || !METRO[String(prev.place).toLowerCase()] || want < 1) return [];
+            const zone = await readPersonZone(admin, user.id, (ctx as any).profile ?? null).catch(() => null);
+            const n = Math.min(10, want + listed.length);
+            const found = await searchJudgeTurn({ clock, message, ask: { ...prev, area: true, keep: [], verify: true, want: n }, userId: user.id, now: Date.now(), profile: (ctx as any).profile ?? null,
+              sources: supabaseSearchSources(admin, { cpu: (stage, fn) => clock.sync(stage, fn), window: postings, jobs: { roleFamily: CareerJobs.roleFamily, seniorityBand: CareerJobs.seniorityBand, stripHtml: CareerJobs.stripHtml } }),
+              judge: { on: false }, canSubmit: canSubmitByHost, show: n, tz: zone?.tz ?? null, want: n,
+              openCheck: linkChecker(fetchAsAsked() as typeof fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) });
+            const seen = new Set(listed.map((e) => String(e.id ?? "")).filter(Boolean));
+            return (found?.picked ?? []).filter((x) => x.posting && x.checked?.state === "live" && !seen.has(String(x.posting.job_id))).slice(0, want)
+              .map((x) => ({ id: x.posting!.job_id, title: x.posting!.title, company: x.posting!.company, location: x.posting!.location, url: x.posting!.url }));
+          },
         })
         : null;
       // FEATURE 14: receipts (D-024, G6). "show me the receipt for Stripe", "what did you send to Acme": the receipt the
       // database wrote when the application finished (career_apply_receipts), the person's own only, read by code; what was
       // sent field by field with each answer's fact, where and when, the hashes, the employer's words, and the pictures of
       // the proof attached through the channel artifact path. Nothing is sent or changed by it.
-      const receiptAns = !activityAsk(message) && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const receiptAns = !g1Brain && !activityAsk(message) && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await receiptTurn({ message, userId: user.id, now: Date.now(), read: supabaseReceipts(admin) }).catch((e) => { console.error("receipt turn:", e?.message ?? e); return null; })
         : null;
       // END FEATURE 14
@@ -1115,23 +1207,27 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             read: supabaseStanding(admin), outreach: outreachStore, events, lastAssistant: f08Stores.lastAssistant, addressOnRecord: f08Stores.addressOnRecord,
             name: () => ((ctx as any).profile?.basics?.name ?? null), markSent: f08Stores.markSent,
             mailOn: chatSwitches(Deno.env).mailTracking,
-            readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch), confirm: supabaseConfirmStore(admin) }),
-            sendOn: chatSwitches(Deno.env).emailSend, canSend: async (u) => !!(await sendToken(u)), sendConsent: sendConsentFor,
-            send: countSend(turnEffects, (u: string, m: any) => gmailSender({ fetch, token: (uu: string) => sendToken(uu) }).send(u, m)), connectAsk: missingIntegration("gmail"), readGrant: gmailReadGrant(admin),
+            readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch, admin), confirm: supabaseConfirmStore(admin) }),
+            sendOn: chatSwitches(Deno.env).emailSend, canSend: async (u, from?: string | null) => !!(await (from ? accountToken({ ...f08Grant, admin }, CAREER_SEND_SCOPE)(u, from) : sendToken(u))), sendConsent: sendConsentFor,
+            // D-062: a reply (t) goes from the account its card names, and only from it: no named account sends only when the
+            // person has exactly one (ownSendToken refuses otherwise; never "the first grant"). A follow-up card (no t) is unchanged.
+            send: countSend(turnEffects, (u: string, m: any, t?: any) => gmailSender({ fetch, token: (uu: string) => (t ? ownSendToken({ ...f08Grant, admin }, CAREER_SEND_SCOPE)(uu, t.from ?? null) : sendToken(uu)) }).send(u, m, t)),
+            sendAccounts: async (u) => (await googleAccounts(admin, u)).filter((a) => a.can_send).map((a) => a.mailbox),
+            findSent: sentFinder({ fetch, token: accountToken({ ...f08Grant, admin }, GMAIL_READONLY) }), connectAsk: missingIntegration("gmail"), readGrant: gmailReadGrant(admin),
           } }).catch((e) => { console.error("follow-up turn:", e?.message ?? e); return null; })
         : null;
       // ROUTING SCENARIOS (2026-10-29): an email-status ask ("where are my emails", "email status", "any update on my emails")
       // is the send rail's (outreachStatus below), never the standing, application-status or networking turn's: before, "email
       // status" drafted an email to a person named "status" and "any update on my emails" read the application inbox.
       const emailAsk = emailStatusAsk(message);
-      const stood = !emailAsk && !billing && !f08 && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const stood = !g1Brain && !emailAsk && !billing && !f08 && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await standingTurn({ message, userId: user.id, now: Date.now(), read: supabaseStanding(admin) }).catch((e) => { console.error("standing turn:", e?.message ?? e); return null; })
           // REQS DOC 2: reminders the person sets ("remind me tomorrow at 9am to ..."), and "any update?" / "what's waiting
           // on me?" from the situation read at the top of the turn; each answers only its own asks, before the router.
           ?? await reminderTurn({ message, userId: user.id, now: Date.now(), store: supabaseReminderStore(admin) }).catch((e) => { console.error("reminder turn:", e?.message ?? e); return null; })
           ?? overviewTurn({ message, situation, now: Date.now() })
         : null;
-      const status = !emailAsk && !billing && !f08 && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !queued && !stood && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const status = !g1Brain && !emailAsk && !billing && !f08 && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !queued && !stood && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await applicationsTurn({ message, userId: user.id, now: Date.now(), read: supabaseApplications(admin) })
         : null;
       // FEATURE 17: a status answer also says where each posting they asked for stands before it is on the queue.
@@ -1143,8 +1239,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // Only addresses in the person's own contacts; the model writes only with CAREER_NETWORKING_DRAFT=on (metered).
       // Nothing is sent here: sending stays career-proactive's, behind CAREER_OUTREACH_SEND.
       const netMeter = ledger.track(newMeter());
+      // D-061 G1, G10 (D-059): "draft a note to X, don't send" asks for a draft, not code's send-ready outreach batch: the brain
+      // writes it (draft_outreach and draft_followup check it in code), shown as a draft, nothing sent. A message carrying an
+      // attachment (a contacts file to import) stays code's.
+      const g1SendDraft = boundaryOf(message) === "send" && G1_WRITE_ASK.test(message) && !(Array.isArray(body.attachments) && body.attachments.length);
       // Spec F.2: a research ask that says not to contact anyone never starts networking (a people list, intros, outreach).
-      const networking = !researchOverAction(message) && !draftThread && !emailAsk && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && (!queued || (!!reach && !queued.ask?.length)) && !f08 && !stood && !status && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const networking = !(g1Brain && !(Array.isArray(body.attachments) && body.attachments.length)) && !g1SendDraft && !researchOverAction(message) && !draftThread && !emailAsk && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && (!queued || (!!reach && !queued.ask?.length)) && !f08 && !stood && !status && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await networkingTurn({ message: queued && reach ? reach.outreach : message, userId: user.id, threadId: tid, now: Date.now(), state: ctx as unknown as Record<string, unknown>, store: outreachStore, events, postings: supabaseReferralPostings(admin),
             attachments: Array.isArray(body.attachments) ? (body.attachments as any[]).filter((a) => a && typeof a === "object").map((a) => ({ name: String(a.name ?? "contacts.csv"), mime: typeof a.mime === "string" ? a.mime : "", text: typeof a.text === "string" ? a.text : null })) : [],
             model: chatSwitches(Deno.env).networkingDraft ? (payload: any) => callModel(careerModelConfig(Deno.env), payload, { meter: netMeter, role: "chat" }) : null,
@@ -1172,17 +1272,20 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // offer placed against DOL LCA, BLS OEWS and the pay open postings on file state (a median only from 5 or more), and
       // the counter drafted on a card that cites it. Code's, before the router; nothing is sent. The thread keeps its
       // offers in the offerBenchmark store, which the snapshot carries and an erase clears.
-      const offered = !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !networking && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const offered = !g1Brain && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !networking && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await offerChatTurn({ message, now: Date.now(), state: (ctx as any).offerBenchmark ?? null, postings: supabasePostingsDb(admin) })
           .catch((e) => { console.error("offer turn:", e?.message ?? e); return null; })
         : null;
       if (offered?.state) (ctx as any).offerBenchmark = offered.state;
+      // D-078: a reading shown for the person's yes lives for one turn. A turn another handler answered drops it, so a yes
+      // after another turn confirms nothing.
+      else if ((ctx as any).offerBenchmark?.shown) (ctx as any).offerBenchmark = { ...(ctx as any).offerBenchmark, shown: null };
       const offerAns = offered?.answer ?? null;
       // END FEATURE 12
       // REQS DOC 1 (Q21, Q249, Q34): "what did you do today", "what did you send this week", "how many applications did you
       // send": counts from the application queue and the email log in the person's own day, the window and the counting
       // method said (career_activity.ts). Read only; a record that cannot be read is named and not counted.
-      const activity = !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !networking && !offerAns && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const activity = !g1Brain && !billing && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !networking && !offerAns && !receiptAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await activityTurn({ message, userId: user.id, now: Date.now(), read: supabaseActivity(admin) }).catch((e) => { console.error("activity turn:", e?.message ?? e); return null; })
         : null;
       // REQS DOC 1 (Q83, Q196): "that's not what I asked", "you're not listening", "this is useless" with nothing else in the
@@ -1199,7 +1302,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // (career_send_status) and the approved emails not on the rail; read only, nothing is sent or changed.
       const outreachStatus = !card && !mock && !asked && !which && !emailed && !outreachAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !networking && !offerAns && !receiptAns && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await outreachStatusTurn({ message, userId: user.id, rail: { rpc: (name, args) => admin.rpc(name, args) }, approvedNotQueued: async (u) => {
-            const d = await admin.from("career_outreach_drafts").select("id").eq("user_id", u).eq("status", "approved").limit(1000);
+            const d = await admin.from("career_outreach_drafts").select("id").eq("user_id", u).eq("status", "approved").or("recipient->>kind.is.null,recipient->>kind.neq.mail_reply").limit(1000); // a mail reply is never on the rail
             if (d.error) throw new Error(`read approved drafts: ${d.error.message}`);
             const ids = (d.data ?? []).map((r: any) => r.id);
             const onRail = new Set<string>();
@@ -1218,7 +1321,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // rollback, and then it is never taken and the router answers exactly as before. Read lazily, only when the brain
       // test below is reached. With no model key configured the staged brain is never tried: the router answers, as it
       // does when the model fails (D-035).
-      const staged = stagedRoute({ env: Deno.env, message, ctx: ctx as unknown as Record<string, unknown>, host, structured: !!(careerTask || careerBatch), clock });
+      // Review of #790 (round 3): the marker of code's restore question, read only for a plain yes or no, and only while that
+      // question is the thread's last word (liveOfferRow: the newest assistant row, no user turn after it). It lives one turn.
+      const restoreAsk = plainAnswer(message) ? ((await liveOfferRow(admin, tid).catch(() => null))?.meta as any)?.restore_ask ?? null : null;
+      const staged = stagedRoute({ env: Deno.env, message, ctx: ctx as unknown as Record<string, unknown>, host, structured: !!(careerTask || careerBatch), clock, restoreAsk });
       // A "judge prompt: ..." instruction is code's (judgePromptTurn), and without a model key the brain is never tried.
       // R10 WO-C: a follow-up that widens the last search ("include business analyst ... plus remote US internships") is a
       // search, code's: it never goes to the brain, and is never answered by a template a word in it happens to match.
@@ -1241,6 +1347,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         out = { reply: planned.reply, intent: planned.intent, resultStatus: planned.resultStatus, contained: false, handler: crisisText ? "crisis" : codeTurn ? "code_in_chat" : resumeAns ? "resume_task" : "planner", parts: planned.parts,
           ...(planned.documents.length ? { result: { documents: planned.documents } } : {}) };
         agentMeta = planned.meta;
+      } else if (card && (card as any).handoff) {
+        const h = (card as any).handoff;
+        out = { reply: h.reply, intent: h.intent, resultStatus: h.status, contained: false, handler: "handoff" };
+        // The exact-answers card's id and hash ride the reply: the next yes in this thread answers that card and no other.
+        if (h.meta) agentMeta = { ...(agentMeta || {}), ...h.meta };
       } else if (card) {
         // A card still waiting for its answer stays this thread's last word (D-MS-1: also after "wait", an unclear reply
         // or a number not on it); an answered one does not.
@@ -1395,7 +1506,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const summary = summaryFor(win.cut, recent, now, tz);
         // WO-066: the person's own daily application limit (the queue's SQL holds the same bound); unread, the default.
         const daily = await admin.rpc("career_apply_daily_limit", { p_user: user.id }).then((r: any) => r.error ? undefined : Number(r.data) || undefined, () => undefined);
-        const turn = await agentTurn({ message: typedMessage, history, stores: ctx as unknown as Record<string, unknown>, userId: user.id, threadId: tid, now,
+        const capStores = supabaseCapabilityStores(admin);
+        let peopleTrace: AlumniResult | null = null;
+        // Review of #790 (round 3): the restore question is never asked while an application card is open (a read that fails counts as open).
+        const cardPending = !!(await supabaseCardStore(admin).latestOpen(user.id).catch(() => true));
+        const turn = await agentTurn({ message: typedMessage, history, restoreAsk, cardPending, stores: ctx as unknown as Record<string, unknown>, userId: user.id, threadId: tid, now,
           model: (payload) => callModel(cfg, payload, { meter, role: "chat" }), postings: (q) => postingsDb.search(searchWords(q), 150), alerts: alertStore,
           mail: supabaseMailStore(admin), interviews: supabaseInterviewStore(admin), digest: supabaseDigestStore(admin),
           events, tz, summary, ...(resumedTaskNote ? { summary: [summary, resumedTaskNote].filter(Boolean).join("\n\n") } : {}), hired: hiredSourceFromEnv(Deno.env, admin), confirmations: confirmEvents,
@@ -1404,7 +1519,16 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           conversations: repliesStore,
           // REPLY SHAPE: Telegram with the reply writer on gets the shape rules and the attach_document tool.
           shape: replyWriterOn(Deno.env) && writerChannel((body as any)?.channel) === "telegram",
-          files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now, records: { application: (u, id) => supabaseFileStore(admin).appRow(u, id) } }),
+          // D-061 G11: create_file is offered on every channel, the reply writer on or off. Where File links are not set up
+          // (TRAINEE_FILE_BASE_URL and its secret), the File service refuses to make one and tells the brain to say so, so
+          // nothing is promised that cannot be opened.
+          // D-072 (files writers): a cover letter it makes (a draft of type cover_letter) is written as a version on the Materials File.
+          files: withLetterVersions(createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now, records: { application: (u, id) => supabaseFileStore(admin).appRow(u, id) } }),
+            supabaseMaterialWriter(admin), (e) => console.error("materials: cover letter version not written:", (e as Error)?.message ?? e)),
+          // D-072 (files writers): the paths the person compares in chat (compare_paths), kept for their Path comparison File.
+          paths: supabasePathStore(admin),
+          // D-072 (files reachable): the record-backed File families (open_record_file), read by the same readers the File server uses.
+          familyFiles: supabaseFamilyMaker(admin, createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now })),
           verifier: hunterVerifier({ fetch, apiKey: Deno.env.get("HUNTER_API_KEY"), cache: supabaseCheckCache(admin), now: Date.now }),
           // RELEASE 9: "keep my layout" reads their own Word file; each tailored file is recorded by version for the outcome rates.
           tailor: { posting: (id) => postingsDb.get(id), personas: supabasePersonaStore(admin), resumes: supabaseResumeStore(admin), render: edgeRenderer(), ownDocx: supabaseOwnDocx(admin), upload: supabaseNewestUpload(admin), versions: supabaseVersionLog(admin),
@@ -1413,25 +1537,58 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // goes only on its card's tap.
           wants: supabaseWantStore(admin), limits: { daily }, posting: (id) => postingsDb.get(id),
           // WO-106 (F4): each job link is checked against its board just before it is shown.
-          linkCheck: linkChecker(fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
+          linkCheck: linkChecker(fetchAsAsked() as typeof fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
           // FEATURE 13: the staged brain answers with the actions that have a code-first owner withheld.
           toolPolicy: staged.chosen ? stagedToolPolicy(staged.decision) : null,
           // Situation knowledge: the context pack and playbooks (CAREER_KNOWLEDGE=on; off by default).
           knowledge: knowledgeOn(Deno.env),
-          // Open career questions: cached, capped web search. DARK: offered only when the gateway's web search is available (WEB_SEARCH_AVAILABLE, false until a live call proves it). The cache is per instance
+          // Open career questions: cached, capped web search (D-060: Claude web search, proven live; offered only while web research is on, research_web.ts webResearchOn). The cache is per instance
           // until a table is approved by the owner; the brief is returned as markdown until PR #280 (file kinds) supplies `publish`.
           // R9-C market research (CAREER_RESEARCH_REPLY=on; off by default): Brave with the owner's BRAVE_SEARCH_API_KEY, else the
           // free first-party sources (research_free_sources.ts: SEC EDGAR, BLS OEWS/OOH, USAJOBS, ATS job boards, Wikipedia/Wikidata,
           // GitHub, news RSS, company sites). Every page is read through the free reader: the resolved addresses of every hop,
           // robots.txt, the never-list. The research brief File only with CAREER_RESEARCH_BRIEF=on.
+          // D-060 web research on (research_web.ts webResearchOn: CAREER_KNOWLEDGE and the proven gateway web search): the turn's
+          // search adds Claude's web search (one call, at most WEB_RESEARCH_SEARCHES searches, cached) to the free sources, official
+          // first, and the inline answer takes Instinct's layout (one topic per message, its link on its own line).
           market: researchReplyOn(Deno.env) && cfg.apiKey ? {
             ...researchSearchFor(Deno.env, fetch),
-            draft: async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: 1800 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); },
+            ...(webResearchOn(Deno.env) ? { search: withWebSearch(claudeWebProvider({ search: (q, w) => webSearch(q, { cfg, meter, ...w }), now: Date.now, cache: webResearchCache }), researchSearchFor(Deno.env, fetch).search), layout: "messages" as const } : {}),
+            draft: async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: RESEARCH_DRAFT_MAX_TOKENS }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); },
             publish: researchBriefOn(Deno.env) ? async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "research_brief", data); return r.ok && r.url ? { url: r.url } : null; } : null,
+            // FAIL_CLOSED.support (off by default; research/support.ts): the judge of layer B. The product's own model (cfg), through
+            // callModel (the one door: the budget ledger reserves before anything is sent) and the turn's meter; never called while
+            // the switch is off. A refusal, an error or a timeout is "no" for every claim (support.ts judgeAll).
+            // (D-098: built by supportJudgeVia, which the reply-quality eval uses too)
+            judge: supportJudgeVia((payload) => callModel(cfg, payload, { meter, role: "chat", timeoutMs: SUPPORT_JUDGE_TIMEOUT_MS })),
           } : null,
-          research: knowledgeOn(Deno.env) && WEB_SEARCH_AVAILABLE && cfg.apiKey ? { search: gatewayGroundSearch(), cache: researchCache, publish: fileKindPublisher(createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }), user.id), derive: modelDerive(async (system, user) => { const r = await callModel(cfg, { system, messages: [{ role: "user", content: [{ type: "text", text: user }] }], max_tokens: 200 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }) } : null,
+          // D-060 (C18): "is that posting still open?" re-checked live on the boards the product reads; any other host is named, not guessed.
+          // D-062: a Workday posting is read from its own CXS data (workday_posting.ts), with its stated deadline.
+          postingRecheck: webResearchOn(Deno.env) ? (url: string) => recheckPosting(url, linkChecker(fetchAsAsked() as typeof fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }), Date.now,
+            { workday: (u) => readWorkdayPosting(u, { fetch: fetchAsAsked(), userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) }) : null,
+          // D-062 (1): "what would you need from me to apply?": the posting's requirements and its application's questions, read
+          // from public pages only (posting_requirements.ts); never an account, a saved application or a submission.
+          applyFlow: (url: string) => readApplyFlow(url, { fetch: fetchAsAsked(), userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
+          research: webResearchOn(Deno.env) && cfg.apiKey ? { search: gatewayGroundSearch((q, w) => webSearch(q, { cfg, meter, ...w })), cache: researchCache, publish: fileKindPublisher(createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }), user.id), derive: modelDerive(async (system, user) => { const r = await callModel(cfg, { system, messages: [{ role: "user", content: [{ type: "text", text: user }] }], max_tokens: 200 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }) } : null,
+          // D-062 (owner, 2026-11-11: "be able to answer emails, find alumni, do all of it"): the person's Gmail confirmations and the
+          // tracker File (CAREER_MAIL_TRACKING), answering an email from their own Gmail (a yes to the exact card sends it:
+          // CAREER_EMAIL_SEND), and public people search from web search excerpts (CAREER_PEOPLE_SEARCH; never LinkedIn or Indeed).
+          capabilities: capabilityTools({
+            mail: supabaseMailStore(admin), tracking: chatSwitches(Deno.env).mailTracking, accounts: (u) => googleAccounts(admin, u), cursor: f08Stores.cursor,
+            readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch, admin), confirm: supabaseConfirmStore(admin) }),
+            connectUrl: connectUrl("gmail"), situation, snapshot: capStores.snapshot,
+            files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }),
+            people: { on: releaseFlagOn(Deno.env, "CAREER_PEOPLE_SEARCH"), search: cfg.apiKey ? (q, w) => webSearch(q, { cfg, meter, ...w }) : null, cache: peopleSearchCache, onResult: (r) => { peopleTrace = r; } },
+            inbox: chatSwitches(Deno.env).mailTracking ? inboxReader({ fetch, token: accountToken({ ...f08Grant, admin }, GMAIL_READONLY), accounts: (u) => googleAccounts(admin, u) }) : null,
+            reply: { outreach: outreachStore, sendOn: chatSwitches(Deno.env).emailSend && sendRailOn(Deno.env), canSend: async (u, from) => !!(await (from ? accountToken({ ...f08Grant, admin }, CAREER_SEND_SCOPE)(u, from) : sendToken(u))), name: () => ((ctx as any).profile?.basics?.name ?? null),
+              findSent: sentFinder({ fetch, token: accountToken({ ...f08Grant, admin }, GMAIL_READONLY) }) },
+          }),
+          // D-064 (G13): the person's previous message, when this one arrived while that turn was still running.
+          whileWorking: (ctx as any)._whileWorking ? ([...history].reverse().find((m) => m.role === "user")?.content ?? "") : null,
           known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory });
         await ledger.record(meter);
+        // D-072 (files writers): the brain's own watch tools change the search plan's watch (F-04), as a watch set by text does.
+        if (turn.tool_calls.some((t: any) => t.ok && (t.name === "set_job_alerts" || t.name === "stop_job_alerts"))) await searchPlanAfterWatch(admin, user.id);
         // Architect ruling 3 (2026-11-09): at a limit, the router's own answer stands when it chose a specific intent for THIS message
         // ("what should I wear to a video interview?" -> its interview prep); only its catch-alls and fallback templates are replaced.
         // Architect amendment (r-states, 2026-11-10; R4, R9, E.6 54): a model outage is held the same way. The router answers only
@@ -1454,7 +1611,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           const kept = (ctx as any).discovery?.heldAtLimit;
           const task = kept?.message && isResume(typedMessage) ? String(kept.message) : String(typedMessage);
           const zone = await readPersonZone(admin, user.id, (ctx as any).profile ?? null);
-          out = { reply: limitHeldReply(task, heldStop, zone, limitRetryAt), intent: HELD_INTENT, resultStatus: "held", contained: false, handler: "limit_held" };
+          out = { reply: limitHeldReply(task, heldStop, zone, limitRetryAt, Array.isArray(turn.tool_calls) ? turn.tool_calls : null), intent: HELD_INTENT, resultStatus: "held", contained: false, handler: "limit_held" };
           (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), heldAtLimit: { message: task.slice(0, 1000), at: Date.now(), stop: heldStop } };
           agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: heldStop, ...replyFlagsMeta(turn as { flags?: unknown }) };
         } else {
@@ -1462,11 +1619,30 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           turnPostings = Array.isArray(turn.postings) ? turn.postings : [];
           turnAttachments = turn.attachments ?? []; turnLinks = turn.linksSeen ?? []; turnFileLinks = turn.fileLinks ?? [];
           // The files tailor_resume made this turn ride the reply (documentsOf below), as a router tailor's do.
+          // D-062 (G6): after a people search, the caveat and "Nobody was contacted." are in the reply (career_alumni_search.ts).
+          if (peopleTrace && !turn.show && turn.stopped === "final") turn.reply = enforcePeopleReply(turn.reply, peopleTrace);
+          // D-067 (D-024): the brain's reply is never sent blank, after every check code ran on it.
+          turn.reply = nonEmptyReply(turn);
+          // Gap #5, review rv4 (A1): a rewrite here (the people caveat above) never drops code's not-run lines (not_run.ts).
+          // (Review rv5: the search judge's rewrite, FEATURE 5 below, is on the other branch of this if, the router's turn: it never
+          // rewrites a brain turn's reply, and a router turn has no brain tool calls, so no not-run lines to keep.)
+          turn.reply = withNotRun(turn.reply, turn.notRunLines);
           out = { reply: turn.reply, intent: turn.show?.intent ?? (turn.tool_calls.some((c: any) => c.name === "draft_followup") ? FOLLOWUP_INTENT : "agent"), resultStatus: turn.stopped, contained: false, handler: "agent", ...(turn.show?.parts ? { parts: turn.show.parts } : {}),
             ...(turnDocuments.length ? { result: { documents: turnDocuments } } : {}) };
-          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
+          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, ...(turn.not_run?.length ? { not_run: turn.not_run } : {}), ...((turn as any).shorten ? { shorten: (turn as any).shorten } : {}), ...((turn as any).set_aside ? { set_aside: (turn as any).set_aside } : {}), ...((turn as any).research ? { research: (turn as any).research } : {}), ...((turn as any).support ? { support: (turn as any).support } : {}), ...((turn as any).pipeline ? { pipeline: (turn as any).pipeline, ...((turn as any).piped ? { piped: (turn as any).piped } : {}) } : {}), pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
             // flag-only reply checks (loop.ts): saved with the turn so remaining reply problems can be counted (Greptile on #566)
-            ...replyFlagsMeta(turn as { flags?: unknown }) };
+            ...replyFlagsMeta(turn as { flags?: unknown }), ...(turn.show?.meta ?? {}) };
+        }
+        // D-075: a fact set aside by code or corrected through correct_profile_fact this turn stops the hosted applications that
+        // state its old value (approved and not started: closed unsent; prepared: discarded), whatever reply the turn ended with;
+        // the reply says which, or that they could not be checked (career_apply_stale_facts.ts; 20261113140000).
+        const factChange = { set_aside: (turn as any).set_aside ?? null, corrected: (turn as any).corrected ?? null };
+        const staleChanges = staleFactChanges(factChange);
+        if (staleChanges.length) {
+          const stops = await stopStaleFacts(admin, user.id, staleChanges, factChange.set_aside?.length ? "set_aside" : "corrected");
+          const lines = staleFactLines(stops);
+          if (lines.length) out = { ...out, reply: [out.reply, ...lines].join("\n"), ...(out.parts ? { parts: [...out.parts, ...lines] } : {}) };
+          agentMeta = { ...(agentMeta || {}), stale_fact_stops: stops === "failed" ? "failed" : Object.fromEntries(Object.entries(stops).map(([k, v]) => [k, v.length])) };
         }
       } else {
         // FEATURE 5: job search ranked by fit and judged (_shared/career_search_judge.ts). "judge prompt: ..." keeps the
@@ -1506,12 +1682,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               // 10 pages read), each on its own posting page by id; no board listing is read (Ashby by its posting page). None is
               // called open unless its check passed.
               canSubmit: canSubmitByHost, // R10 owner ruling (apply by message and yes): the posting's own host decides the label
-              openCheck: linkChecker(fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
+              openCheck: linkChecker(fetchAsAsked() as typeof fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
               tz: f5Zone?.tz ?? null, want: f5Ask.want ?? wantOf(message) }));
             // F.1: the blocker question gets the evidenced blocker: a source that could not be read is a connection problem.
             if (!found && f5Said?.explain) out = { ...out, intent: "career_discovery", resultStatus: "blocked", handler: "search_judge",
               reply: "What blocked it: a search connection problem. The job boards could not be read just now, so this says nothing about whether open roles exist. It is not your resume: listing roles never needs a confirmed resume. Nothing was applied for. Ask again in a few minutes and I'll run the same search." };
             if (found) {
+              // D-058: what the chat reply no longer says (refresh time, freshness, "Nothing was invented") is the turn's proof.
+              if (found.proof) agentMeta = { ...(agentMeta || {}), search_proof: found.proof };
               // ONBOARDING ROUND 2 and F.1: the resume line and the blocker answer (searchReplyParts, shared with the eval harness).
               const prof = (ctx as any).profile;
               const { why, resumeLine } = searchReplyParts({ message, said: f5Said, found, profile: prof, prior: f5Before });
@@ -1588,6 +1766,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             }
           } catch (e) { console.error("career search judge: the router's reply stands:", (e as Error)?.message ?? e); }
           await ledger.record(f5Meter);
+          // D-072 (files writers): the search the person set or changed is their search plan (F-04): a new version when it differs.
+          await writeSearchPlan(supabaseSearchPlanWriter(admin), user.id, { search: f5Ask, now: Date.now() })
+            .catch((e) => console.error("search plan: not written:", (e as Error)?.message ?? e));
         } else if (f5Free && (ctx as any).discovery?.lastAsk) {
           // Spec 2.3: a turn that was not a search ends the search a correction could amend ("only remote" three messages later is not one).
           (ctx as any).discovery = { ...(ctx as any).discovery, lastAsk: null, lastAskAt: null };
@@ -1692,6 +1873,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           if (line) out = { ...out, reply: `${out.reply}\n${line}`, ...(out.parts ? { parts: [...out.parts, line] } : {}) };
         }
       }
+      // D-075: what a claim or submit check stopped because a fact it stated changed (the fact write recorded it; no reply said it
+      // yet) is said here, once, on every path.
+      {
+        const told = untoldFactStopLine(await untoldFactStops(admin, user.id));
+        if (told) out = { ...out, reply: `${out.reply}\n${told}`, ...(out.parts ? { parts: [...out.parts, told] } : {}) };
+      }
       // BETA C03 / A15.1 (career_prep_file.ts): the router's interview prep File (result.file) is stored as a File for this person
       // and its signed link is sent after the summary; when it cannot be made, the reply says so and gives the page as text.
       if (out.handler !== "agent" && !careerTask && !careerBatch) {
@@ -1753,7 +1940,15 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const hp = (ctx as any)._hostPatch as Record<string, unknown> | undefined;
         stopTurn = out.handler === "CareerHostControl" && hp?.paused === true && !hp.erase ? { kind: "account" }
           : out.handler === "CareerHostControl" && out.intent === "career_resumed" && hp?.paused === false ? { kind: "resume" }
-          : stopAsk && out.handler !== "agent" ? { ...stopAsk, cancelled: [] } : null;
+          : stopAsk && !stopAsk.alongside && out.handler !== "agent" ? { ...stopAsk, cancelled: [] } : null;
+      }
+      // Review 2026-11-13 round 3: a boundary beside another ask ("find jobs at Plaid, don't contact anyone") is never cancelled.
+      // The ask was answered above; the hold is applied here, to effects only, and the reply says what it held.
+      if (!stopTurn && stopAsk?.kind === "workflow" && stopAsk.alongside) {
+        stopHold = await holdUnsent(admin as any, user.id, Date.now());
+        if (stopHold.error) console.error("career stop (alongside): hold failed:", stopHold.error);
+        const line = alongsideHoldLine(stopHold);
+        if (line) out = { ...out, reply: `${out.reply ?? ""}\n\n${line}`.trim(), ...(out.parts ? { parts: [...out.parts, line] } : {}) };
       }
       if (stopTurn?.kind === "account") {
         // Whatever the chain answered, the pause is the account's: patched onto this turn's commit, read back below.
@@ -1796,6 +1991,18 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // channel_inbound.ts replyParts), and out.reply stays the WHOLE answer, so the stored reply (agent_messages) holds all of
       // it. The overflow page (a research_brief needing a source link the turn had) and the one capped second message, whose
       // tail was dropped and never stored, are gone.
+      // D-061 G6 (restate the boundary): the person set one ("don't send", "draft only", "don't apply") and code answered this turn:
+      // its reply says what was not done, in one line, when it does not already say it. Only when the turn itself sent, queued
+      // and submitted nothing (turnEffects, the writes this turn made), so the line is always true. One rule for every code
+      // turn, never per prompt. The brain's turns are told the same (turn_notes.ts boundaryNote).
+      {
+        const b = boundaryOf(message);
+        const moved = turnEffects.sent > 0 || turnEffects.sendUnknown > 0 || turnEffects.queued > 0 || [...turnEffects.writes].some((w) => G6_EFFECT_WRITE.test(w));
+        if (b && !moved && !stopTurn && out.handler !== "agent" && out.handler !== "code_in_chat" && out.intent !== CRISIS_INTENT && out.reply && !BOUNDARY_SAID.test(out.reply)) {
+          const line = BOUNDARY_LINE[b];
+          out = { ...out, reply: `${out.reply}\n\n${line}`, ...(out.parts ? { parts: [...out.parts, line] } : {}) };
+        }
+      }
       let shapeField: { attachments: { filename: string; content: string }[]; links: string[] } | null = null;
       {
         const sh = shapeForTurn({ on: replyWriterOn(Deno.env), channel: writerChannel((body as any)?.channel), reply: out.reply, attachments: turnAttachments, allowedLinks: turnLinks,
@@ -1824,6 +2031,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (docs.length) {
           const m = await materializeArtifacts(admin, { userId: user.id, threadId: tid, documents: docs });
           if (m.artifacts.length) artifactsField = m.artifacts;
+          // D-072 (files writers): each tailored resume or cover letter delivered here is a version on the Materials File
+          // (career_material_writer.ts). A failed write never fails the turn: the file was delivered either way.
+          await writeTurnMaterials(supabaseMaterialWriter(admin), user.id, docs, m.stored, out.result)
+            .catch((e) => console.error("materials: version not written:", (e as Error)?.message ?? e));
           if (m.failed > 0) artifactNote = "One file from this turn couldn't be attached here — ask me to send it again and I'll rebuild it.";
         }
       }
@@ -1897,7 +2108,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // A job watch set, changed, paused or stopped by text is the person's alert settings, which the scheduled alerts
       // run reads (career_watch_alerts.ts). After the save: a refused save writes none; a failed write never fails it.
       await syncWatchAlerts({ userId: user.id, before: loaded.watchState, after: ctx.alertWatchState, erased: ctx._hostPatch?.erase === true, store: supabaseAlertStore(admin), now: Date.now() })
-        .then((r) => { if (r.action === "refused") console.error("career watch alerts: not saved:", r.reason); })
+        .then(async (r) => {
+          if (r.action === "refused") console.error("career watch alerts: not saved:", r.reason);
+          // D-072 (files writers): a watch set, changed, paused or stopped is a change to the person's search plan (F-04).
+          if (r.action === "saved" || r.action === "off") await searchPlanAfterWatch(admin, user.id);
+        })
         .catch((e) => console.error("career watch alerts:", e?.message ?? e));
       flowCtx.note = null;
       // R10 F.3: the stop's effect, read back from the authoritative state after the commit. The reply above stands only

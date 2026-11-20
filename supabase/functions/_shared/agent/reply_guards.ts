@@ -54,6 +54,27 @@ export function stripSecrets(reply: string): string {
   const ps = pieces(reply);
   return rebuild(ps, new Set(ps.flatMap((p, i) => (secretIn(p.text) ? [i] : []))));
 }
+// D-066 (P14, the owner's Behavior Guide: never ask for a password or secret in chat; a login is the person signing in themselves,
+// CLAUDE.md): a sentence that asks the person to send, share, type or give a password, passcode, one-time or verification code,
+// PIN, API key, token or login credentials in this chat. A sentence that says not to ("never send your password here") or points to
+// signing in themselves asks for nothing.
+// Independent review 2026-11-13: "send me the 6-digit code they texted you", "text me the code Workday emailed you" and "send
+// over your login" were missed. A code is a sign-in code when its digits, its kind or where it came from is said; "login" is the
+// sign-in itself unless a page, link or its working is meant. Pointing to a page or site to type it on asks for nothing.
+const CODE_KIND = String.raw`(?:\d+|four|five|six|seven|eight)[- ]digit code|(?:sms|text|text message|texted|email|emailed|confirmation|access|auth|authentication|mfa|sign[- ]?in|log[- ]?in) code|(?:e-?mail|text|message|sms)\s+(?:with|containing)\s+(?:the|your|a)\s+(?:\w+\s+)?code|code(?=[^.!?\n]{0,40}\b(?:texted|e-?mailed|sent|send|sends|received|got|get|gets|messaged|arrives?|comes in|come in|from (?:the|their|that|your|an?) (?:text|e-?mail|sms|message|app|authenticator))\b)`;
+const LOGIN = String.raw`(?:log[- ]?in|sign[- ]?in)(?:\s+(?:details|credentials|info(?:rmation)?))?(?!\s+(?:page|screen|link|url|portal|button|form|flow|step|issue|problem|error|works?|worked|is|was|goes|went|fails?|failed|succeeds?|attempts?)\b)`;
+const CRED = new RegExp(String.raw`\b(?:password|passcode|passwd|one[- ]time (?:code|password|passcode)|otp|verification code|security code|2fa code|two[- ]factor code|pin(?: code| number)?|api key|access token|token|${CODE_KIND}|credentials|creds|username and password|${LOGIN})\b`, "i");
+const CRED_ASK = /\b(?:send|share|give|tell|text|type|paste|enter|provide|drop|forward|reply with|dm|shoot|message|pass along|let me (?:know|have)|sending|sharing|texting|forwarding|giving)\b(?:\s+(?:me|us|it|over|here|in))*[^.!?\n]{0,40}\b(?:your|the|that|this|a)\b[^.!?\n]{0,30}$|\bwhat(?:'s| is| are)\s+(?:your|the)\b[^.!?\n]{0,30}$|\bwhat\s+$|\b(?:i(?:'ll)? need|i would need|i'd need|can i (?:get|have))\b[^.!?\n]{0,40}\b(?:your|the)\b[^.!?\n]{0,30}$/i;
+const CRED_NOT = /\b(?:never|don'?t|do not|not|no need|won'?t|shouldn'?t|without)\b|\byourself\b|\bon (?:the|their|its) own (?:page|site)\b|\b(?:on|into)\s+(?:the\s+|their\s+|its\s+)?(?:[\w-]+(?:'s)?\s+){0,2}(?:page|site|website|portal|form|app|screen|box|field)\b/i;
+// Review round 2 (#825): the ask after the code ("Once the code arrives, just text it to me").
+const CRED_ASK_AFTER = /^[^.!?\n]{0,60}\b(?:send|text|forward|share|give|paste|reply with|dm|message)\s+(?:it|them|that|this)\s+(?:to me|to us|my way|over|here|back)\b/i;
+export function credentialAsks(reply: string): number[] {
+  return pieces(reply).flatMap((p, i) => {
+    const t = plainQuotes(p.text), m = CRED.exec(t);
+    if (!m || CRED_NOT.test(t)) return [];
+    return CRED_ASK.test(t.slice(0, m.index)) || CRED_ASK_AFTER.test(t.slice(m.index)) ? [i] : [];
+  });
+}
 
 // ------------------------------------------------------------------------------------------------ sources
 // What a sentence about the person may draw on: confirmed facts (never one waiting for their yes, memory.ts's rule),
@@ -243,6 +264,8 @@ export function bracketUntraced(reply: string, sources: string[], personal: stri
 const SNAKE = /\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b/g;
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 const RAW_ID = /\b[a-z][a-z0-9]*:[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*\b/gi;
+// D-067 (live-6 C8: "the 3.9 GPA is still on file as confirmed (F-002)"): a fact's record id from the person block is internal.
+const FACT_ID = /\bF-\d{3,}\b/g;
 export interface Posting { title: string; company: string }
 // The postings this turn's tool results named, by every id they gave it.
 export function postingsOf(results: string[]): Map<string, Posting> {
@@ -268,7 +291,7 @@ export function leakedWords(reply: string, o: { tools: string[]; typed: string; 
   const add = (w: string) => { if (!own.has(w.toLowerCase()) && !out.includes(w)) out.push(w); };
   const t = String(reply ?? "").replace(URL_RE, " ");
   for (const id of o.postings.keys()) if (idLike(id) && t.includes(id)) add(id);
-  for (const re of [RAW_ID, UUID, SNAKE]) for (const m of t.matchAll(re)) add(m[0]);
+  for (const re of [RAW_ID, UUID, SNAKE, FACT_ID]) for (const m of t.matchAll(re)) add(m[0]);
   for (const name of o.tools) if (/_/.test(name) && new RegExp(`\\b${esc(name)}\\b`).test(t)) add(name);
   // WO-061 (second judge, run 39603731114 p3: "You don't have that interview on file yet: SITUATION shows nothing"):
   // the name of the system prompt's block is internal; only the all-caps block name, never the ordinary word.
@@ -285,7 +308,7 @@ export function stripLeaks(reply: string, o: { tools: string[]; typed: string; p
     if (!leakedWords(p.text, o).length) continue;
     p.text = tidy(masked(p.text, (t) => {
       let s = t;
-      const ids = [...new Set([...[...o.postings.keys()].filter((id) => idLike(id) && s.includes(id)), ...(s.match(RAW_ID) || []), ...(s.match(UUID) || [])])]
+      const ids = [...new Set([...[...o.postings.keys()].filter((id) => idLike(id) && s.includes(id)), ...(s.match(RAW_ID) || []), ...(s.match(UUID) || []), ...(s.match(FACT_ID) || [])])]
         .filter((id) => !own.has(id.toLowerCase())).sort((a, b) => b.length - a.length);
       for (const id of ids) {
         const known = o.postings.get(id);
@@ -570,4 +593,67 @@ export function smallTalkPitch(message: string, reply: string): number[] {
     if (PITCH.test(p.text) || verbs.size >= 3) out.push(k);
   });
   return out;
+}
+
+// ------------------------------------------------------------------------------------------------ what the person asked for
+// D-067 (live-6 C20: "it prints 1 line, not the 6 you asked for", when the person typed no number; D-007): a number the reply says
+// the person asked for, wanted or said is in their own words, or the sentence goes. The sentences that carry one are returned.
+const NUM_WORD: Record<string, string> = { one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10", twelve: "12", fifteen: "15", twenty: "20", fifty: "50", hundred: "100", single: "1", a: "1", an: "1" };
+const N = String.raw`(\d[\d,.]*|one|two|three|four|five|six|seven|eight|nine|ten|twelve|fifteen|twenty|fifty|hundred)`;
+const ATTRIBUTED = [
+  new RegExp(String.raw`\b${N}\s+(?:[\w-]+\s+){0,3}?(?:that\s+|which\s+)?you\s+(?:asked|wanted|requested|said|mentioned|named|picked|chose|told\s+me)\b`, "gi"),
+  new RegExp(String.raw`\byou\s+(?:asked|wanted|requested|said|told\s+me|named)\s+(?:me\s+)?(?:for\s+|to\s+\w+\s+)?(?:about\s+|around\s+|roughly\s+|exactly\s+)?${N}\b`, "gi"),
+  new RegExp(String.raw`\b(?:as\s+you\s+asked|you\s+asked\s+for)[^.!?\n]{0,30}?\b${N}\b`, "gi"),
+];
+const numKey = (x: string) => NUM_WORD[x.toLowerCase()] ?? x.replace(/[,.]+$/, "").replace(/,/g, "");
+export function misquotedAsks(reply: string, personSaid: string[]): { index: number; figure: string }[] {
+  const said = new Set((personSaid.join("\n").match(/\d[\d,.]*|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twelve|fifteen|twenty|fifty|hundred|single|an?)\b/gi) ?? []).map(numKey));
+  const out: { index: number; figure: string }[] = [];
+  pieces(reply).forEach((p, index) => {
+    const t = plainQuotes(p.text).replace(URL_RE, " ");
+    for (const re of ATTRIBUTED) for (const m of t.matchAll(re)) {
+      const n = numKey(m[1]);
+      if (!said.has(n) && !out.some((o) => o.index === index)) out.push({ index, figure: m[1] });
+    }
+  });
+  return out;
+}
+
+// S3 r12b (dev H005 on 8e80264f2: "It's on your record as your goal, and it's still waiting for your yes." when no confirmation had
+// been asked and nothing was waiting on them): a fact they stated is "not confirmed yet", which is true, but "waiting for your yes" says a
+// confirmation is open. The claim, as a clause of a sentence about their record (a fact, goal, school, anything on file), is dropped
+// when no confirmation is open (career_brain.ts confirmationOpen decides); the rest of the sentence stands. Applications, drafts,
+// messages and cards waiting for a yes are real approvals and are never touched here.
+// S3 r12b review (PR #871): the claim's subject is also "which"/"that" alone and "I'm"/"we're" ("Chicago, which still needs your
+// yes" left "Chicago, which."; "saved, and I'm still waiting for your yes" left "saved, and I'm.").
+const CONFIRM_HEAD = /\s*(?:[,;]|\s[—–-])?\s*(?:(?:and|but|though)\s+)?(?:(?:it|that|this|which)(?:['’]s|\s+is)\s+|(?:it|that|which)\s+|(?:i['’]m|i\s+am|we['’]re|we\s+are)\s+)?(?:still\s+)?(?:(?:waiting|pending|awaiting|waits)\s+(?:on\s+|for\s+)?(?:your|a|the)\s+(?:yes|confirmation|ok|okay|go-ahead|approval|sign-off)|needs?\s+your\s+(?:yes|confirmation|ok|okay|go-ahead|approval)|(?:needs|requires)\s+(?:a\s+)?(?:yes|confirmation)\s+from\s+you)\b/i;
+const CONFIRM_CLAIM = new RegExp(CONFIRM_HEAD.source + String.raw`[^.!?\n]*`, "i");
+// The yes is asked for another thing, named right after it ("your yes on the interview slot", "your approval for the referral"):
+// a real question about that thing, never a claim about the fact, so the sentence stays whole.
+const OTHER_OBJECT = /^\s+(?:on|for|of|about|regarding|to)\s+(?:the|your|a|an|my|our|their|his|her)\s+\p{L}/iu;
+// What a cut sentence must not end on: it would not be a whole sentence ("..., which.", "... and I'm.").
+const DANGLING = /(?:[\s,;:—–(-]+(?:which|who|and|but|or|so|though|because|while|when|if|i['’]m|i\s+am|we['’]re|we\s+are|it['’]s|is|are|was|the|a|an))+[\s,;:—–(-]*$/i;
+const RECORD_TALK = /\b(?:record|recorded|goal|fact|facts|on file|saved|profile|noted|school|major|degree|location|city|preference)\b/i;
+const APPROVAL_TALK = /\b(?:applications?|apply|applying|submit\w*|drafts?|messages?|emails?|outreach|card|batch|queue\w*|send|sending|sent|cover letters?|resume|packet)\b/i;
+export function confirmClaimsDropped(reply: string): string {
+  // The sentence before, across lines too ("Your goal is saved.\nIt still needs your confirmation.").
+  let prev = "";
+  const out = String(reply ?? "").split("\n").map((line) => line.split(/(?<=[.!?]["'”’)\]]*)\s+/).map((x) => {
+    // About their record: the sentence says so, or it is "it/that/this" right after a sentence that does.
+    const before = prev;
+    if (x.trim()) prev = x;
+    const about = RECORD_TALK.test(x) || (/^\W*(?:it|that|this)\b/i.test(x) && RECORD_TALK.test(before));
+    const head = CONFIRM_HEAD.exec(x);
+    if (!head || !about || APPROVAL_TALK.test(x) || OTHER_OBJECT.test(x.slice(head.index + head[0].length))) return x;
+    // The claim alone in brackets goes with its brackets, and what follows them stands ("recorded (still waiting for your yes)
+    // and used in search" keeps "and used in search").
+    const unbracketed = x.replace(/\s*\(([^()]*)\)/g, (m, inner) => CONFIRM_HEAD.test(inner) && !OTHER_OBJECT.test(inner.slice((CONFIRM_HEAD.exec(inner)?.index ?? 0) + (CONFIRM_HEAD.exec(inner)?.[0].length ?? 0))) ? "" : m);
+    if (unbracketed !== x && !CONFIRM_HEAD.test(unbracketed)) return unbracketed.replace(/\s+([.,;:!?])/g, "$1").trim();
+    const end = /[.!?]["')\]]*\s*$/.exec(x)?.[0]?.trim() ?? "";
+    const left = x.replace(CONFIRM_CLAIM, "").replace(/[.!?]["')\]]*\s*$/, "").replace(/[\s,;:—–(-]+$/, "").replace(DANGLING, "").trim();
+    // Only the claim was the sentence ("It's still waiting for your yes."): it goes whole.
+    if (left.split(/\s+/).filter((w) => /\p{L}/u.test(w)).length < 3) return "";
+    return `${left}${/[?!]/.test(end) ? end : "."}`;
+  }).filter(Boolean).join(" ")).join("\n").replace(/\n+$/, "");
+  return out.trim() ? out : String(reply ?? "");
 }

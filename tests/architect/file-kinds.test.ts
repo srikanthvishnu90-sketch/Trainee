@@ -50,7 +50,9 @@ function leaves(x: unknown, out: string[] = []): string[] {
 
 // ================================================================== schema validation per kind
 Deno.test("registry: the seven kinds, the four source labels", () => {
-  eq([...KIND_IDS].sort(), ["application_proof", "application_review", "comparison", "draft", "introduction", "job_list", "plan_review", "research_brief"]);
+  // Architect amendment (D-062, MIRROR-PROCESS C16): the application tracker kind, built by code only (not a create_file kind).
+  eq([...KIND_IDS].sort(), ["application_proof", "application_review", "comparison", "draft", "introduction", "job_list", "plan_review", "research_brief", "tracker"]);
+  assert(!validateKind("tracker", { title: "Application tracker", coverage: ["x"] }).ok, "a model's tracker is refused");
   for (const s of ["From the posting", "From your resume", "From you", "Reported, not verified"]) assert((SOURCES as readonly string[]).includes(s), s);
 });
 Deno.test("schema: every sample is accepted and a missing required part is refused, per kind", () => {

@@ -127,7 +127,10 @@ Deno.test("f05 turn: the live board first, with its freshness; the snapshot only
   const live = [P("g:1", "Data Analyst", "Chicago, IL", 2), P("g:2", "Data Analyst", "Boston, MA", 1)];
   const r = (await searchJudgeTurn({ message: "m", ask, userId: "u", now: NOW, profile: null, sources: sources(live), judge: { on: false } }))!;
   eq(r.source, "live");
-  assert(/^From 1 live posting for data analyst in Chicago, first seen in the last 2 days\./.test(r.reply), r.reply);
+  // Architect amendment (D-058, 2026-11-11, owner's "same length as Instinct"): the chat line keeps the count and scope; the freshness is the turn's proof
+  // (and each posting's first-seen date on the File, role_results.ts).
+  assert(/^From 1 live posting for data analyst in Chicago\./.test(r.reply) && !/first seen/.test(r.reply), r.reply);
+  eq(r.proof?.freshness, "first seen in the last 2 days");
   assert(/^You have no confirmed facts yet, so these are newest first/m.test(r.reply), r.reply); // OWNER LIST #6 (2026-10-28)
   eq(r.shortlist.map((e) => e.id), ["g:1"]);
   const s = (await searchJudgeTurn({ message: "m", ask, userId: "u", now: NOW, profile: null, sources: sources([], [{ ...P("kb:1", "Data Analyst", "Chicago, IL", 20), fetched_on: "2026-10-15" }]), judge: { on: false } }))!;
@@ -135,7 +138,9 @@ Deno.test("f05 turn: the live board first, with its freshness; the snapshot only
   assert(/saved snapshot of job boards \(read 2026-10-15\), not the live board: the live board has no postings yet\. Some may have closed since\./.test(s.reply), s.reply);
   const none = (await searchJudgeTurn({ message: "m", ask, userId: "u", now: NOW, profile: null, sources: sources([], []), judge: { on: false } }))!;
   eq(none.status, "none");
-  assert(/Nothing was invented/.test(none.reply), none.reply);
+  // Architect amendment (D-058, 2026-11-11, owner's "same length as Instinct"): the short empty form; "Nothing was invented" is the turn's proof.
+  assert(/: no open roles\./.test(none.reply) && !/Nothing was invented/.test(none.reply), none.reply);
+  eq(none.proof?.invented, "Nothing was invented to fill the list.");
   eq(none.shortlist, []);
 });
 

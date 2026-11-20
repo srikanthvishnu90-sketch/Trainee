@@ -63,8 +63,13 @@ const sha256Hex = (buf) => crypto.createHash("sha256").update(buf).digest("hex")
 // 1,706 / 2,436 bytes). Now renderPdf 1,926 bytes / renderDocx 2,782 bytes.
 // Re-pinned 2026-11-10 (r-resume-design): the name prints at 16 pt (APP-LAYER-15-FIXES A.4; R6 scoped allows 10-18), and
 // the Word copy links its styles part (word/_rels/document.xml.rels) and prints with the PDF's font, sizes and leading.
-const GOLDEN_PDF_SHA256 = "d73c389e49e6662414973cf6e2feb8c1dd176e945747e6c816b1ae70cf666108";
-const GOLDEN_DOCX_SHA256 = "f24037b7d7ba3888dee8eb5c5acbab1a8dc35e25c1e39f9e1266d18a0e231d2b";
+// Architect amendment (owner decision 2026-11-13, D-078: confirm before compare): inferred skills are withheld until confirmed,
+// so the Skills line of this fixture changes; text diff: "Python, JavaScript, React, Kubernetes, PostgreSQL, Docker, Go, SQL, AWS,
+// Data Structures, Algorithms" -> "Python, JavaScript, React, Kubernetes, PostgreSQL, Docker, Go, SQL, AWS" (PDF and DOCX; every
+// other line identical). Was PDF d73c389e49e6662414973cf6e2feb8c1dd176e945747e6c816b1ae70cf666108,
+// DOCX f24037b7d7ba3888dee8eb5c5acbab1a8dc35e25c1e39f9e1266d18a0e231d2b.
+const GOLDEN_PDF_SHA256 = "cf5107d8bf2113b37f5c9171baab7927c91a89466113473f70d075e8e3ad7798";
+const GOLDEN_DOCX_SHA256 = "3c807b4555c74bf7e2a2dfeaf44cb6151c9a57970ad84fc2ce2562cb81113edc";
 
 test("edge realm (no require): renderPdf produces a real PDF instead of refusing", () => {
   const Edge = loadEdgeRender();

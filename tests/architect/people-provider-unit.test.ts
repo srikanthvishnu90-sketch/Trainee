@@ -103,7 +103,8 @@ Deno.test("discovery: a domain with no mail server is 'fail' (nothing there is e
 // ------------------------------------------------------------------------------------------------ config
 Deno.test("config: off unless switched on AND the gateway has a key AND web search is available (dark: never yet); the reply is plain; no provider, no call", () => {
   const env = (o: Record<string, string>) => (k: string) => o[k];
-  const off = providerConfig(env({ ANTHROPIC_API_KEY: KEY }));
+  // Architect amendment (D-062): CAREER_PEOPLE_SEARCH is a release flag now (on when unset); "off" is its rollback, so the off case sets it.
+  const off = providerConfig(env({ ANTHROPIC_API_KEY: KEY, CAREER_PEOPLE_SEARCH: "off" }));
   eq([off.provider, off.switchedOn], [null, false], "the key alone doesn't switch on model spend");
   assert(/isn't switched on yet/.test(notWiredReply(off)) && /won't guess/.test(notWiredReply(off)));
   const nokey = providerConfig(env({ CAREER_PEOPLE_SEARCH: "on" }));

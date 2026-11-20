@@ -42,8 +42,9 @@ stay disabled on every page until their stores exist.
 
 - **Built** (20261110160000): as above, with `watch` stored as `{ text, active }`; `payload_hash` is computed on insert from the
   content; `career_search_plan_approve_as` answers `approved`, `already`, `stale` (another hash), `superseded` (a newer version
-  exists) or `missing`. The plan-step writer is not built yet.
-- **Writes:** the career brain's plan step (agent-chat) inserts a new version; the File's `approveplan` action sets
+  exists) or `missing`. The writer is built (D-072 files writers, `_shared/career_search_plan_writer.ts`): a search set or changed
+  in chat, or a watch set, changed, paused or stopped, writes a new version when the plan differs from the newest.
+- **Writes:** agent-chat inserts a new version when the person's search or watch changes (D-072 files writers); the File's `approveplan` action sets
   `approved_at`/`approved_hash` for that exact version through the trainee-file handler (it changes only this person's
   own row - the architect's condition for `approveplan` being WO-E's).
 - **Reads:** F-04 adapter; the search reads only the newest approved version. Approval authorizes searching and
@@ -119,7 +120,9 @@ insert from the content, and `approved_at`/`approved_hash`/`approved_role`). A r
 approved row is never changed or deleted while its owner exists (a trigger). `approvedoc` (`career_material_version_approve_as`)
 approves the exact version for the role it was made for: a stale hash is `stale`, another role `wrong_role`, and approving a
 newer version leaves every approved one as it was. The apply engine must send the approved version for that role, never the
-newest (wiring the engine to read it is not part of S3).
+newest (wiring the engine to read it is not part of S3). The writer is built (D-072 files writers, `_shared/career_material_writer.ts`): every
+tailored resume or cover letter delivered in chat writes one version (one document per target posting or target, the file itself, what
+changed from the producer's own change list); the same file again writes nothing.
 
 ## Order of work (proposal)
 
@@ -131,3 +134,106 @@ newest (wiring the engine to read it is not part of S3).
 
 Each is its own migration PR with RLS tests in `tests/db/` (owner reads own rows; another account reads nothing; anon
 reads nothing; authenticated cannot write), and its adapter and family wiring in a WO-E follow-up.
+
+## 6. How each File family is reached from the chat (D-072, files reachable)
+
+Owner standard (behavior guide P5/P17, "complete product"): every File family the product defines is reachable from the chat
+when the person's ask calls for it, made from their real records, and a "made" claim needs a made File that opens (D-066 P6,
+D-067). Before D-072 no production code called `createFamily`, so the record-backed pages below were served and tested but
+unreachable (item 6b report, `docs/architect/reports/ITEM6B-ROOT-CAUSES-20261112.md`).
+
+The chat path for the eleven record-backed families: the person's ask (`_shared/file_family_ask.ts familyAskOf`) routes the
+turn to the brain in staged mode (`career_staged.ts`, reason `file_family_ask`; an exact payload, an approval, a control such as
+"pause my weekly brief" and a bare reply stay code's; what counts as an ask is below). The brain calls `open_record_file` with the family's name only
+(`_shared/agent/file_family_tool.ts`); code reads the person's records through the same `FamilyRecords` the File server draws
+the page from (`_shared/file_family_make.ts makeFamilyFile`, `supabaseFamilyMaker`), and makes the File with
+`createFamily(userId, family, title, null, { ref })` only when the records hold something: no view is stored, the page reads the
+records on every open. The link is minted by code and rides the reply (`fileLinks`); the tool returns what the page holds
+(`holds`, from the page's own view), and the reply says only that. Nothing on record: no File is made and the reply says what
+is missing (never a hollow File). Records unreadable: nothing is made. If the model answers the ask without the tool, the
+process check asks it once (`career_brain.ts processCheck familyFile`). Approvals on these pages stay POST forms bound to the
+payload hash shown (D-MS-1, D-MN-2).
+
+The ask reader fails closed (review of #805; three denylist rounds each sent the File to people who had asked for it to
+stop, in words the list did not have). A non-null `familyAskOf` holds the turn to the tool, so it is an allowlist of
+whole-message shapes: a family is returned only when the ENTIRE message, after normalising case, apostrophe variants,
+whitespace, punctuation and politeness (hey, please, thanks, "can you", "could you"), is one of these, and any other word
+anywhere is null:
+
+- a see verb (show, open, see, view, pull up, bring up, send, resend, give, get, share, with "me" or "us"; "can I
+  see/have/get/open"; "I want to / I'd like to / I need to / let me see, open, view, get, look at"; "where is / where's";
+  "what's in / on"; "link to / for"), then my/the/that/our/this, then the File's own name with an optional File word (file,
+  page, link, doc, one-pager, sheet, url) or a generic phrase WITH a File word ("my interviews page", "the page with my
+  profile", "a file comparing my offers"), then at most a tail from a closed list (again, now, today, tonight, this morning,
+  real quick, for me, here, in chat, on telegram/whatsapp/imessage, by end of day, when you can);
+- the File's own name alone ("my weekly brief", "weekly brief?");
+- the File they can't reach ("I can't find my interview hub", "I never got my weekly brief", "my search plan link doesn't
+  open"), optionally followed by "send me the link";
+- with one more clause, before or after, only from a closed list of statements that they can't reach it: "I can't / couldn't
+  find / open / see / get it / the link / the page", "the link / the old one doesn't / won't / isn't work(ing) / load(ing) /
+  open(ing)", "I never got it", "you didn't send it", "I lost the link".
+
+Null by construction, with no list of stop words to keep up: an opt-out or a control however it is worded ("pause my weekly
+brief", "kill the weekly brief", "weekly brief? no thanks", "no me mandes el weekly brief", "send me the weekly brief
+never"), an ask to make something new ("build a search plan", "make me my weekly brief": make and build are not see verbs),
+a comparison or a question about something else ("career brief vs resume", "my boss wants me to send a weekly report"), and
+any message with a second topic or a free clause ("show me my interview hub so I can prepare", "stop. show me my weekly
+brief"). A short list of stop words is also refused outright, as defence in depth. Null never means "no": the turn is only
+not held to the tool. A see-ask that is not one of the shapes is an accepted miss: in staged mode it reaches the brain by
+the other routes with `open_record_file` offered and not held (the model decides), and a message that names one of these
+Files which the router read as a resume delivery ("don't forget to send me my weekly brief" got "no resume has been
+tailored") goes to the brain the same way (`career_staged.ts`, reason `file_named`, `fileNamedIn`; never held). Two kinds
+stay the router's because they name a second task it answers: a role ("... for the design role": a search) and interview
+preparation ("... my interviews page for the research role": the prep File). Measured on the reviewer's 188 messages plus 64
+more opt-outs: opt-outs null 79/79 and 64/64, make-new null 24/24, not-a-File null 25/25, see-asks held 34/60 with the 26
+misses listed (`tests/architect/files-ask-failclosed-20261113.test.ts`, `tests/architect/files-ask-clause-20261113.test.ts`).
+The interview time in `holds` is the page's: the person's zone, with the
+zone named (`tests/architect/files-ask-optout-d072.test.ts`).
+
+| Family | File | The ask (examples) | Creator | Records the page reads | Before D-072 | After |
+| --- | --- | --- | --- | --- | --- | --- |
+| F-01 | Career brief | "show me my career brief" | `open_record_file` career_brief | account (stated facts, confirmed resume), standing, events | unreachable | reachable (drawn for everyone: what is not on record is named "Not set yet" / Unknown) |
+| F-02 | Profile facts | "show me my profile facts", "give me the page with my profile" | `open_record_file` profile_facts | account, standing | unreachable | reachable (drawn for everyone, Unknowns named) |
+| F-03 | Path comparison | "open my path comparison" | `open_record_file` path_comparison | `career_path_comparisons` (newest), written by `compare_paths` when the person compares paths in chat (D-072 files writers) | unreachable | reachable when a comparison exists; else "nothing on record" and no File |
+| F-04 | Search plan | "show me my search plan" | `open_record_file` search_plan | `career_search_plans` (newest version), written when a search or watch is set or changed (D-072 files writers) | unreachable | reachable when a plan row exists |
+| F-05, F-06, F-10, F-11 | Roles list, role workspace, batch, pipeline | a search ("find me analyst internships in Chicago") | the results list (`role_results.ts`, `file_family_live.ts`) | the results list | reachable | unchanged |
+| F-07 | Materials | "open my materials page" | `open_record_file` materials | `career_material_versions` (the newest document), written when a tailored resume or cover letter is delivered (D-072 files writers) | unreachable | reachable when a version row exists |
+| F-08 | Answer library | "what's in my answer library?", "show me my answers page" | `open_record_file` answer_library | `career_apply_questions` | unreachable | reachable |
+| F-09 | Application review | the card's review link | `createReview` (`application_review_links.ts`) | the prepared application | reachable | unchanged |
+| F-12 | Message review | "show me the message review" | `open_record_file` message_review | `career_outreach_drafts` (newest waiting for a decision, else newest) | unreachable | reachable |
+| F-13 | Interview hub | "pull up my interview hub", "show me my interviews page" | `open_record_file` interview_hub | `career_interviews` | unreachable | reachable |
+| F-14 | Weekly brief | "send me my weekly brief", "where's my weekly summary" | `open_record_file` weekly_brief | `career_digest_prefs`, `career_events`, questions, interviews | unreachable | reachable (drawn for everyone: a quiet week says so) |
+| F-14n | Negotiation plan | "show me my negotiation plan" | `open_record_file` negotiation_plan | the offers the person told Trainee | unreachable | reachable |
+| F-15 | Offer comparison | "show me my offer comparison", "give me a file comparing my offers" | `open_record_file` offer_comparison | the offers the person told Trainee | unreachable | reachable |
+
+Tests: `tests/architect/files-reachable-d072.test.ts` (each family from its ask through the real brain turn and File server,
+nothing on record, hash-bound approvals, the process check) and `tests/architect/files-reachable-d072-pg.test.ts` (the real
+agent-chat handler on Postgres 16, the link opened through the deployed File server's dependencies).
+
+## 7. The writers of F-03, F-04 and F-07 (D-072, files writers)
+
+| Family | Store | Writer | Fires from |
+| --- | --- | --- | --- |
+| F-04 | `career_search_plans` | `career_search_plan_writer.ts writeSearchPlan` | the search path (`handler-career.ts`, after `askFor`), the watch sync (`syncWatchAlerts` saved or off), the brain's `set_job_alerts`/`stop_job_alerts` |
+| F-07 | `career_material_versions` | `career_material_writer.ts writeTurnMaterials`, `withLetterVersions` | each stored turn document its producer marked (resume task, `tailor_resume`, the router's posting tailor); the brain's `create_file` cover letter |
+| F-03 | `career_path_comparisons` (20261112150000) | `agent/path_comparison_tool.ts` `compare_paths` | a message comparing paths (`pathCompareAskOf`, routed to the brain: `career_staged.ts` reason `path_compare`) |
+
+Each writes a new version only when the content differs (F-04) or the file differs (F-07), never overwrites one, and never fails the turn.
+Tests: `tests/architect/files-writers-d072-pg.test.ts` (each writer from its chat path through the real handler on Postgres 16, then the
+family File opened with those rows) and `tests/architect/files-writers-d072.test.ts`.
+
+Review fixes (PR #799, 2026-11-13; `tests/architect/files-writers-review-20261113.test.ts`, `tests/db/career_erase_approved_versions.check.sql`):
+
+- **Erase.** `career_erase_person` ("forget everything") deletes the person's approved plans and documents: for its own transaction
+  it names the one person it is erasing (`career.erase_person`, transaction-local, cleared when it ends) and the versions guard
+  lets only that person's approved rows go. Every other delete of an approved version is refused as before (migration
+  `20261113120000`, with its rollback). Account deletion (the cascade) and `career_path_comparisons` (no delete guard) were not affected.
+- **One document per posting (F-07).** `doc_key` tells postings apart: by the posting id, else by a digest of the pasted posting's own
+  text (`postingKeyOf`, never shown or stored as text); a target the key's alphabet cannot spell (no Latin letters, "C++"/"C#")
+  adds a digest of its words. Not covered: the router's posting tailor when its artifact carries a company and no posting id
+  (the artifact holds no posting text), which still keys on the company.
+- **A letter's basis.** `based_on` on a cover letter is "the N facts listed on the draft" when the draft lists them, else empty.
+- **Path comparison (F-03).** A direction's name is the person's wording: the model's name is kept only when it stands in their
+  message, else their quoted words are the name; the title likewise. Related confirmed facts hold two of the path's distinct words
+  as whole words (or its only word); Strong needs three such facts each holding two (a one-word path is never Strong); an offer
+  is matched by the company's name as whole words in what they wrote.

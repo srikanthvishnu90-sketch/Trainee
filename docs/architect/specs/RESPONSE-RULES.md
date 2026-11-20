@@ -125,7 +125,7 @@ The chat words for each C.24 state:
 |---|---|---|---|
 | Loading | The one interim: what Trainee is doing (`ackFor`). | A result, a count, or "one sec". | `telegram-typing-ack.test.ts`; the loop |
 | Empty | The scope checked and one specific change (section 2, empty search). | A bare "widen the search". | `r10-files-shell.test.ts` |
-| Needs input | One fact, by name, with why it matters; the prepared draft stays (E3, E4). | Two questions, or a discarded draft. | `r10-fix-12-review.test.ts` (pending) |
+| Needs input | One fact, by name, with why it matters; the prepared draft stays (E3, E4). | Two questions, or a discarded draft. | `r10-fix-12-review.test.ts` |
 | Prepared | Ready for review, not sent. | "Submitted" or "done". | `wo-g-application-review.test.ts` |
 | In progress | "approved; it is sent next" (`career_apply_cards.ts` RESULT). | A green badge, or "sent" before the send. | `mass-submit-handler-pg.test.ts`; the loop's batch test |
 | Uncertain | Sent but not confirmed, with the proof to look for; no blind retry. | "Confirmed" from a page alone. | `wo-g-batch-closeout-pg.test.ts` |
@@ -142,7 +142,7 @@ The chat words for each C.24 state:
 | E1 | One yes approves exactly what was shown, by payload hash. A batch yes approves every application in the batch shown and sends all of them; each gets its own receipt and the batch gets one closeout (owner ruling; D-MS-1, D-MN-2). | approval hash tests; `tests/architect/wo-g-batch-closeout-pg.test.ts` |
 | E2 | Numbered references persist: "apply to 2 and 4" means items 2 and 4 of the list last shown, until a new list is shown. | `tests/architect/ask-to-queue-20261110.test.ts` (40 scripts through the real handler on Postgres 16: after a widened or new search, an unrelated turn, and the same or overlapping asks) |
 | E3 | A question is narrow: one fact, by name, with why it matters ("Graduation date needed: the posting requires December 2027 or later"). Two concrete choices beat an open question. | `blocker_named`; GAP for the "why it matters" clause |
-| E4 | Asking never discards work: the prepared draft stays visible while one field is missing (C.24 Needs input). | `tests/architect/pending/r10-app-layer/r10-fix-12-review.test.ts` |
+| E4 | Asking never discards work: the prepared draft stays visible while one field is missing (C.24 Needs input). | `tests/architect/r10-app-layer/r10-fix-12-review.test.ts` |
 | E5 | Applying needs only a chat message and a yes; the cloud browser does the rest. Nothing is downloaded or installed (D-050). An employer account is created only after the yes to that exact application (D-051, pending the owner's wording). | `supabase/functions/_shared/submit_capability.ts` (host list in #666) |
 | E6 | Work that does not depend on a blocker keeps moving; the reply says so. At a limit the reply keeps the task and says what still works ("searching postings still works now"); in a batch the items a question does not hold are sent and each held one is named with its question. | `not_kept` in `tests/architect/r-states-bubbles-loop.test.ts` (live at every limit); the batch test there over `answerText` and `batchCloseoutText`; `tests/architect/wo-g-batch-closeout-pg.test.ts` |
 | E7 | A link in chat is a File link or an inspected employer link. No bearer link is sent when files are attached (ruling on #634). | `tests/architect/r9-resume-fit-send-20261108.test.ts` |

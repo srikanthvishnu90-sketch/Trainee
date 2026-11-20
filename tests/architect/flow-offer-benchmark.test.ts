@@ -46,10 +46,19 @@ Deno.test({ name: "FEATURE 12: offers placed against market numbers at the real 
     handler = await careerHandler(pg, PEOPLE);
     const chat: Chat = handler.chat("tok-f");
     const say = async (c: Chat, message: string) => { const r = await c.say(message); eq(r.status, 200, r.reply); return r; };
+    // Architect amendment (owner decision 2026-11-13, D-078: confirm before compare): the handler shows its reading of an offer or
+    // rate check first and compares nothing until the person's plain yes to it; `told` is the message, the reading shown (checked),
+    // and the person's "yes" through the same real handler. Every assertion below is on the reply after that yes, unchanged.
+    const told = async (c: Chat, message: string) => {
+      const shown = await say(c, message);
+      if (shown.intent !== "career_offer_confirm") return shown;
+      assert(/Is that right\? Reply yes, or tell me what to change\./.test(shown.reply) && !/median|percentile/.test(shown.reply), shown.reply);
+      return say(c, "yes");
+    };
     const noNumber = (reply: string, n: string) => assert(!reply.includes(n), `a median from too few filings is never said (${n}): ${reply}`);
 
     await t.step("an offer: the employer's own filings (n = 5) and BLS, each with its median, the offer's percentile, n, dataset and period", async () => {
-      const r = await say(chat, "I got an offer from JPMorgan for $110k base plus a $10k signing bonus as an analyst in New York, with $20k in RSUs over 4 years. Need to answer by Friday");
+      const r = await told(chat, "I got an offer from JPMorgan for $110k base plus a $10k signing bonus as an analyst in New York, with $20k in RSUs over 4 years. Need to answer by Friday");
       eq(r.intent, "career_offer_benchmark", r.reply);
       assert(/JPMorganChase's own H-1B filings for Financial and Investment Analysts in the New York metro \(DOL H-1B LCA, FIXTURE Q0\): median \$120,000, from 5 filings/.test(r.reply), r.reply);
       assert(/Your base is at exactly the 25th percentile/.test(r.reply), r.reply);
@@ -59,7 +68,7 @@ Deno.test({ name: "FEATURE 12: offers placed against market numbers at the real 
     });
 
     await t.step("n < 5: the employer filed 4 wages, so no median is stated and the reply says why; BLS still places it", async () => {
-      const r = await say(chat, "Goldman offered me $95,000 in New York as a summer analyst");
+      const r = await told(chat, "Goldman offered me $95,000 in New York as a summer analyst");
       eq(r.intent, "career_offer_benchmark", r.reply);
       assert(/Goldman Sachs's own H-1B filings for Financial and Investment Analysts in the New York metro: no median, only 4 filings in FIXTURE Q0, too few for a median/.test(r.reply), r.reply);
       noNumber(r.reply, "$117,820");
@@ -67,18 +76,18 @@ Deno.test({ name: "FEATURE 12: offers placed against market numbers at the real 
     });
 
     await t.step("a rate check with no company: the pay six open postings in the metro state, the closed, hourly and other-city ones left out", async () => {
-      const r = await say(chat, "is $95k good for a data analyst in Chicago");
+      const r = await told(chat, "is $95k good for a data analyst in Chicago");
       eq(r.intent, "career_offer_benchmark", r.reply);
       assert(/^Checking: data analyst, Chicago metro, base \$95,000\./.test(r.reply), r.reply);
       assert(/Public pay data \(DOL, BLS\): none mapped to "data analyst", so no public figure/.test(r.reply), r.reply);
       assert(/Pay stated by open data analyst postings in the Chicago metro on file: median \$102,500 from 6 postings/.test(r.reply), r.reply);
       assert(/Your base is above the middle of 1 of the 6 posted ranges/.test(r.reply), r.reply);
-      const again = await say(chat, "Is 130k a fair salary for a data analyst in Chicago?");
+      const again = await told(chat, "Is 130k a fair salary for a data analyst in Chicago?");
       assert(/above the middle of 6 of the 6 posted ranges/.test(again.reply), again.reply);
     });
 
     await t.step("a rate check with two postings: no number, and the reason", async () => {
-      const r = await say(chat, "is $150k good for a product manager in Denver");
+      const r = await told(chat, "is $150k good for a product manager in Denver");
       eq([r.intent, r.resultStatus], ["career_offer_benchmark", "no_benchmark"], r.reply);
       assert(/only 2 open postings on file state a yearly pay range, too few for a median \(I need at least 5\)/.test(r.reply), r.reply);
       assert(/I have no market number for this one, and I won't make one up/.test(r.reply), r.reply);
@@ -113,7 +122,7 @@ Deno.test({ name: "FEATURE 12: offers placed against market numbers at the real 
       const ask = await say(chat, "Stripe offered me 150k");
       eq(ask.intent, "career_offer_ask", ask.reply);
       assert(/I need the city and the job title/.test(ask.reply), ask.reply);
-      const r = await say(chat, "software engineer in Seattle");
+      const r = await told(chat, "software engineer in Seattle");
       eq(r.intent, "career_offer_benchmark", r.reply);
       assert(/Stripe's own H-1B filings for Software Developers in the Seattle metro: no median, only 1 filing in FIXTURE Q0, too few for a median/.test(r.reply), r.reply);
       noNumber(r.reply, "$170,000");

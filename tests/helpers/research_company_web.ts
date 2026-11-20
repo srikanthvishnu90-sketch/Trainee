@@ -21,7 +21,9 @@ export const U = {
 };
 export const PAGES: Record<string, [string, string]> = {
   [U.update]: ["Stripe's 2025 update", "<p>February 24, 2026.</p><p>Businesses on Stripe generated $1.9 trillion in total volume in 2025, up 34% from 2024.</p><p>The Revenue suite is on track to reach a $1 billion annual run rate in 2026.</p>"],
-  [U.billing]: ["Stripe Billing documentation", "<p>Stripe Billing lets businesses bill customers with subscriptions and invoices.</p><p>Billing helps businesses manage the revenue lifecycle, from the first invoice to recovering failed payments.</p>"],
+  // Architect amendment (D-073): Trainee's reading (FULL.frame) now stands only with at least 60% of its words on the pages it names
+  // (the item 10 eval's "cited" measure); this page now states what that reading rests on. Every bar of the tests that use it stands.
+  [U.billing]: ["Stripe Billing documentation", "<p>Stripe Billing lets businesses bill customers with subscriptions and invoices.</p><p>Billing helps businesses manage the revenue lifecycle, from the first invoice to recovering failed payments.</p><p>Stripe offers payments plus software, not card processing alone.</p>"],
   [U.radar]: ["Stripe Radar documentation", "<p>Radar uses machine learning to help businesses block fraudulent payments.</p><p>Blocking more payments can reduce fraud losses, but it can also decline legitimate customers, so businesses tune their rules to let good payments through.</p>"],
   [U.role]: ["Data Analyst Intern", "<p>As a Data Analyst Intern you will define metrics and build reports and dashboards for business teams.</p><p>You will design experiments and turn the results into business recommendations.</p><p>You have experience with SQL and are pursuing a quantitative Bachelor's or Master's degree.</p><p>Applicants graduate in December 2027 or spring/summer 2028. Offices: New York, Seattle and South San Francisco HQ.</p>"],
   [U.rivals]: ["Payments Weekly: who Stripe competes with", "<p>October 2, 2026.</p><p>Stripe competes with Adyen for large enterprise payment contracts.</p>"],

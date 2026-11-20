@@ -1,0 +1,117 @@
+{
+ "case": {
+  "id": "R17",
+  "company": "Ramp",
+  "site": "ramp.com",
+  "role": "Software Engineer, Engineering Platform",
+  "board": "ashby:ramp"
+ },
+ "plan": {
+  "queries": [
+   "Ramp",
+   "Ramp Software Engineer, Engineering Platform"
+  ],
+  "companies": [
+   "Ramp"
+  ],
+  "sites": [
+   "ramp.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:54:23.587Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://ramp.com/",
+    "title": "ramp.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://ramp.com/about",
+    "title": "ramp.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://ramp.com/careers",
+    "title": "ramp.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.ashbyhq.com/posting-api/job-board/ramp",
+    "title": "Ashby job board: ramp",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://ramp.com/press",
+    "title": "ramp.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://ramp.com/team",
+    "title": "ramp.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Ramp%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Ramp",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer",
+   "Not used for Ramp: the Greenhouse job board \"ramp\" (Ashby \"ramp\" is the one that links the company's site)."
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Ramp."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://api.ashbyhq.com/posting-api/job-board/ramp",
+    "title": "Ashby job board token: ramp",
+    "text": "The Ashby job board with the token ramp lists 176 open roles. The board does not name its company.\n11 of the 176 open roles on the Ashby job board with the token ramp say intern, new grad, junior, associate or entry level in the title.\n138 open roles on the Ashby job board with the token ramp are in New York, NY (HQ).\n15 open roles on the Ashby job board with the token ramp are in Remote (US).\n9 open roles on the Ashby job board with the token ramp are in London, UK.\n7 open roles on the Ashby job board with the token ramp are in San Francisco, CA.\n4 open roles on the Ashby job board with the token ramp are in Toronto, ON.\nOpen role on the Ashby job board with the token ramp: Security Engineer, Cloud, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Software Engineer, Android, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Account Executive | Strategic, San Francisco, CA.\nOpen role on the Ashby job board with the token ramp: Software Engineer, iOS, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Partner Development Representative | Accounting, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Senior Manager, Account Executive | Mid-Market, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Account Manager | Commercial, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Product Designer, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: University Grad | Customer Experience Associate, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Partner Development Representative | Private Equity, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Account Manager | Mid-Market, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Senior Product Marketing Manager - New Products, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Customer Activation Manager | Enterprise, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Customer Activation Manager | Mid-Market, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Software Engineer, Security, Stablecoin, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Account Executive | Commercial, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Senior Channel Partner Manager, Global Advisory / GSI, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Senior Channel Partner Manager, Strategic Advisory, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Customer Activation Manager | Scaled, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Technical Consultant, Enterprise, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Senior Brand Designer, Growth, San Francisco, CA.\nOpen role on the Ashby job board with the token ramp: Product Manager | Procurement, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Product Manager | Growth, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Commercial Account Executive, Canada, Toronto, ON.\nOpen role on the Ashby job board with the token ramp: Solutions Consultant, Enterprise, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Customer Experience Associate (Evening Shift), New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Software Engineer, Growth Platform, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Security Engineer, Product, New York, NY (HQ).\nOpen role on the Ashby job board with the token ramp: Manager, Scaled Customer Success Strategy & Operations, San Francisco, CA.\nOpen role on the Ashby job board with the token ramp: Account Manager | Strategic, New York, NY (HQ).",
+    "requested": "https://api.ashbyhq.com/posting-api/job-board/ramp",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://ramp.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://ramp.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://ramp.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://ramp.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://ramp.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Ramp%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

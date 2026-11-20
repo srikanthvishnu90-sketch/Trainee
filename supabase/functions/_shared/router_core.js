@@ -20487,7 +20487,7 @@ if (typeof module !== "undefined" && module.exports) module.exports = Government
       const doorstep = { family: "application", driven_by: "agent", gap, state: "AWAITING_COMMIT", committed: false, step_log: stepLog, payload, payload_sha256: hash, proof: { step_log: stepLog, payload_snapshot: payload, payload_sha256: hash } };
       return {
         intent: "captcha_handoff", family: "access", resultStatus: "awaiting_user", sends: 0, submits: 0, artifact: payload, payload, doorstep,
-        reply: "A CAPTCHA is a step only you can do: I hand you the tap on the real page, you finish that one step, and the run resumes right where it stopped. No solver services are used, ever — that is a hard rule, not a preference. No stop is recorded for this session yet, so no ticket exists to hand you — the moment a run actually stops on one, the ticket is minted and the link is yours. Next step — tap the handoff link when it appears and the application continues from the exact field it stopped on.",
+        reply: "I won't solve a CAPTCHA, and no solver service is used. It is a step only you can do: I hand you the tap on the real page, you finish that one step, and the run resumes right where it stopped. That is a hard rule, not a preference. No stop is recorded for this session yet, so no ticket exists to hand you — the moment a run actually stops on one, the ticket is minted and the link is yours. Next step — tap the handoff link when it appears and the application continues from the exact field it stopped on.",
       };
     }
     // Routing robustness (wedge paraphrase battery): repair a token only
@@ -21778,13 +21778,182 @@ const CareerProfile = (() => {
   }
   function confirmedFacts(profile) { return (profile.facts || []).filter((f) => !f.needs_confirmation && !quarantinedFact(f)); }
   function unprovenSkills(profile) { refreshSkillFlags(profile); return (profile.facts || []).filter((f) => f.kind === "skill" && f.unproven); }
+  // D-069 (real set item 3, finding 1): a skill is named in a fact only as a whole token, or as one of its known aliases. It was a
+  // substring test, so "R" was proven by every fact with the letter r in it and "SQL" by "PostgreSQL". Case and punctuation are
+  // read: a short name (R, C, Go, ML, JS, TS) counts only as written with its capitals and never inside "R&D", "C-suite" or
+  // "Go-to-market"; "Node.js", "C++", "C#", "CI/CD" and "A/B testing" keep their punctuation; "SQL" is never "PostgreSQL" or
+  // "MySQL". Each alias group names one skill (Postgres is PostgreSQL, k8s is Kubernetes, Golang is Go).
+  const SKILL_ALIASES = [
+    ["JavaScript", "JS", "ECMAScript"], ["TypeScript", "TS"], ["PostgreSQL", "Postgres", "psql"], ["Kubernetes", "k8s"], ["Node.js", "NodeJS"],
+    ["Go", "Golang", "Go lang"], ["Express", "Express.js", "ExpressJS"], ["C++", "cpp"], ["C#", "csharp", "C sharp"], ["AWS", "Amazon Web Services"], ["GCP", "Google Cloud", "Google Cloud Platform"],
+    ["Machine Learning", "ML"], ["React", "React.js", "ReactJS"], ["Vue", "Vue.js", "VueJS"], ["Next.js", "NextJS"], ["CI/CD", "CICD"],
+    ["A/B Testing", "AB testing", "A/B tests", "A/B test", "split testing"], ["Excel", "Microsoft Excel", "MS Excel"], ["PowerPoint", "Microsoft PowerPoint", "MS PowerPoint"],
+    ["MongoDB", "Mongo"], ["scikit-learn", "sklearn", "scikit learn"], ["REST", "RESTful", "REST API", "REST APIs"], ["Capital IQ", "CapIQ", "S&P Capital IQ"],
+    ["Financial Modeling", "Financial Modelling"], ["Natural Language Processing", "NLP"], ["R"], ["C"], ["SQL"], ["MySQL"], ["Git"],
+  ];
+  const skillKey = (s) => String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim();
+  const ALIAS_GROUP = new Map();
+  for (const g of SKILL_ALIASES) for (const f of g) ALIAS_GROUP.set(skillKey(f), g);
+  const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // The forms a skill is written in: its alias group, else the name as given.
+  function skillForms(name) {
+    const raw = String(name == null ? "" : name).trim();
+    return ALIAS_GROUP.get(skillKey(raw)) || (raw ? [raw] : []);
+  }
+  const skillKeyOf = (name) => skillKey(skillForms(name)[0] || name);
+  const WORD_NAMES = new Set(["REST", "Excel", "Spark", "Swift", "Rust", "Ruby", "Spring", "Flask", "Go", "Golang", "Express", "Ember", "Julia", "Dart", "Elixir", "Scala",
+    "Word", "Access", "Chef", "Puppet", "Unity", "React", "Sketch", "Vue", "Basic", "Hive", "Pig", "Ant", "Salt", "Crystal", "Nim", "Lean", "Java", "Python", "SAS", "Scratch", "Processing", "Flutter", "Scheme"]);
+  const WORD_KEYS = new Set([...WORD_NAMES].map((w) => w.toLowerCase()));
+  const _formRe = new Map();
+  const isShort = (form) => (/^[A-Za-z]{1,2}$/.test(form)) || WORD_NAMES.has(form);
+  function formRe(form) {
+    if (_formRe.has(form)) return _formRe.get(form);
+    // A name that is also an English word ("excel at", "the rest of", "spring 2024", "swift", "spark") counts only capitalized.
+    const short = isShort(form);
+    const body = escRe(form).replace(/\s+/g, "\\s+");
+    // A short name: its own capitals only (an all-lower form like "k8s" or "psql" is matched as written), and never joined to
+    // "&", "-", "'" or a dotted letter. A longer one: any case, never inside a longer word or a dotted name ("Node" in "Node.js").
+    const re = short
+      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`, "gi")
+      : new RegExp(`(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#])(?!\\.[A-Za-z0-9])`, "gi");
+    _formRe.set(form, re);
+    return re;
+  }
+  // 2026-11-13 (review of PR #788): fail closed. The whole-token test above still proved R from "Toys R Us cashier", C from
+  // "Vitamin C study assistant", Go from "Go Bears!", ML from "5 ML doses", TS from "TS/SCI clearance", Excel from "Excel
+  // Academy tutor" and SQL from "I have never used SQL". Two rules on top of it:
+  //   - no skill is named inside a negation ("never used SQL", "no experience with Python, R or SQL", "not familiar with Go");
+  //   - a short or ordinary-word name (one or two letters, or WORD_NAMES) is named only in a skills context: the text is the
+  //     name alone; or it sits in a list (commas, slashes, bullets, "and") next to a known skill; or it follows a cue ("in",
+  //     "using", "with", "skills:", "languages:") and is not the first word of a longer name ("with Excel Academy"); or a
+  //     word of the trade follows it ("ML models", "R scripts", "Excel (pivot tables)").
+  const KNOWN_SKILLS = new Set([...ALIAS_GROUP.keys(), ...[...WORD_NAMES].map(skillKey), ...("python java ruby php perl kotlin scala haskell matlab sas stata spss tableau "
+    + "pytorch tensorflow keras pandas numpy scipy shiny tidyverse ggplot2 docker terraform ansible jenkins linux bash html css sass django rails laravel angular svelte redux "
+    + "graphql grpc kafka airflow hadoop snowflake redshift bigquery dbt looker powerbi figma photoshop illustrator jira salesforce sap oracle azure redis elasticsearch nosql "
+    + "objective-c assembly fortran cobol lua jquery node selenium cypress jest junit pytest phoenix flutter rails postgres akka apache pyspark rstudio racket swiftui gin gorm scratch processing scheme unreal blender autocad solidworks verilog vhdl latex vba ai").split(" ")]);
+  // Round 3 (2026-11-13). Two rules, the first for EVERY skill name, the second for names that are also a common word, a
+  // place, an animal, a company or a unit.
+  //  (a) The clause the name is in must be the person's own use of it. It is refused when the clause denies it near the name
+  //      ("not", "never", "none", "no ... experience", "have yet to"), only wishes for or studies it ("would love", "learning",
+  //      "Intro to", "a course in", "basic knowledge of"), or someone else does the using ("she", "my teammate", "the team
+  //      used", "hired", "recruited", "a vendor who used").
+  //  (b) Such a name counts only: alone; in a list of known skills; after a cue or a skills label; before a word of the
+  //      trade; or in a clause that is plainly technical. Never as the first word of another name ("Spark New Zealand"),
+  //      before "of", "at" or an apposition ("Ruby, my manager").
+  const NOT_NEG = /\bnot (?:only|just)\b|\bno stranger to\b|\bnever (?:stopped|quit|gave up)\b|\bcan(?:['’]t|not) imagine [\w ]*?without\b/gi;
+  const NEG = /(?:\b(?:not|never|none|no|without|neither|nor|zero|unfamiliar|lack\w*|limited|rather than|instead of)\b|n['’]t\b|\byet to\b)/i;
+  const INTENT = /\b(?:wish|would love|want(?:ed|s)? to|hop(?:e|ing) to|plan(?:ning|s)? to|goal|learning|to learn|become proficient|interested in|curious about|pick(?:ing)? up|taking a course|currently taking|enrolled|bootcamp|coursework|intro(?:duction)? to|(?:book|talk|class|course|lecture|article|video|workshop|webinar)s? (?:about|on|in|that mentioned)|read about|heard (?:of|about)|the idea of|exposure to|basic knowledge of|someday)\b/i;
+  const NOT_ME = /\b(?:she|he|they)\s+(?:is|was|were|are|built|wrote|used|uses|knows?)\b|\b(?:my|our) (?:teammate|manager|boss|colleagues?|coworkers?|client|friend)s?\b|\bthe team (?:used|uses|chose|wrote)\b|\bvendor\b|\b(?:hired|recruit\w+|interviewed|sold|selling|job ads?|job postings?)\b/i;
+  const words = (x, n, fromEnd) => { const w = x.split(/\s+/).filter(Boolean); return (fromEnd ? w.slice(-n) : w.slice(0, n)).join(" "); };
+  function notOwnUse(before, after) {
+    const b = before, a = after;
+    return NEG.test(words(b, 6, true)) || NEG.test(words(a, 6, false)) || INTENT.test(`${b} | ${a}`) || NOT_ME.test(`${b} | ${a}`);
+  }
+  // A cue right before the name: a preposition or verb of use, a skills label, years of it, a level word.
+  const CUE = /(?:\b(?:in|using|with|via|use[sd]?|wrote|writes?|writing|know|knows|learned|taught myself|self-taught in|picked up|applied|mostly|mainly|primarily|also|(?:skills?|languages?|tools?|stack|tech|technologies|frameworks?|software|proficien(?:t|cy)|analysis|programming|experience)\s*(?::|-|—|–|in|with|is|was|includes?)?|\d+\+?\s*(?:years?|yrs?|months?)(?:\s+of)?(?:\s+experience)?(?:\s+(?:of|in|with|using))?|advanced|expert(?:-level)?|strong|daily|intermediate|solid|heavy|fluent|embedded|modern|low-level|ANSI|Apache|Visual|MS|Microsoft|(?:migrat|port|rewr[io]t|convert|mov|switch)\w*\b[^.;!?\n]{0,30}\bto|but also|from [\w+#.]+ to)\s+)$/i;
+  // A word of the trade right after it (lower case as written, or a product's own second word), or a parenthesis that is not a name.
+  const TRADE = /^\s+(?:models?|modell?ing|pipelines?|algorithms?|engineer(?:ing|s)?|code|scripts?|scripting|programming|programmers?|programs?|developers?|development|apps?|services?|APIs?|apis?|macros?|formulas?|spreadsheets?|dashboards?|queries|components?|front[- ]?end|back[- ]?end|librar(?:y|ies)|frameworks?|microservices?|hooks?|notebooks?|users?|power user|fundamentals|CLI|iOS|jobs|chatbots?|agents|databases?|server|game|cookbooks?|research|Boot|Native|Streaming|Shiny|Markdown|on Rails|for (?:numerical|scientific|statistical|data|regression)|is (?:my|what|the|our))\b|^\s*\((?!\s*(?:19|20)\d\d\b)(?![A-Z][a-z]+(?: [A-Z][a-z]+){0,2}\))|^\s*:\s*\S|^\s*\)/;
+  // A clause that is plainly about software or a claimed skill.
+  const TECHY = /\b(?:APIs?|SDK|CLI|backend|back-end|front[- ]?end|full-stack|microservices?|firmware|iOS|Android|apps?|databases?|quer(?:y|ies)|pipelines?|ETL|jobs|events|latency|deploy\w*|cluster|compiler|generics|concurrency|middleware|scripting|scripts?|programming|programmer|developer|software|codebase|code|coded|monorepo|library|framework|server|client|game|shader|dashboards?|models?|regression|simulation|ARM|REST|auth|production|rewrite|rewrote|refactor\w*|composition|streaming|configuration|cross-platform|macros|VLOOKUP|pivot|spreadsheets?|forecasting|languages?|proficient|experienced|expert|hands-on|comfortable|systems|optimi[sz]ation|generative)\b/;
+  const OK_NEXT = (w) => KNOWN_SKILLS.has(skillKey(w)) || /[a-z][A-Z]|^[A-Z0-9#+]{2,}$/.test(w) || /^(?:Boot|Native|Streaming|Shiny|Markdown|Rails)$/.test(w);
+  const LIST_SEP = /\s*(?:[,/;|•·\n—–]|\s[&+-]\s|\s(?:and|or)\s)\s*/;
+  const knownAt = (item, end) => {
+    const ws = String(item).replace(/\([^)]*\)/g, " ").replace(/^[\s([]+|[\s.)\]]+$/g, "").split(/\s+/).filter(Boolean);
+    if (!ws.length) return false;
+    const pick = (n) => skillKey((end ? ws.slice(-n) : ws.slice(0, n)).join(" ").replace(/^[^:]*:\s*/, ""));
+    return KNOWN_SKILLS.has(pick(1)) || (ws.length > 1 && KNOWN_SKILLS.has(pick(2)));
+  };
+  // `asWritten` false: the name in another case ("react", "go", "r"). That counts only as an item of a list of known skills.
+  function inSkillsContext(t, at, end, asWritten, name) {
+    const before = t.slice(0, at), after = t.slice(end), cued = CUE.test(before);
+    if (!before.trim() && /^[\s.]*$/.test(after)) return true; // the name alone
+    // Not the skill: "Go to market", "R and D", "Word of mouth", "Excel at", "R. Smith", "Ruby, my manager", "Spark New Zealand".
+    if ((/^[- ]to\b|^\s+at\b/.test(after) && !cued) || /^[- ]to[- ]market\b|^\s+(?:and|&|n)\s+D\b|^\s+of\b|^\.\s+[A-Z][a-z]|^,\s+(?:the|my|our)\s+[\w ]{1,25}(?:,|$)/.test(after)) return false;
+    const nextWord = /^\s+([A-Z][\w+#.-]*)/.exec(after);
+    if (nextWord && !OK_NEXT(nextWord[1].replace(/[.,]$/, ""))) return false;
+    if (nextWord && asWritten) return true; // a product's own second word, or another skill ("React Native", "Spark SQL", "Elixir GenServers")
+    // The list this name is an item of: the item before ends in a known skill, or the item after starts with one; and the
+    // name is the whole of its own item, or follows a cue ("built with react and typescript"; never "I go, python club").
+    const prev = before.split(LIST_SEP), next = after.split(LIST_SEP), own = prev[prev.length - 1];
+    const alone = (x) => /^[\s([:]*$/.test(x == null ? "" : x.replace(/^.*[:(]\s*/, ""));
+    const others = [...KNOWN_SKILLS].filter((k) => k !== skillKey(name) && k.length > 1 && new RegExp(`(?<![A-Za-z0-9+#])${escRe(k)}(?![A-Za-z0-9+#])`, "i").test(t));
+    const plainOther = others.some((k) => !isShort(k) && !WORD_KEYS.has(k)), listOnly = !t.replace(/\([^)]*\)/g, "").split(LIST_SEP).some((x) => x.trim().split(/\s+/).length > 2);
+    const listCue = CUE.test(own) || prev.slice(0, -1).some((it) => CUE.test(it.replace(/\S+\s*$/, "")));
+    const neighbour = (item, e) => knownAt(item, e) && (plainOther || listOnly || others.length >= 2 || listCue || TECHY.test(t));
+    if (prev.length > 1 && alone(own) && neighbour(prev[prev.length - 2], true)) return true;
+    if (next.length > 1 && /^[\s.)\]]*$/.test(next[0].replace(/\([^)]*\)/g, "")) && (alone(own) || CUE.test(own)) && neighbour(next[1], false)) return true;
+    if (!asWritten) return false;
+    if (cued && !/^\s+(?:19|20)\d\d\b/.test(after)) return true;
+    if (TRADE.test(after) && !/^\s*\)/.test(after)) return true;
+    // A plainly technical clause, or one that names other skills beside it.
+    return TECHY.test(`${before} | ${after}`) || plainOther || others.length >= 2;
+  }
+  function textNamesSkill(text, skillName) {
+    // "Not only Python but also Go", "No stranger to Go", "never stopped using R" affirm the skill: read as "using".
+    const t = String(text == null ? "" : text).replace(NOT_NEG, " using ");
+    if (!t) return false;
+    for (const f of skillForms(skillName)) {
+      const re = formRe(f); re.lastIndex = 0;
+      for (const m of t.matchAll(re)) {
+        // The clause the name is in: up to the sentence marks around it.
+        const cs = Math.max(...[...t.slice(0, m.index).matchAll(/(?<!\b[A-Z])\.(?=\s)|[;!?](?=\s)|\n/g)].map((x) => x.index + 1), 0), endRe = /(?<!\b[A-Z])\.(?=\s|$)|[;!?](?=\s|$)|\n/g;
+        endRe.lastIndex = m.index + m[0].length;
+        const ce0 = endRe.exec(t), ce = ce0 ? ce0.index : t.length, before = t.slice(cs, m.index), after = t.slice(m.index + m[0].length, ce);
+        if (notOwnUse(before, after)) continue;
+        if (!isShort(f) || inSkillsContext(t.slice(cs, ce), m.index - cs, m.index - cs + m[0].length, m[0] === f, f)) return true;
+      }
+    }
+    return false;
+  }
   function skillEvidence(profile, skillName) {
-    const name = String(skillName || "").toLowerCase();
-    const skill = (profile.facts || []).find((f) => f.kind === "skill" && (f.name || "").toLowerCase() === name);
-    const supporting = (profile.facts || []).filter((f) => !f.needs_confirmation && f.kind !== "skill" && ((f.skills || []).some((s) => String(s).toLowerCase() === name) || String(f.text || "").toLowerCase().includes(name)));
+    const name = skillKeyOf(skillName);
+    const skill = (profile.facts || []).find((f) => f.kind === "skill" && skillKeyOf(f.name || "") === name);
+    const supporting = (profile.facts || []).filter((f) => !f.needs_confirmation && f.kind !== "skill" && ((f.skills || []).some((s) => skillKeyOf(s) === name) || textNamesSkill(f.text, skillName)));
     const evidenceIds = new Set([].concat((skill && skill.evidence) || [], supporting.map((f) => f.id)));
     return { skill: skill || null, proven: evidenceIds.size > 0 && (skill ? !skill.unproven || supporting.length > 0 : supporting.length > 0), evidenceFactIds: [...evidenceIds], supportingFactIds: supporting.map((f) => f.id) };
   }
+
+  // D-078 (owner decision 2026-11-13: confirm before compare). A skill read from experience text (textNamesSkill) is an
+  // inference, and rule-based reading is wrong often enough that the person confirms it before it prints. A skill counts as
+  // the person's own statement when a confirmed skill fact names it (a Skills section they confirmed, "my skills are ...",
+  // or an inferred skill they said yes to, which is then a confirmed skill fact like any other) or a confirmed fact lists it
+  // in its own skills list. Anything else on a resume's Skills line was inferred and waits for their yes.
+  const usableFact = (f) => f && !f.needs_confirmation && f.status !== "draft" && (f.status === undefined || f.status === "confirmed") && !quarantinedFact(f);
+  function statedSkill(profile, skillName) {
+    const key = skillKeyOf(skillName);
+    if (!key) return false;
+    return (profile && profile.facts || []).some((f) => usableFact(f) && (
+      (f.skills || []).some((s) => skillKeyOf(s) === key)
+      || (f.kind === "skill" && ([f.name, f.title].some((n) => n && skillKeyOf(String(n).replace(/^Skill:\s*/i, "")) === key) || namedInSkillFact(f.text, skillName)))));
+  }
+  // A skill fact is the person's own statement of their skills ("my skills are Excel and R"), so a name in it needs no skills
+  // context: it counts as a whole token, unless the clause denies it or wishes for it.
+  function namedInSkillFact(text, skillName) {
+    const t = String(text == null ? "" : text);
+    for (const form of skillForms(skillName)) {
+      const re = formRe(form); re.lastIndex = 0;
+      for (const m of t.matchAll(re)) if (!notOwnUse(t.slice(0, m.index), t.slice(m.index + m[0].length))) return true;
+    }
+    return false;
+  }
+  // A skill already put to the person (a draft skill fact read from their experience): asked once, never again.
+  const INFERRED_SOURCE = "inferred-from-experience";
+  function inferredSkillAsked(profile, skillName) {
+    const key = skillKeyOf(skillName);
+    return (profile && profile.facts || []).some((f) => f && f.kind === "skill" && f.source === INFERRED_SOURCE && skillKeyOf(f.name || f.title || "") === key);
+  }
+  // The confirmed facts whose own words name the skill (the evidence the question cites); none means the stricter reader
+  // does not support the inference at all, and it is withheld without being asked.
+  function inferredSkillEvidence(profile, skillName) {
+    return (profile && profile.facts || []).filter((f) => usableFact(f) && f.kind !== "skill" && textNamesSkill([f.title, f.text, ...(f.bullets || [])].filter(Boolean).join(". "), skillName)).map((f) => f.id);
+  }
+  // The draft skill fact that asks: shown to the person in the words of the question, confirmed only by their yes
+  // (confirm_profile_fact, the same mechanism as every other draft fact).
+  function inferredSkillDraft(skillName, evidence) {
+    const name = String(skillName).trim();
+    return { kind: "skill", name, title: name, text: `${name}, read from your experience`, skills: [name], evidence: (evidence || []).slice(), source: INFERRED_SOURCE, needs_confirmation: true, status: "draft" };
+  }
+  const SKILL_QUESTION = (names) => `I read these skills from your experience: ${names.join(", ")}: keep them? They are not on your resume until you say yes.`;
 
   // ---- fact-mining interview (Doc 2 §1) ----
   const METRIC_RE = /\b\d+(\.\d+)?\s*(%|users?|customers?|teams?|members?|people|hours?|minutes?|pages?|companies|participants|requests|ms\b|x\b)/i;
@@ -21970,6 +22139,33 @@ const CareerProfile = (() => {
   const DEGREE_ANY = /\b(?:bachelor|master|associate|doctor|degree|diploma|ph\.?\s?d|mba|bba|b\.?sc|m\.?sc)\b|\b[bm]\.\s?[as]\./i;
   const DEGREE_LINE = /^(?:(?:bachelor|master|associate|doctor|b\.?sc|m\.?sc|ph\.?\s?d|mba|bba)\b|(?:[bm]\.?\s?[as]\.?|[bm]\.?\s?b\.?\s?a\.?)(?=\s|,|$))/i;
   function parseResumeText(text) { return parseResumeSections(text).drafts; }
+  // D-063 follow-up (owner's benchmark persona; real pastes look the same): a resume's education line often sits in the header
+  // block under the name, with no "Education" heading ("Lakeshore University, BS Computer Science and Finance, Expected June
+  // 2029. GPA 3.9"). It was dropped with the contact lines, so the school, degree and graduation date were never facts. A
+  // header line naming a school AND a degree or a graduation date is read as an education DRAFT in the person's own words (its
+  // school, degree and date kept as fields), and a GPA on it as a separate GPA draft, both awaiting the person's yes like every
+  // other resume fact (D-007). Lines after the first heading are unchanged.
+  const HEAD_SCHOOL = /\b(?:university|college|institute of technology|polytechnic|academy|school of [a-z]+|[a-z]+ school)\b/i;
+  const HEAD_DEGREE = /\b(?:[Bb]achelor|[Mm]aster|[Aa]ssociate|[Dd]octor|[Dd]egree|[Dd]iploma|[Pp]h\.?\s?[Dd]|MBA|BBA|B\.Sc|M\.Sc|B\.Eng|M\.Eng)\b|\b[BbMm]\.\s?[AaSs]\.|\b(?:BS|BA|BSc|BSE|BBA|MS|MA|MSc|MEng|BEng|AB|SB)\b/;
+  const HEAD_MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter)";
+  const HEAD_DATE = new RegExp(String.raw`\b(?:(expected|anticipated|graduating|graduation|grad\.?|class of)\s*:?\s*)?((?:${HEAD_MONTH}\.?\s+)?(?:19|20)\d{2})\b`, "i");
+  const HEAD_GPA = /[,;.|]?\s*\(?\b(?:cumulative\s+|overall\s+)?gpa\s*:?\s*([0-4]\.\d{1,2})(?:\s*\/\s*4(?:\.0+)?)?\)?|[,;.|]?\s*\b([0-4]\.\d{1,2})(?:\s*\/\s*4(?:\.0+)?)?\s+gpa\b/i;
+  function headerEducation(line) {
+    const raw = String(line || "").trim();
+    if (!raw || raw.length > 220 || /@|https?:|www\.|\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/.test(raw) || !HEAD_SCHOOL.test(raw)) return null;
+    const date = raw.match(HEAD_DATE);
+    if (!HEAD_DEGREE.test(raw) && !(date && date[1])) return null;
+    const g = raw.match(HEAD_GPA);
+    const title = (g ? raw.replace(g[0], "") : raw).replace(/\s{2,}/g, " ").replace(/[\s,;|.]+$/, "").trim();
+    const parts = title.split(/\s*[,|–—]\s*|\s+-\s+/).map((x) => x.trim()).filter(Boolean);
+    const school = parts.find((x) => HEAD_SCHOOL.test(x)) || null;
+    const degree = parts.find((x) => x !== school && HEAD_DEGREE.test(x)) || null;
+    const d = title.match(HEAD_DATE);
+    const out = [{ kind: "education", title, text: title, bullets: [], school, degree, end: d ? d[2] : null, expected: !!(d && d[1] && /expect|anticipat|graduating/i.test(d[1])), source: "resume-ingest", needs_confirmation: true, status: "draft" }];
+    const gpa = g ? (g[1] || g[2]) : null;
+    if (gpa) out.push({ kind: "other", section: "gpa", name: "GPA", title: `GPA ${gpa}`, text: `GPA: ${gpa}`, gpa, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+    return out;
+  }
   function parseResumeSections(text) {
     // CHAT PASTE SHAPE (text-path measurement 2026-10-24): a resume
     // pasted into a chat is often ONE paragraph with its section
@@ -22018,7 +22214,7 @@ const CareerProfile = (() => {
       }
     }
     const drafts = [], unread = [];
-    let section = null, current = null, lastWasMore = false, leadDate = null;
+    let section = null, current = null, lastWasMore = false, leadDate = null, seenHeading = false;
     const flush = () => {
       if (current) { drafts.push(current); current = null; }
       if (leadDate) { drafts.push({ kind: section || "experience", title: leadDate, text: leadDate, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" }); leadDate = null; }
@@ -22036,6 +22232,7 @@ const CareerProfile = (() => {
       if (aiDirected(line)) { if (!unread.includes(AI_DIRECTED_LABEL)) unread.push(AI_DIRECTED_LABEL); continue; }
       const head = sectionOf(line);
       if (head) {
+        seenHeading = true;
         flush();
         lastWasMore = false;
         // D-052 (owner, PR #742): an "Interests" or "Hobbies" heading holds the person's interests. Each item is a draft fact
@@ -22060,7 +22257,12 @@ const CareerProfile = (() => {
         }
         continue;
       }
-      if (!section) continue; // header/contact block (or a section that holds no entries) is not a fact
+      if (!section) {
+        // header/contact block (or a section that holds no entries) is not a fact, except an education line in the header block.
+        const edu = !seenHeading ? headerEducation(line) : null;
+        if (edu) drafts.push(...edu);
+        continue;
+      }
       if (section === "interest") {
         for (const name of line.replace(/^[-•*]\s*/, "").split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
           drafts.push({ kind: "other", section: "interests", name, title: name, text: `Interest: ${name}`, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
@@ -22372,7 +22574,7 @@ const CareerProfile = (() => {
     return receipt;
   }
 
-  return { KINDS, createProfile, profileFromData, addFact, updateFact, getFact, listFacts, confirmFact, confirmedFacts, quarantinedFact, QUARANTINE_VERSION, unprovenSkills, skillEvidence, factMiningQuestions, isThin, parseCsv, parseLinkedInConnections, parseLinkedInProfile, ingestLinkedIn, parseResumeText, parseResumeSections, ingestResume, supersedeResume, confirmationReply, fieldCorrectionOf, classifyResumeIngest, SUPPORTED_RESUME_FORMATS, refreshSkillFlags, RETENTION_DECLARATION, retentionDeclaration, previewProfileDeletion, deleteProfileData };
+  return { KINDS, createProfile, profileFromData, addFact, updateFact, getFact, listFacts, confirmFact, confirmedFacts, quarantinedFact, QUARANTINE_VERSION, unprovenSkills, skillEvidence, textNamesSkill, skillForms, statedSkill, inferredSkillAsked, inferredSkillEvidence, inferredSkillDraft, SKILL_QUESTION, INFERRED_SOURCE, factMiningQuestions, isThin, parseCsv, parseLinkedInConnections, parseLinkedInProfile, ingestLinkedIn, parseResumeText, parseResumeSections, ingestResume, supersedeResume, confirmationReply, fieldCorrectionOf, classifyResumeIngest, SUPPORTED_RESUME_FORMATS, refreshSkillFlags, RETENTION_DECLARATION, retentionDeclaration, previewProfileDeletion, deleteProfileData };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerProfile;
 
@@ -23133,7 +23335,17 @@ const CareerTailor = (() => {
     const famVocabScope = new Set((FAMILY_SKILLS[jd.family] || []).map((x) => String(x).toLowerCase()));
     const rawLcScope = String(jd.rawText || "").toLowerCase();
     const mentionedInJd = (name) => { const n = String(name).toLowerCase(); let i = rawLcScope.indexOf(n); while (i >= 0) { const b = i === 0 ? " " : rawLcScope[i - 1]; const a = rawLcScope[i + n.length] || " "; if (!/[a-z0-9]/.test(b) && !/[a-z0-9]/.test(a)) return true; i = rawLcScope.indexOf(n, i + 1); } return false; };
-    const skillsProven = skillsProvenAll.filter((s) => wantedLcScope.has(s.name.toLowerCase()) || famVocabScope.has(s.name.toLowerCase()) || mentionedInJd(s.name));
+    const skillsScoped = skillsProvenAll.filter((s) => wantedLcScope.has(s.name.toLowerCase()) || famVocabScope.has(s.name.toLowerCase()) || mentionedInJd(s.name));
+    // D-078 (owner decision 2026-11-13: confirm before compare): a skill read from experience text, which no confirmed skill
+    // fact states and no confirmed fact lists (122 statedSkill), does not print until the person says yes to it. This is the
+    // one builder every resume path uses (the chat tool, the router's tailor, packets, batch apply); each withheld name is
+    // returned with the facts whose words named it, so a chat path can ask about it once.
+    const withheldSkills = [];
+    const skillsProven = skillsScoped.filter((s) => {
+      if (Profile.statedSkill(profile, s.name)) return true;
+      withheldSkills.push({ name: s.name, factIds: Profile.inferredSkillEvidence(profile, s.name) });
+      return false;
+    });
     const skillsLine = skillsProven.length ? { heading: "Skills", lines: [] } : null;
     if (skillsLine) {
       const ids = [...new Set(skillsProven.map((s) => s.factId))];
@@ -23214,7 +23426,7 @@ const CareerTailor = (() => {
     }
     for (let i = sections.length - 1; i >= 0; i--) if (!sections[i].lines.length) sections.splice(i, 1);
     const lines = sections.flatMap((s) => s.lines.map((l) => ({ ...l, section: s.heading })));
-    return { family, familyLabel: fam.label, conventions: fam.conventions, pageLimit: fam.pageLimit, header: headerOf(profile), sections, lines, deduped, selectedFactIds: selected.map((x) => x.fact.id) };
+    return { family, familyLabel: fam.label, conventions: fam.conventions, pageLimit: fam.pageLimit, header: headerOf(profile), sections, lines, deduped, selectedFactIds: selected.map((x) => x.fact.id), withheldSkills };
   }
 
   // ---- TRUTH AUDIT — hard gate (APPE-002) ----
@@ -28974,9 +29186,12 @@ const CareerNegotiation = (() => {
   // Nothing is sent: the draft is returned for the person to read, change and send themselves.
   function factScript(offer, opts) {
     opts = opts || {};
-    const usd = (n) => "$" + Math.round(n).toLocaleString("en-US");
+    // D-069: each figure in its own currency when the caller passes how to write it ("AUD 87,600"); US dollars otherwise.
+    const fmt = typeof opts.money === "function" ? opts.money : null;
+    const usd = (n, field) => fmt ? fmt(n, field) : "$" + Math.round(n).toLocaleString("en-US");
     const o = offer || {};
-    const role = o.role || "role";
+    // 2026-11-13: a title that already ends in "role" is not doubled, and an offer with no title is not "the role role".
+    const role = String(o.role || "role").replace(/\s+role$/i, "");
     const competing = (opts.competing || []).filter((c) => c && c.said && Number.isFinite(c.base));
     const best = competing.slice().sort((a, b) => b.base - a.base)[0] || null;
     const bench = opts.benchmark && Number.isFinite(opts.benchmark.median) ? opts.benchmark : null;
@@ -28993,15 +29208,15 @@ const CareerNegotiation = (() => {
       if (best) because.push(`I have another offer${best.company ? ` from ${best.company}` : ""} with a base of ${usd(best.base)}.`);
       ask = "Is there flexibility on the base or the signing bonus?"; askSay = "Ask whether the base or the signing bonus can move.";
     }
-    const fallback = o.signing != null ? `If the base is set, a higher signing bonus than ${usd(o.signing)} would also help.` : "If the base is set, a signing bonus would also help.";
+    const fallback = o.signing != null ? `If the base is set, a higher signing bonus than ${usd(o.signing, "signing")} would also help.` : "If the base is set, a signing bonus would also help.";
     const deadline = opts.deadline && opts.deadline.text ? String(opts.deadline.text) : null;
-    const stated = [base != null ? `a base of ${usd(base)}` : null, o.signing != null ? `a ${usd(o.signing)} signing bonus` : null].filter(Boolean).join(" and ");
+    const stated = [base != null ? `a base of ${usd(base)}` : null, o.signing != null ? `a ${usd(o.signing, "signing")} signing bonus` : null].filter(Boolean).join(" and ");
     const email = [
-      `Subject: ${role[0].toUpperCase() + role.slice(1)} offer${o.company ? `, ${o.company}` : ""}`,
+      `Subject: ${o.role ? role[0].toUpperCase() + role.slice(1) : "Your"} offer${o.company ? `, ${o.company}` : ""}`,
       "",
       "Hi,",
       "",
-      `Thank you for the offer for the ${role} role${stated ? `, with ${stated}` : ""}. Before I decide, I'd like to talk about the pay.`,
+      `Thank you for the offer${o.role ? ` for the ${role} role` : ""}${stated ? `, with ${stated}` : ""}. Before I decide, I'd like to talk about the pay.`,
       ...because,
       `${ask} ${fallback}`,
       deadline ? `I'll get back to you by ${deadline}.` : null,
@@ -37465,6 +37680,39 @@ const CareerRouter = (() => {
   function sameEmployer(a, b) { const x = employerKey(a), y = employerKey(b); return !!x && x === y; }
   // D-054 (R01): the scope an empty search names: the role as asked (or "internships"), the place, and "remote only". Null when
   // the ask named no role a search can be about and no place.
+  // MIRROR-1000 gaps (2026-11-11): a typed word one slip from the word meant ("remoet", "hybrdi", "potsed", "dyas") is read
+  // as that word, for the few words that decide a search's limits. Optimal string alignment distance <= 1 on words of 4+ letters.
+  function oneSlip(a, b, min = 4) {
+    if (a === b) return true;
+    if (a.length < min || b.length < min || Math.abs(a.length - b.length) > 1) return false;
+    const d = [];
+    for (let i = 0; i <= a.length; i++) { d[i] = [i]; for (let j = 1; j <= b.length; j++) d[i][j] = i ? 0 : j; }
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+    return d[a.length][b.length] <= 1;
+  }
+  // The limits a search ask stated, said back in plain words, so "no roles" also shows what was asked for.
+  // Review 2026-11-13 (fail closed): only exact limit words and phrases count, plus the misspellings listed here (the MIRROR-1000
+  // slips "remoet", "hybrdi", "potsed", "lasst", "fuly"). Typo matching invented limits: "decent" read as "recent" (posted
+  // recently), "pasted" as "posted", "officer" or "an office in Austin" as onsite. A limit word inside a field or a name
+  // ("remote sensing", "hybrid cloud", "office manager", "Fresh Market", "a recent graduate") is not a limit.
+  const LIMIT_REMOTE_RE = /\b(?:remote|remoet|reomte|rmote|remtoe)\b(?![- ](?:sensing|control|pilot|monitoring)\b|\.[a-z])/; // "Remote.com" is a company
+  const LIMIT_ONLY_RE = /\b(?:only|fully|fuly|fulyl)\b/;
+  const LIMIT_HYBRID_RE = /\b(?:hybrid|hybrdi|hyrbid|hybird|hbyrid)\b(?![- ](?:cloud|car|cars|vehicle|vehicles|app|apps)\b)/;
+  const LIMIT_ONSITE_RE = /\b(?:on[- ]?site|onsight|in[- ](?:the[- ])?office|in[- ]person|office days?|office[- ]based)\b/;
+  const LIMIT_NO_OFFICE_RE = /\b(?:no|not|zero|without|never)\b[^.,;!?]{0,20}\b(?:on[- ]?site|onsight|in[- ](?:the[- ])?office|in[- ]person|office days?)\b/;
+  const LIMIT_RECENT_RE = /\b(?:posted|potsed|psoted|posed|listed)\s+(?:recently|today|yesterday|this week|within\b|in the (?:last|past|lasst)\b|(?:the )?(?:last|past|lasst)\b)|\b(?:recently|newly|freshly|just) (?:posted|listed)\b|\b(?:from|in|within|over)\s+(?:the\s+)?(?:last|past|lasst)\s+(?:\w+\s+)?(?:weeks?|days?|dyas|dayss|24 hours|month)\b|\b(?:recent|fresh|new) (?:postings|posts|listings|openings)\b/;
+  function statedSearchLimits(text) {
+    const t = lc(text), out = [];
+    if (LIMIT_REMOTE_RE.test(t)) out.push(LIMIT_ONLY_RE.test(t) || /\bremote[- ]only\b/.test(t) ? "remote only" : "remote");
+    const onsite = LIMIT_ONSITE_RE.test(t);
+    if (LIMIT_HYBRID_RE.test(t)) out.push(onsite ? "hybrid, not fully onsite" : "hybrid");
+    else if (onsite) out.push(LIMIT_NO_OFFICE_RE.test(t) ? "no office days" : "onsite");
+    if (LIMIT_RECENT_RE.test(t)) out.push("posted recently");
+    return out;
+  }
   function emptySearchScope(lp, o, namedRole) {
     const internship = (o && o.intent) === "career_internship_discovery";
     const roleText = s(lp && lp.roleText).trim();
@@ -37492,8 +37740,15 @@ const CareerRouter = (() => {
     // route, not re-parsed from nothing and dropped to the fallback.
     try {
       const prevP = (ctx.discovery && ctx.discovery.lastParams) || null;
-      const cleanedAsk = s(text).replace(/^\s*(wait|actually|ok|okay|so|eh|and)[ ,]+/i, "").replace(/^.*?\bi meant\s+/i, "").replace(/^(find|show|get|give|search|list)(\s+me)?\s+/i, "");
-      const roleM = cleanedAsk.match(/([A-Za-z][A-Za-z /&-]{2,34}?)\s+(roles|internships|jobs|openings)\b/);
+      // A first word one slip from the verb ("loook up", "fid me", "shwo me") is the verb, not part of the role.
+      const cleanedAsk = s(text).replace(/^\s*(wait|actually|ok|okay|so|eh|and)[ ,]+/i, "").replace(/^.*?\bi meant\s+/i, "")
+        .replace(/^([a-z]+)(\s+up)?(\s+me)?\s+/i, (m, v) => ["find", "show", "get", "give", "search", "list", "look"].some((x) => oneSlip(v.toLowerCase(), x, 3)) ? "" : m);
+      // S3 r12b (dev H002 on 8e80264f2: "I'm a data analyst in Chicago looking for analyst roles" kept the role text "lyst in
+      // Chicago looking for analyst roles"): the role text starts at a word, never inside one, and starts after the last word of
+      // asking or connecting before the job noun ("in Chicago looking for analyst roles" is "analyst roles").
+      const roleRaw = cleanedAsk.match(/\b([A-Za-z][A-Za-z /&-]{2,34}?)\s+(roles|internships|jobs|openings)\b/);
+      const roleHead = roleRaw ? roleRaw[1].replace(/^.*\b(?:for|looking|seeking|searching|hunting|hoping|trying|want|wants|wanting|need|needs|needing|into|in|as|about|find|get|show)\s+/i, "").trim() : "";
+      const roleM = roleRaw && roleHead.length >= 2 ? [roleRaw[0], roleHead, roleRaw[2]] : roleRaw;
       const whereM = s(text).match(/\bin\s+([A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+){0,2}|NYC|SF|LA)\b/) || s(text).match(/\b(NYC|New York|Chicago|Boston|San Francisco|Los Angeles|Houston|Dallas|London|Illinois|Midwest)\b/);
       ctx.discovery = Object.assign({}, ctx.discovery || {}, { lastParams: {
         families: (fams || []).slice(),
@@ -37541,7 +37796,11 @@ const CareerRouter = (() => {
       // ("No open marine biology internships in Boise on my list right now"), never a headline about roles that "fit best"
       // over an empty list, and one specific next change. An ask with no role and no place keeps "Nothing to show yet".
       const scope = emptySearchScope(lp, o, namedRole);
-      const facts = [scope ? "The postings I have on hand right now hold none, and I won't make any up." : namedRole ? "I won't make any up." : "I don't have open roles on my list right now, and I won't make any up."];
+      // MIRROR-1000 gaps (2026-11-11): the empty result in plain words ("I found no open roles"), and the limits kept.
+      const facts = [scope ? "I checked the postings I have on hand and found no open roles for that (career sites outside them were not checked), and I won't make any up." /* D-061 G4, G5: what was read, and what was not */ : namedRole ? "I won't make any up." : "I have no open roles on my list right now, and I won't make any up."];
+      // Review 2026-11-13: no filter ran on an empty pool, so the limits are named as asked for, never as kept.
+      const asked = statedSearchLimits(text);
+      if (asked.length) facts.push(`You asked for ${asked.join("; ")}; no limit was applied, since there were no postings to apply it to.`);
       if (fams && fams.length) facts.push(`I've kept your ask (${fams.map(familyLabel).join(" + ")}) and will run it as soon as matching roles come in.`);
       const newPerson = !(profile && (profile.facts || []).length);
       const widen = scope && lp.whereText && !lp.remoteOnly ? `Want me to look beyond ${lp.whereText}, remote roles included?` : null;
@@ -38391,7 +38650,16 @@ const CareerRouter = (() => {
   // and the follow-up "make it shorter" had nothing to revise.
   // Campaign-scale asks (counts, lists, many firms) never match this
   // gate and keep the plan-first path.
-  function singleDraftTargetOf(text) {
+  // S3 r12c (dev H015): `said` is the person's own words. The routing copy (detypo) re-spells a company one edit from the route
+  // vocabulary (a company ending "Networks" became "... Network", the CB-0441 class), so the company a draft names is read from what they
+  // wrote whenever it names one there.
+  function saidCompany(text, said) {
+    const own = said ? companyFromText(s(said)) : null;
+    const routed = companyFromText(s(text));
+    if (own && routed && lc(own).split(/\s+/).length === lc(routed).split(/\s+/).length) return own;
+    return routed || null;
+  }
+  function singleDraftTargetOf(text, said) {
     const raw = s(text);
     const t = lc(text);
     if (!/\b(draft|write|compose)\b/.test(t)) return null;
@@ -38401,12 +38669,12 @@ const CareerRouter = (() => {
     if (!m) return null;
     const role = m[1].trim();
     if (!/\b(analyst|banker|associate|recruiter|manager|engineer|consultant|intern|partner|director|alum)\b/i.test(role)) return null;
-    const company = companyFromText(raw) || m[2].replace(/[.?!]+$/, "").trim();
+    const company = saidCompany(raw, said) || m[2].replace(/[.?!]+$/, "").trim();
     if (!company || company.length < 3) return null;
     return { role, company };
   }
-  function handleSingleDraftAsk(text, ctx) {
-    const target = singleDraftTargetOf(text);
+  function handleSingleDraftAsk(text, ctx, said) {
+    const target = singleDraftTargetOf(text, said);
     if (!target) return null;
     const profile = ctx.profile || {};
     const facts = Array.isArray(profile.facts) ? profile.facts : [];
@@ -38448,18 +38716,47 @@ const CareerRouter = (() => {
   // by the 135 handlers downstream) are carved out: when the graph
   // on the turn actually names people at the asked company, this
   // handler stands down and the graph answers.
-  function handlePeopleMatchingStop(text, ctx) {
+  function severalCompanies(raw) {
+    const names = new Set();
+    for (const m of s(raw).matchAll(/(?<![\p{L}])\p{Lu}[\p{L}0-9&.'-]*(?:\s+\p{Lu}[\p{L}0-9&.'-]*)*/gu)) {
+      const before = s(raw).slice(0, m.index);
+      const w = m[0].replace(/[.'-]+$/, "");
+      if (/^(?:I|I'm|I've|I'd|I'll)$/.test(w) || (/^\s*$|[.!?]\s*$/.test(before) && w.split(/\s+/).length === 1) || FACT_CITIES.some((ct) => lc(ct) === lc(w))) continue;
+      names.add(lc(w));
+    }
+    return names.size >= 2;
+  }
+  function hearsayCompany(raw, company) {
+    const esc = s(company).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const at = `(?:\\s+who\\s+(?:works|worked|is)\\s+|\\s+)(?:at|from)\\s+${esc}\\b`;
+    return new RegExp(`\\b(?:my|a|his|her|their|our)\\s+(?:\\w+\\s+)?(?:friend|contact|colleague|coworker|co-worker|cousin|brother|sister|mom|dad|mentor|classmate|roommate|recruiter)s?${at}`, "i").test(s(raw)) ||
+      new RegExp(`\\b(?:someone|somebody|a\\s+guy|a\\s+person|people)${at}\\s+(?:said|says|told|tells|mentioned|thinks|heard)\\b`, "i").test(s(raw));
+  }
+  function handlePeopleMatchingStop(text, ctx, said) {
     const t = lc(text);
     const raw = s(text);
     if (namedRecipientFromAsk(raw)) return null; // a named person is the draft family's ask
     const company = companyFromText(raw, ctx);
+    // (review of PR #871, H015: the draft names a company only when the ask names one company, as the one they want to reach; two or
+    // more names, or one that is where someone else is ("my friend at Google said Bluepeak is hiring"), fall back to the general
+    // alternative)
+    const ownCompany = company && !severalCompanies(said ? s(said) : raw) && !hearsayCompany(said ? s(said) : raw, company) ? saidCompany(raw, said) : null;
     if (company) {
       try {
         const gs = graphStoreOf(ctx);
         if (gs && Array.isArray(gs.people) && gs.people.some((p) => p && lc(p.current_firm || p.company || "") === lc(company))) return null;
       } catch { /* no graph: the stop stands */ }
     }
-    const alt = "What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts.";
+    // S3 r12c (dev H015, s3sub 2789d3090 p1: an introduction ask that named the company got the alternative "draft a coffee-chat
+    // email to a role at a named company", though they had named one): when the ask names the company, the alternative
+    // is the draft route for THAT company, and the command it quotes is one the single-draft route really answers (a role it reads,
+    // the company as they wrote it). Sending stays off, so the draft is one they send themselves.
+    const roleM = /\b(alum(?:nus|na|ni)?|analyst|banker|associate|recruiter|manager|engineer|consultant|intern|partner|director)\b/.exec(t);
+    const draftRole = roleM ? (/^alum/.test(roleM[1]) ? "alum" : roleM[1]) : null;
+    const draftCmd = ownCompany && draftRole ? `draft a coffee-chat email to ${/^[aeiou]/.test(draftRole) ? "an" : "a"} ${draftRole} at ${ownCompany}` : null;
+    const alt = !ownCompany
+      ? "What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts."
+      : `What I can do instead: draft a coffee-chat email to ${draftRole ? `${/^[aeiou]/.test(draftRole) ? "an" : "a"} ${draftRole}` : "someone in the role you name"} at ${ownCompany}, written from your confirmed facts, for you to send yourself${draftCmd ? ` — say "${draftCmd}"` : ""}; or build a shortlist from sources you supply (your LinkedIn export, names you paste, your school's alumni directory), with every name carrying its source.`;
     // The standing draft's recipient: an identity demand about a
     // draft that exists gets the truth about THAT draft.
     if (/\bwho exactly would this go to\b|\bgive me their name and email\b|\bwho is this (going )?to\b/.test(t)) {
@@ -39048,7 +39345,7 @@ const CareerRouter = (() => {
     if (!art && /\bpacket\b/.test(t) && !/\b(resume|cv|cover letter|pdf|docx)\b/.test(t)) {
       const reply = compose({
         headline: "There's no application packet in this chat yet.",
-        facts: ["Pick a role and I'll prepare one for you to review: the job and the resume for it. Nothing is submitted until you approve it."],
+        facts: ["Pick a role and I'll prepare one for you to review. Nothing is submitted until you approve it."],
         nextStep: "Which role should it be for?",
       });
       return { intent: "career_packet_absent", reply, resultStatus: "awaiting_user", sends: 0, documents: [] };
@@ -40387,6 +40684,11 @@ const CareerRouter = (() => {
           headline: "To stop messages: text \"stop\" — I pause, send no alerts and start nothing new until you text \"resume career work\".",
           facts: ["To delete your data: say \"yes, erase it\" and I remove your saved career facts and profile, job watches and alerts, application tracker, and the plans and drafts I act on.", "Nothing is deleted until you send that exact yes."],
           nextStep: "Which would you like?" }) };
+      }
+      // MIRROR-1000 gaps (2026-11-11): "in two lines" / "short version" gets the short form: what goes, and the exact yes.
+      if (/\b(?:keep it (?:short|brief)|short (?:version|answer)|(?:in )?(?:one or two|one|two) (?:lines?|sentences?)|briefly|be brief|tl;?dr)\b/.test(t)) {
+        return { intent: "career_erase_confirm", resultStatus: "awaiting_user", reply: compose({ headline: "An erase removes your saved career facts and profile, job watches and alerts, application tracker, and the drafts and plans I act on.",
+          facts: [], nextStep: "Nothing is deleted until you say “yes, erase it”." }) };
       }
       return { intent: "career_erase_confirm", resultStatus: "awaiting_user", reply: compose({ headline: "Before anything is deleted — here is exactly what an erase removes.", facts: ["It goes: your saved career facts and profile, your job watches and alerts, your application tracker, and the standing plans, drafts and conversation state I act on.", "It does not rewrite the chat transcript or audit records — that text is excluded from your active context instead, the same line the product's own erase draws."], nextStep: "Say “yes, erase it” if that is what you want. Nothing is deleted until that yes — and a yes to anything else does not count." }) };
     }
@@ -41899,6 +42201,13 @@ const CareerRouter = (() => {
   }
 
   // ---------- refusal family: blasts + false claims (SC-035/294/295) -------
+  const BULK_APPLY_RE = /\b(?:apply|submit|send in)\b(?:\s+(?:for me|my applications?|applications?))?(?:\s+(?:to|for|on))?\s+(?:all|every|everything|each|\d{2,})\b/g;
+  const BULK_NEGATED_RE = /\b(?:don'?t|dont|do not|never|not|no|no need to|stop)\s+(?:(?:just|even|actually|ever|yet|really|go|ahead|and)\s+){0,2}$/;
+  function bulkApplyAsked(t) {
+    BULK_APPLY_RE.lastIndex = 0;
+    for (let m = BULK_APPLY_RE.exec(t); m; m = BULK_APPLY_RE.exec(t)) if (!BULK_NEGATED_RE.test(t.slice(0, m.index))) return true;
+    return false;
+  }
   function handleRefusal(text, ctx) {
     const t = lc(text);
     const falseClaim = /\b(say|claim|tell|pretend|imply)\b[^.]*\b(sent me|referred me|told me to reach out|recommended me)\b/.test(t);
@@ -41929,7 +42238,7 @@ const CareerRouter = (() => {
       } catch { claimOnRecord = false; }
     }
     const unverifiedClaim = materialImperative && (claimToken || admission) && (admission || !claimOnRecord);
-    const noReview = /\b(automatically|while i sleep|tonight|right now|don'?t need to see|no review|without (me|my) (seeing|reviewing)|just do it|all of them|don'?t ask)\b/.test(t);
+    const noReview = /\b(automatically|while i sleep|tonight|right now|don'?t need to see|no review|without (me|my) (seeing|reviewing)|just do it|all of them|don'?t ask|(?:don'?t|do not) care)\b/.test(t);
     // HELD-OUT (2026-10-24): "submit applications for me overnight
     // while i sleep, don't ask me each time" named no everything/
     // all-jobs object and no count, so it escaped massObject — but
@@ -41940,7 +42249,13 @@ const CareerRouter = (() => {
     const barePluralMass = /\b(applications|jobs|roles)\b/.test(t) && noReview && !/\?\s*$/.test(t) && !/^(did|have|has|do|does|were|was|are)\b/.test(t);
     const massObject = /\b(everything|every job|all jobs|all of them|every role|all roles)\b/.test(t) || /\b(\d{2,})\s*(jobs|applications|roles)\b/.test(t) || barePluralMass;
     const massCount = Number((t.match(/\b(\d{2,})\s*(jobs|applications|roles)\b/) || [])[1]) || 0;
-    const massApply = /\b(apply|submit|send in)\b/.test(t) && massObject && (noReview || massCount >= 50);
+    // MIRROR-1000 (2026-11-11): the person's own guard ("don't apply to anything", "do not apply on my behalf") is not the ask
+    // to apply: "what backend developer jobs are open in Detroit right now ... Don't apply to anything" was refused as bulk apply.
+    // Review 2026-11-13 (fail closed): that stripping also ate "no wait apply to all 60 jobs" and "i do not care just apply to
+    // every job". An apply-to-all/every/N clause is the ask unless the negation governs its own verb ("don't apply to all",
+    // "do not just submit all 50", "no need to apply to all 60").
+    const applyAsked = /\b(apply|submit|send in)\b/.test(t.replace(/\b(?:don'?t|do not|never|not|no|nothing)\s+(?:\w+\s+){0,3}?(?:apply|submit|send in)\b[^.;:!?]*/g, " ")) || bulkApplyAsked(t);
+    const massApply = applyAsked && massObject && (noReview || massCount >= 50);
     // HELD-OUT (2026-10-24): the insistence shape — "nobody checks
     // anyway, just add one at a bank". The fabrication's object is
     // carried by the conversation (the internship just refused);
@@ -42784,7 +43099,7 @@ const CareerRouter = (() => {
     if (!qs.length && !fam) return null;
     const textOf = (x) => s(x && (x.q || x.question || x.text));
     const norm = (x) => lc(x).replace(/[^a-z0-9]+/g, " ").trim();
-    const served = new Set((Array.isArray(thread.served) ? thread.served : []).map(norm));
+    const served = prepServedSet(thread, norm);
     const dcfQ = /\bdcf\b/.test(t) ? qs.find((x) => /dcf/i.test(textOf(x))) : null;
     const ordered = [...new Set([...(fam ? fam.questions : []), ...qs.filter((x) => x && (x.round === "technical" || /technical/i.test(s(x.round)))).map(textOf), ...qs.map(textOf)].filter(Boolean))];
     // A stated weakness ("I'm weakest on prioritizing") is drilled first, from the unserved questions that name it.
@@ -42802,7 +43117,7 @@ const CareerRouter = (() => {
     } catch { /* the question stands without the record */ }
     const facts = ["Answer it the way you would in the room — out loud, structured, numbers before adjectives.", "I will score the answer against the rubric and drill the weakest part next; that loop is the prep."];
     if (cycled) facts.unshift("You have answered every question I have for this, so this one comes round again.");
-    const reply = compose({ headline: `Here is your question: ${q}`, facts, nextStep: "Give me your answer and I will score it." });
+    const reply = compose({ headline: `Here is your question: ${q}`, facts, nextStep: "What is your answer? I will score it." });
     return { intent: "prep_brief", reply, resultStatus: "running", sends: 0, question: { kind: "bank_question", q } };
   }
   // ======================================================================
@@ -42935,7 +43250,9 @@ const CareerRouter = (() => {
       if (sc && Array.isArray(sc.feedback) && sc.feedback[0]) facts.push(`Fix first: ${s(sc.feedback[0]).split(/(?<=[.!?])\s/)[0]}`);
       facts.push("The rubric reads the answer's shape (its order, numbers and specifics); it cannot tell whether what you said is right for the role.");
       const head = scores ? `Your answer, scored: ${scores.total}/15 on the rubric.` : "Your answer, read against the rubric.";
-      return { intent: "prep_brief", reply: compose({ headline: head, facts, nextStep: "Want the next question, or the same one again with the weak part as the focus?" }), resultStatus: "running", sends: 0, question: lq };
+      // MIRROR WA-1 (2026-11-11): marked as a keyword-rubric read, so the staged release can tell it from a drill key's grade
+      // (career_staged.ts prepRubricRead): the rubric reads shape, not the answer, and it also catches a new ask sent mid-session.
+      return { intent: "prep_brief", reply: compose({ headline: head, facts, nextStep: "Want the next question, or the same one again with the weak part as the focus?" }), resultStatus: "running", sends: 0, question: lq, scored: "rubric" };
     }
     // (3) Serve the next question from the sector's bank.
     if (!sector) return null;
@@ -42945,7 +43262,7 @@ const CareerRouter = (() => {
     const qs = (bank && bank.questions) || [];
     if (!qs.length) return null;
     const norm = (x) => lc(x).replace(/[^a-z0-9]+/g, " ").trim();
-    const served = new Set((Array.isArray(thread.served) ? thread.served : []).map(norm));
+    const served = prepServedSet(thread, norm);
     const inSector = (row) => {
       const ty = s(row && row.source && row.source.type);
       if (ty.startsWith(`interview_bank_${sector}`)) return true;
@@ -43098,7 +43415,9 @@ const CareerRouter = (() => {
     // session is a behavioral question, not a "case".
     const pickedBehavioral = /behavioural|behavioral/.test(lc((row.source && row.source.section) || row.round || "")) || (row.source && row.source.type === "generic_behavioral_bank") || row.round === "behavioral";
     const serveLabel = pickedBehavioral ? "Your behavioral question" : isCase ? "Your case" : `Your ${kindLabel}`;
-    return { intent: "prep_brief", reply: compose({ headline: explainTS ? "The three financial statements, walked through — statements, linkages, and the flow-through." : `${serveLabel}: ${qText}`, facts, nextStep: explainTS ? "Now say it back as your own answer — I will grade it against the drill key (fin-1)." : pickedBehavioral ? "Answer it the way you would in the room — situation, task, action, result — I will score it against the rubric and drill the weakest part next." : isCase ? "Work it out loud: clarify the objective, build the tree, state a hypothesis — I will push on the weakest branch." : "Answer it the way you would in the room, out loud and structured — I will score it against the rubric and drill the weakest part next." }), resultStatus: "running", sends: 0, question: { kind: "bank_question", q: qText, sector, bank_item: row.source || null } };
+    return { intent: "prep_brief", reply: compose({ headline: explainTS ? "The three financial statements, walked through — statements, linkages, and the flow-through." : `${serveLabel}: ${qText}`, facts: explainTS ? facts : [...facts, pickedBehavioral ? "Answer it the way you would in the room — situation, task, action, result — I will score it against the rubric and drill the weakest part next." : isCase ? "Work it out loud: clarify the objective, build the tree, state a hypothesis — I will push on the weakest branch." : "Answer it the way you would in the room, out loud and structured — I will score it against the rubric and drill the weakest part next."],
+      // MIRROR-1000 gaps (2026-11-11): a served question ends by asking for the answer (compose keeps one sentence of nextStep).
+      nextStep: explainTS ? "Now say it back as your own answer — I will grade it against the drill key (fin-1)." : pickedBehavioral ? "What is your answer?" : isCase ? "Where do you start?" : "What is your approach?" }), resultStatus: "running", sends: 0, question: { kind: "bank_question", q: qText, sector, bank_item: row.source || null } };
   }
   // COMPLEXITY WAVE (BUG-173): the night-before shape ("interview
   // tomorrow, I'm so nervous I can't sleep — what do I do") — a
@@ -43106,7 +43425,9 @@ const CareerRouter = (() => {
   // out-loud rep; none of it needs a profile to be honest.
   function handlePrepEve(text, ctx) {
     const t = lc(text);
-    if (!/\binterview\b/.test(t) || !/\b(tomorrow|tonight|nervous|anxious|can'?t sleep|cant sleep|scared|worried|freaking out)\b/.test(t)) return null;
+    // MIRROR-1000 gaps (2026-11-11): nerves alone ("I get nervous and ramble") are not the night before; the tonight plan is for
+    // an interview tomorrow or tonight, or a person who can't sleep over one.
+    if (!/\binterview\b/.test(t) || !/\b(tomorrow|tonight|can'?t sleep|cant sleep|freaking out)\b/.test(t) && !(/\b(nervous|anxious|scared|worried)\b/.test(t) && /\b(today|in the morning|in a few hours)\b/.test(t))) return null;
     // RESEARCH ROUND 2 (2026-10-30): "prep me for my interview at Acme Robotics tomorrow" and "I have an interview at
     // Microsoft Research Asia tomorrow" were answered "Company: not supplied yet — flagged, not invented" (the checklist was
     // never given the firm the person named), with no word that the firm has no file. The firm named (whole name) goes in;
@@ -44901,6 +45222,30 @@ const CareerRouter = (() => {
     if (m) m.path = rec;
     return rec;
   }
+  // S3 r12 (dev H010): the brain can start a mock in its own words; the questions it asked are on the thread (prep.asked, written
+  // by agent-chat career_brain.ts recordPrepAsked). A bank question the brain already asked counts as served, so "next question"
+  // never serves it again: "Tell me about yourself and why you want this role." asked by the brain, then "Here is your question: Tell
+  // me about yourself and why this role." from the bank. Close wording counts (the content words, nearly all shared); a different
+  // question with the same frame ("Tell me about a time you failed" / "... you led") does not. prepSameQuestion(bank question, asked).
+  const PREP_STOP = new Set(["the", "and", "you", "your", "for", "with", "are", "was", "that", "this", "what", "how", "would", "did", "can", "will", "have", "has"]);
+  function prepWords(x) { return new Set(String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter((w) => w.length >= 3 && !PREP_STOP.has(w))); }
+  function prepSameQuestion(a, b) {
+    const x = prepWords(a), y = prepWords(b);
+    if (!x.size || !y.size) return false;
+    let both = 0;
+    for (const w of x) if (y.has(w)) both += 1;
+    // (the bank question's words nearly all asked, in a question not much longer: "... why this role" / "... why you want this
+    // data analyst role")
+    // S3 r12b (dev H010): every content word of a bank question of four or more is asked, whatever context the brain wrote
+    // around it ("... why this data analyst role at Northwind Ledger."): the same question. One word apart in a frame ("a time
+    // you failed" / "a time you led") is not.
+    return both / (x.size + y.size - both) >= 0.7 || (both / x.size >= 0.85 && both / y.size >= 0.6) || (x.size >= 4 && both === x.size);
+  }
+  function prepServedSet(thread, norm) {
+    const base = new Set((Array.isArray(thread && thread.served) ? thread.served : []).map(norm));
+    const asked = (Array.isArray(thread && thread.asked) ? thread.asked : []).filter((x) => typeof x === "string" && x.trim());
+    return { has: (k) => base.has(k) || asked.some((a) => prepSameQuestion(k, a)) };
+  }
   function prepThreadOf(ctx) {
     const c = ctx || {};
     if (c.prepThread && typeof c.prepThread === "object") return c.prepThread;
@@ -45226,7 +45571,8 @@ const CareerRouter = (() => {
         try { sum0 = Track && Track.statusSummary ? Track.statusSummary(store) : null; } catch { sum0 = null; }
         return emitTrack(ctx, { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: 0 } }, sum0 ? { summary: sum0 } : { summary: { total: 0 } });
       }
-      const reply = compose({ headline: "Your application tracker is empty — no applications on record yet.", facts: ["Once you apply through me, each one shows up here with where it stands. If you applied somewhere on your own, tell me and I'll add it."], nextStep: "Say \"find jobs\" and I'll start a search." }); // PRODUCT AUDIT 2026-10-28: plain words (no question, so a bare \"yes\" never reads as an answer to one)
+      // D-061 G2 (answer first): the answer, then what it means; the same words in that order.
+      const reply = compose({ headline: "No applications on record yet, per your application tracker; ones you sent on your own are not checked here.", facts: ["Once you apply through me, each one shows up here with where it stands. If you applied somewhere on your own, tell me and I'll add it."], nextStep: "Say \"find jobs\" and I'll start a search." }); // D-061 G5: what the tracker does not cover, said in the answer's own sentence. PRODUCT AUDIT 2026-10-28: plain words (no question, so a bare \"yes\" never reads as an answer to one)
       let sum = null;
       try { sum = Track && Track.statusSummary ? Track.statusSummary(store) : null; } catch { sum = null; }
       return emitTrack(ctx, { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: 0 } }, sum ? { summary: sum } : { summary: { total: 0 } });
@@ -48237,6 +48583,48 @@ const CareerRouter = (() => {
     });
     return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [fields[0].key], open: fields.map((f) => f.key), company };
   }
+  // D-072 (item 9b, d054 M05; D-053 salary expectation is asked per application, WO-122 a reused answer is a labelled suggestion):
+  // "use the same expected salary for the Lakefront Data application". The model answered this, and in 1 of 5 real-model passes
+  // said it would use $85,000 for Lakefront Data without asking and without saying it was the Northline Health answer. A salary
+  // expectation is never carried to another employer on its own: code says which answer it is and where it was given, fills
+  // nothing in, and asks the person to confirm it for this application (one question; their yes keeps it for that application
+  // in their words, through the same open-question list as any sensitive answer).
+  const SALARY_REUSE = /\b(?:same|reuse|re-use|copy|carry (?:it )?over|bring (?:it )?over|again|too|as well)\b/;
+  const SALARY_WORDS = /\b(?:expected salary|salary expectations?|expected pay|pay expectations?|salary)\b/;
+  const MONEY = /\$\s?\d[\d,]*(?:\.\d+)?\s?[kK]?\b|\b\d{2,3}(?:,\d{3})+\b|\b\d{2,3}\s?[kK]\b/;
+  function salaryAnswerOnFile(ctx, target) {
+    const out = [];
+    for (const f of statedFactsOf(ctx)) if (f && f.kind === "salary_expectation" && MONEY.test(s(f.value))) out.push({ figure: s(f.value).match(MONEY)[0], company: f.key || null });
+    const prof = ctx && ctx.profile;
+    for (const f of prof && Array.isArray(prof.facts) && !prof._fromStatedFacts ? prof.facts : []) {
+      if (!f || f.status === "rejected") continue;
+      const txt = [f.title, f.text].map(s).join(" ");
+      if (!/\bsalary\b/i.test(txt) || !MONEY.test(txt)) continue;
+      const co = txt.match(/\bfor (?:the |my )?([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3}?)(?:\s+(?:application|role|job|posting|position|internship|one))\b/);
+      out.push({ figure: txt.match(MONEY)[0], company: co ? co[1] : null });
+    }
+    const other = out.filter((x) => !(x.company && target && lc(x.company) === lc(target)));
+    return other.length ? other[other.length - 1] : null;
+  }
+  function handleSalaryReuse(text, ctx) {
+    const t = lc(text);
+    if (!SALARY_WORDS.test(t) || !SALARY_REUSE.test(t)) return null;
+    if (/\b(?:offer|counter|negotiat\w*|signing bonus|raise)\b/.test(t)) return null; // a negotiation turn owns its pay talk
+    if (MONEY.test(s(text))) return null; // a figure stated now is the person's own answer, not a reuse
+    const coM = s(text).match(/\b[Ff]or (?:the |my )?([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3}?)\s+(?:one|application|role|job|internship|posting|position)\b/);
+    const target = coM ? coM[1] : null;
+    if (!target) return null;
+    const src = salaryAnswerOnFile(ctx, target);
+    if (!src) return null;
+    const fig = src.figure.replace(/\s+/g, "");
+    try { const m = threadMirrorForWrite(ctx); if (m) m.sensitiveAsk = { company: target, fields: ["salary"], total: 1, at: nowOf(ctx), suggest: { salary: fig, from: src.company || null } }; } catch { /* the reply still asks */ }
+    const reply = compose({
+      headline: `Expected salary is asked for each application, so I won't carry it over to ${target} on my own.`,
+      facts: [`${fig} is the expected salary you gave ${src.company ? `for the ${src.company} application` : "earlier in this chat"}. Nothing has been filled in, submitted or sent.`],
+      nextStep: `Should I use ${fig} as your expected salary for ${target} too?`,
+    });
+    return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: ["salary"], open: ["salary"], company: target, suggestion: { field: "salary", value: fig, from: src.company || null } };
+  }
   // The person's answer to the open field: recorded in their words, then the next field, or the end of the list.
   function sensitiveAnswerValue(key, raw) {
     const v = s(raw).replace(/\s+/g, " ").replace(/[.!]+$/, "").trim();
@@ -48263,7 +48651,17 @@ const CareerRouter = (() => {
     if (!field) { if (wm) delete wm.sensitiveAsk; return null; }
     const total = st.total || st.fields.length, k = total - st.fields.length + 1;
     const skipped = /^(?:skip|pass|leave it blank|i'?d rather not say|rather not say|prefer not to say)\b/.test(t);
-    const value = skipped ? null : sensitiveAnswerValue(key, raw);
+    // D-072 (D-053, WO-122): a suggested earlier answer (shown with its source) is kept only on the person's own yes; a no asks
+    // for their answer for this application, and a figure they type is their answer as said.
+    const suggested = st.suggest && typeof st.suggest[key] === "string" ? st.suggest[key] : null;
+    const bareYes = /^(?:yes|yep|yeah|yup|sure|ok|okay|correct|right|do it|use it|that'?s right|sounds good)\b[\s,.!]*(?:please|thanks|thank you|use it|do it)?[\s.!]*$/.test(t);
+    const bareNo = /^(?:no|nope|nah|don'?t|do not|not that)\b[\s,.!]*$/.test(t);
+    if (suggested && bareNo) {
+      if (wm) wm.sensitiveAsk = Object.assign({}, st, { suggest: undefined, at: nowOf(ctx) });
+      const reply = compose({ headline: `Okay, I won't use ${suggested} for ${st.company || "this application"}.`, nextStep: sensitiveQuestion(field, st.company, k, total) });
+      return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [key], open: st.fields.slice(), company: st.company || null };
+    }
+    const value = skipped ? null : (suggested && bareYes ? suggested : sensitiveAnswerValue(key, raw));
     if (!skipped && !value) {
       const reply = compose({ headline: `I didn't catch ${field.label} in that, so nothing was kept for it.`, nextStep: sensitiveQuestion(field, st.company, k, total) });
       return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [key], open: st.fields.slice(), company: st.company || null };
@@ -48271,7 +48669,17 @@ const CareerRouter = (() => {
     let said = null;
     if (value) {
       const kind = FIELD_FACT_KIND[key];
-      recordThreadFact(ctx, kind, value, raw);
+      const evidence = suggested && value === suggested ? `${raw} (yes to ${suggested}${st.suggest && st.suggest.from ? `, the answer given for ${st.suggest.from}` : ""})` : raw;
+      // D-072: a salary answer is keyed to its application (D-053); the same figure given for another employer is a separate
+      // answer, never a re-key of that one.
+      if (key === "salary" && st.company) {
+        if (!(ctx.statedFacts && Array.isArray(ctx.statedFacts.facts))) ctx.statedFacts = { facts: [] };
+        const list = ctx.statedFacts.facts;
+        if (!list.some((x) => x && x.kind === kind && lc(x.value) === lc(value) && x.key === st.company)) {
+          list.push({ kind, value: s(value).replace(/\s+/g, " ").trim(), evidence: s(evidence).slice(0, 200), at: new Date(nowOf(ctx)).toISOString(), key: st.company });
+          ctx.statedFacts.updatedAt = new Date(nowOf(ctx)).toISOString();
+        }
+      } else recordThreadFact(ctx, kind, value, evidence);
       // A sponsorship answer is written through the same path as a sponsorship correction, so a different earlier answer
       // still invalidates what was prepared on it.
       const prof = ctx && ctx.profile;
@@ -48280,8 +48688,7 @@ const CareerRouter = (() => {
         try { writeSensitiveCorrection(prof, { kind: need ? "future_need" : "no_longer_needed", needsSponsorship: need, clause: raw }, raw, ctx); } catch { /* the stated fact stands */ }
         if (before === true || before === false) { if (before !== need) recordInvalidation(ctx, "sensitive_fact_corrected", raw, "the user answered the sponsorship question differently from the earlier answer; prepared packets and approvals built on the old answer are invalid"); }
       }
-      const f = statedFactsOf(ctx).filter((x) => x.kind === kind).pop();
-      if (f && st.company && key === "salary") f.key = st.company;
+      const f = key === "salary" && st.company ? statedFactsOf(ctx).filter((x) => x.kind === kind && x.key === st.company).pop() : statedFactsOf(ctx).filter((x) => x.kind === kind).pop();
       said = f ? String(factLine(f)).replace(/[.\s]+$/, "") : `${field.label}: ${value}`;
     }
     const rest = st.fields.slice(1);
@@ -48736,6 +49143,7 @@ const CareerRouter = (() => {
       || handleSensitiveCorrection(text, c)
       || handleSensitivePick(text, c)
       || handleAnswerReuse(text, c)
+      || handleSalaryReuse(text, c)
       || handleQueueCancel(text, c)
       || handleDoorstepCancel(text, c)
       || handlePacketValidity(text, c)
@@ -48981,6 +49389,12 @@ const CareerRouter = (() => {
     const d = ctx && ctx.workerCapabilities && ctx.workerCapabilities.job_alert_delivery;
     return !!(d && (d.live === true || d.status === "LIVE"));
   }
+  // D-066 (P15, the owner's Behavior Guide: an ongoing commitment says what it watches, where from, and what it cannot see): the
+  // source of a watch is the employer job boards ingest reads (career_ingest.ts INGEST_PROVIDERS); LinkedIn and Indeed are never
+  // read (CLAUDE.md), so a role posted only there is a blind spot, said once when a watch is set or listed.
+  function watchSourceLine() {
+    return "Source: employer boards (Greenhouse, Lever, Ashby, Workday); never LinkedIn or Indeed, so roles only there won't reach you.";
+  }
   function alertDeliveryLine(ctx) {
     return alertDeliveryLive(ctx)
       ? "I will text you matches as they post."
@@ -49125,6 +49539,7 @@ const CareerRouter = (() => {
     else facts.push("Remote postings for this role are included too, as long as they are open to where you are; say \"no remote\" to leave them out.");
     if (interest.filters.remote_ok !== false && !homeKnown) facts.push("A remote posting limited to a country is held until I know where you are — tell me your city and country.");
     if (userWords) facts.push("That title is not a standard category, so the watch keys on your own words exactly as you stated them — postings whose titles carry those words are what it can match.");
+    facts.push(watchSourceLine());
     facts.push(alertDeliveryLine(ctx));
     if (wp.opt_out && wp.opt_out.global) facts.push("Your job alerts are currently paused, so this watch is recorded but will not remind until you resume alerts.");
     // OWNER DECISION 2026-10-28: the watch is saved first, then ONE ask for only what is still missing (resume, place); nothing
@@ -49169,6 +49584,7 @@ const CareerRouter = (() => {
       : ["Your watch profile exists but holds no interests right now — it polls nothing and reminds nothing."];
     if (wp.opt_out && wp.opt_out.global) facts.push("Job alerts are PAUSED for you: watches are recorded, and no reminders go out until you resume them.");
     if (wp.alert_cap_per_day) facts.push(`Cap: at most ${wp.alert_cap_per_day} alert${wp.alert_cap_per_day === 1 ? "" : "s"} a day across your watches.`);
+    if (wp.interests.length) facts.push(watchSourceLine());
     facts.push(alertDeliveryLine(ctx));
     if (queued) facts.push(`${queued} reminder${queued === 1 ? " is" : "s are"} already queued for delivery.`);
     const reply = compose({ headline: wp.interests.length ? `You are watching ${wp.interests.length} role${wp.interests.length === 1 ? "" : "s"}.` : "Your watch list is empty.", facts, nextStep: "Add a role, remove one by name, or pause alerts — say which." });
@@ -50204,7 +50620,7 @@ const CareerRouter = (() => {
       if (tgt.company) { const mir = threadMirrorForWrite(ctx); if (mir) mir.namedApply = { company: tgt.company, role: tgt.role || null }; }
       const worker = ctx.workerCapabilities && ctx.workerCapabilities.portal_browser;
       const facts = [`I can apply only to a posting I have on file or one you paste. The ${tgt.role || "role"} posting at ${tgt.company || "that company"} is not on file, and I won't make one up.`];
-      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (!f && worker && worker.status === "NOT_WIRED" && !ctx.liveSwitches) facts.push("The browser worker that executes applications is also not wired in this handler — even a listed role would stop at preparation here."); }
+      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (!f && worker && worker.status === "NOT_WIRED" && !ctx.liveSwitches) facts.push("Here a listed role would also stop at preparation: I prepare it, and nothing is submitted from this chat."); }
       const reply = compose({ headline: `I can't apply to the ${tgt.role || "role"} at ${tgt.company || "that company"} yet — that posting is not in the list I can work from.`, facts, nextStep: "Paste the posting or its link and I will prepare the application from it in this turn." });
       return { intent: "named_role_apply", reply, resultStatus: "blocked", sends: 0 };
     }
@@ -50857,11 +51273,11 @@ const CareerRouter = (() => {
     // LANE A v2 ITEM 4 (CB-0247): a single named-company draft ask
     // materializes ONE draft here, before the campaign-plan family
     // can read it as list-building.
-    const singleDraft = handleSingleDraftAsk(text, c);
+    const singleDraft = handleSingleDraftAsk(text, c, rawText);
     if (singleDraft) return singleDraft;
     // LANE A v2 ITEM 5: people-matching asks end in the plain honest
     // stop here, before recommendations/fallback can claim them.
-    const pmStop = handlePeopleMatchingStop(text, c);
+    const pmStop = handlePeopleMatchingStop(text, c, rawText);
     if (pmStop) return pmStop;
     // LANE A v2 ITEM 1 (CB-0443): a memory question that resolves
     // against the stated record is claimed HERE — with a profile
@@ -52245,6 +52661,10 @@ const CareerRouter = (() => {
       const ex = facts.find((f) => f.kind === kind);
       if (ex) {
         if (lc(ex.value) === lc(clean)) return false;
+        // D-072 (item 9b, d054 M07/M08): a correction keeps what it replaced, beside the record (statedFacts.replaced), so a
+        // read-back and the brain can say "you first said X, then corrected it" instead of inventing where the answer came from.
+        const was = { kind, value: ex.value, evidence: ex.evidence || null, at: ex.at || null, replaced_at: new Date(nowOf(ctx)).toISOString() };
+        ctx.statedFacts.replaced = [...(Array.isArray(ctx.statedFacts.replaced) ? ctx.statedFacts.replaced : []), was].slice(-20);
         ex.value = clean; ex.evidence = ev; ex.at = new Date(nowOf(ctx)).toISOString();
         ctx.statedFacts.updatedAt = ex.at;
         return true;
@@ -52787,7 +53207,8 @@ const CareerRouter = (() => {
         // Release item 9 loop (tests/architect/loop-09-memory.test.ts): a correction names the date it replaces ("I graduate in
         // December 2026, not May 2027", "..., instead of May 2027"). That trailing contrast is not a negation of the new date:
         // it is left out before the negation check. "I don't graduate in 2027" is still a negation.
-        const CONTRAST = new RegExp(`,?\\s*(?:and\\s+)?(?:not|instead of|rather than)\\s+(?:in\\s+|on\\s+)?(?:${MON}\\s+)?20\\d\\d\\b`, "gi");
+        // MIRROR-1000: the replaced date may be a month alone ("my graduation is December 2028, not May").
+        const CONTRAST = new RegExp(`,?\\s*(?:and\\s+)?(?:not|instead of|rather than)\\s+(?:in\\s+|on\\s+)?(?:(?:${MON})(?:\\s+20\\d\\d)?|20\\d\\d)\\b`, "gi");
         const wholeDefinite = definiteSentence(u.replace(CONTRAST, "").replace(/[.!?;:\n\u2014\u2013-]+/g, " "));
         const definite = (x) => wholeDefinite && definiteSentence(x);
         let m2;
@@ -53171,6 +53592,14 @@ const CareerRouter = (() => {
     return added;
   }
   function statedFactsOf(ctx) { return (ctx.statedFacts && Array.isArray(ctx.statedFacts.facts)) ? ctx.statedFacts.facts : []; }
+  // D-072 (item 9b): the latest earlier value a correction replaced for this kind, when it differs from the value now on record.
+  function statedReplacedOf(ctx, kind) {
+    const list = ctx && ctx.statedFacts && Array.isArray(ctx.statedFacts.replaced) ? ctx.statedFacts.replaced : [];
+    const now = statedFactsOf(ctx).find((f) => f && f.kind === kind);
+    if (!now) return null; // a fact no longer on record has no history to read back
+    for (let i = list.length - 1; i >= 0; i--) { const w = list[i]; if (w && w.kind === kind && lc(w.value) !== lc(now.value)) return w; }
+    return null;
+  }
   // SERIAL-1530: the location the person stated in chat (single-valued; a correction replaces it), else "".
   function statedHomeOf(ctx) { const g = statedFactsOf(ctx).find((f) => f && f.kind === "geography"); return g ? s(g.value).trim() : ""; }
   // 2026-10-23 (fix2 review): the experience kind holds every work-at frame, so its line
@@ -53230,7 +53659,13 @@ const CareerRouter = (() => {
       preferences: { roles: [], industries: [], locations: geo ? [geo.value] : [], remote: null, companySize: null, compFloor: null, dealBreakers: [], targetCompanies: firm ? [firm.value] : [], excludedCompanies: [] },
       constraints: { graduationDate: null, startDate: null, workAuthorization: spons ? spons.evidence || null : null, needsSponsorship: spons ? spons.value === "needs sponsorship" : null, relocation: null, securityClearance: null },
       defaults: {},
-      facts: facts.map((f, i) => ({ id: `stated-${f.kind}-${i}`, kind: f.kind, text: factLine(f), value: f.value, evidence: f.evidence || null })),
+      // D-072 (item 9b, d054 M07): each row says it was said in this chat (when), and what it replaced; the brain read these rows
+      // under "from their account, not from this chat" and told the person Purdue "was already waiting on your yes from before
+      // this chat" and that Northwestern "was never saved".
+      facts: facts.map((f, i) => {
+        const was = statedReplacedOf(ctx, f.kind);
+        return { id: `stated-${f.kind}-${i}`, kind: f.kind, text: factLine(f), value: f.value, evidence: f.evidence || null, said_in_chat: true, said_at: f.at || null, ...(was ? { replaces: factLine(was) } : {}) };
+      }),
       connections: [],
     };
   }
@@ -53341,6 +53776,11 @@ const CareerRouter = (() => {
     if (!/\bwhat did you change\b|\bshow me (exactly )?what you changed\b|\bwhat (exactly )?changed\b|\bwhat'?s different\b|\bthe diff\b|\bshow (me )?the changes\b|\bwhat did you (add|remove|drop|keep)\b/.test(t)) return null;
     let rec = null;
     try { const m = threadMirrorOf(ctx); rec = m && m.tailor ? m.tailor : null; } catch { rec = null; }
+    // MIRROR-1000 gaps (2026-11-11): "tell me what changed" beside a search change ("scratch Atlanta, do Berlin instead",
+    // "cut it down to remote roles"), with a search on the thread and no tailoring, asks what the new search changed: the
+    // search refine answers it, not the tailoring diff.
+    const lastSearch = ctx.discovery && ctx.discovery.lastParams;
+    if ((!rec || !rec.diff) && lastSearch && !/\b(resume|cv|cover letter|bullets?|tailor\w*)\b/.test(t)) return null;
     if (!rec || !rec.diff) {
       const reply = compose({ headline: "No tailoring has run in this conversation yet, so there is no change list to show.", facts: ["The moment a resume is tailored here, the exact additions, removals and moves — each with its reason — are kept on this thread, and I can walk every one."], nextStep: "Name the role (or paste the posting) and I will tailor first, then show every change." });
       return { intent: "career_tailor_diff", reply, resultStatus: "awaiting_user", sends: 0 };
@@ -53738,7 +54178,17 @@ const CareerRouter = (() => {
         const headline = sponsorAsk && need === false && agrees(true) ? "No: you told me you don't need visa sponsorship."
           : sponsorAsk && need === true && agrees(false) ? "Yes: you told me you need visa sponsorship."
           : "Here is what you told me about your work authorization.";
-        const reply = compose({ headline, facts: waRecord.slice(0, 2).map((x) => `On record: ${x}.`) });
+        // D-070 (D-054 M08 on the real model, 3 of 5 passes failed by one judge): the record was read back twice in two wordings
+        // ('work authorization — "I don't need visa sponsorship"' and "you do not need visa sponsorship"); a derived line that only
+        // repeats the person's own quoted words is not read back again.
+        const quoted = waRecord.filter((x) => /"/.test(x));
+        const lines = waRecord.filter((x) => !(/^you (?:do not )?need (?:visa )?sponsorship$/.test(x) && quoted.some((q) => /sponsor/i.test(q))));
+        // D-072 (item 9b, d054 M08: one judge failed the read-back in 3 of 5 passes as "terse, does not acknowledge the
+        // correction"): when the answer on record corrected an earlier one in this conversation, the read-back says so, from the
+        // replaced value itself (statedFacts.replaced), never from a guess.
+        const was = sponsorAsk ? statedReplacedOf(ctx, "sponsorship") : null;
+        const corrected = was ? [`You first told me ${factLine(was)}, then corrected it; the corrected answer is the one I use.`] : [];
+        const reply = compose({ headline, facts: [...corrected, ...lines.slice(0, 2).map((x) => `On record: ${x}.`)] });
         return { intent: "profile_recall", reply, resultStatus: "completed", sends: 0 };
       }
       const label = what.charAt(0).toUpperCase() + what.slice(1);
@@ -54766,7 +55216,7 @@ const CareerRouter = (() => {
       if (m && m.resumeIngest && typeof m.resumeIngest === "object" && intent !== "career_resume_ingest") m.resumeIngest.stale = true;
     } catch { /* a mark never breaks a turn */ }
   }
-  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
+  return { handleChat, noteServedTurn, handleStateChangeIntents, statedSearchLimits, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
     // C01: the name-match internals, for the old-vs-new equivalence test (tests/career-c01-cpu-hot-path.test.cjs) only.
     _d6Full: rankedShortlistFull, scoredCount, _c01NameMatch: { ltLexicon, ltFormMatches, ltEsc, ltPlain, ltClean, ltIsPlace, ltIsSchool, postingsFromCtx } };
 })();
@@ -55727,7 +56177,9 @@ const CareerRender = (() => {
 
   const PDF_CONTENT_TYPE = "application/pdf";
   const DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  const HEADING_ALLOWLIST = ["EXPERIENCE", "EDUCATION", "SKILLS", "PROJECTS", "LEADERSHIP", "SUMMARY", "CERTIFICATIONS", "AWARDS", "PUBLICATIONS", "COURSEWORK", "ACTIVITIES", "RESEARCH", "ADDITIONAL"];
+  // Gap #8 (architect ruling 2026-11-16): a resume tailored to one posting may split its experience into RELEVANT EXPERIENCE and
+  // ADDITIONAL EXPERIENCE (career_tailor.ts relevanceSplit), two standard headings.
+  const HEADING_ALLOWLIST = ["EXPERIENCE", "EDUCATION", "SKILLS", "PROJECTS", "LEADERSHIP", "SUMMARY", "CERTIFICATIONS", "AWARDS", "PUBLICATIONS", "COURSEWORK", "ACTIVITIES", "RESEARCH", "ADDITIONAL", "RELEVANT EXPERIENCE", "ADDITIONAL EXPERIENCE"];
 
   // ================= shared document model =================
   // The single block list both renderers consume and sourceLines() reports.
@@ -56412,6 +56864,147 @@ const CareerRender = (() => {
     { re: /\[[^\]]{1,40}\]/, label: "bracketed placeholder [..]" }, { re: /\bTBD\b/, label: "TBD" },
     { re: /\bXXX+\b/, label: "XXX" }, { re: /placeholder/i, label: "the word 'placeholder'" },
   ];
+  // ================= the contact at the top (fail closed, never by guessing) =================
+  // Round 2 of the #776/#785 review: guessing which addresses are placeholders refused real people (john.doe@gmail.com,
+  // me@danaokafor.com) and passed template text. The rule, in order:
+  //   1 syntax      one @, a dotted local part, valid domain labels and a TLD; no spaces, mailto:, template marks, look-alike
+  //                 letters or the "[email protected]" a web page leaves. Malformed: refused.
+  //   2 reserved    domains that can never receive mail (RFC 2606/6761: example.com/.org/.net and example.<any>, .example,
+  //                 .invalid, .localhost, .local): refused. No real domain is listed (email.com, domain.com, me.com are real).
+  //   3 (career_tailor.ts) the email that prints must equal one the person confirmed. That is the gate.
+  //   4 doubtful    a template's stand-in name on a real domain (you@, firstname.lastname@, john.doe@) is not refused: it is
+  //                 "confirm", passed once the person has typed that address for their resume (opts.checked).
+  // NOT refused: the reserved TLD ".test". Every fixture in this repo writes the person's own email as <name>@example.test and
+  // these modules have no test seam, so refusing it needs a fixture migration first.
+  const EMAIL_TOKEN_RE = /[^\s|,;<>()\[\]{}]+@[^\s|,;<>()\[\]{}]+/g;
+  const RESERVED_TLDS = new Set(["invalid", "localhost", "example", "local", "tld"]);
+  const DOUBTFUL_LOCALS = new Set(["you", "your", "name", "yourname", "myname", "fullname", "yourfullname", "firstname", "lastname", "firstlast", "firstnamelastname", "youremail", "myemail", "email", "emailaddress", "user", "username", "test", "johndoe", "janedoe"]);
+  const LABEL_RE = /^[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?$/u;
+  const mixedScript = (x) => /[a-z]/i.test(x) && /[Ͱ-ϿЀ-ԯ]/.test(x);
+  // null when the address is one mail can reach; otherwise why it can never be the person's email (rules 1 and 2).
+  function placeholderEmail(v) {
+    const raw = String(v == null ? "" : v), s = raw.trim().toLowerCase();
+    if (!s) return "missing";
+    if (/[\[\]<>{}]/.test(s) || /email\s+protected/.test(s)) return "template text, not an email address";
+    const at = s.indexOf("@"), local = s.slice(0, at), domain = s.slice(at + 1), labels = domain.split("."), tld = labels[labels.length - 1];
+    const okLocal = at > 0 && /^[\p{L}\p{N}!#$%&'*+\/=?^_`|~.-]+$/u.test(local) && !/^\.|\.$|\.\./.test(local);
+    const okDomain = labels.length >= 2 && labels.every((l) => LABEL_RE.test(l)) && (/^\p{L}{2,}$/u.test(tld) || /^xn--[a-z0-9-]+$/.test(tld));
+    if (/[\s​-‏⁠﻿＀-￯。]/.test(raw.trim()) || s.indexOf("@", at + 1) >= 0 || !okLocal || !okDomain || mixedScript(local) || labels.some(mixedScript)) return "not a valid email address";
+    const reg = labels.length >= 3 && tld.length === 2 && ["co", "com", "org", "net", "ac", "edu", "gov"].includes(labels[labels.length - 2]) ? labels[labels.length - 3] : labels[labels.length - 2];
+    if (RESERVED_TLDS.has(tld) || (tld !== "test" && labels.slice(0, -1).includes("example") && (reg === "example" || labels[labels.length - 2] === "example"))) return `on a reserved domain that cannot receive mail (${domain})`;
+    return null;
+  }
+  // Rule 4: why a valid address still needs the person's own word (null: it does not).
+  function doubtfulEmail(v) {
+    const s = String(v == null ? "" : v).trim().toLowerCase();
+    if (placeholderEmail(s)) return null;
+    const local = s.slice(0, s.indexOf("@")).replace(/\+.*$/, "").replace(/[._-]+/g, "");
+    return DOUBTFUL_LOCALS.has(local) ? `the stand-in a template prints (${s.slice(0, s.indexOf("@"))}@)` : null;
+  }
+  // The placeholder phone numbers in a piece of text. A phone is 7 to 15 digits (E.164). Refused: lettered templates
+  // ((xxx) xxx-xxxx, NNN-NNN-NNNN), numbers reserved for fiction (555-0100 to 555-0199, +44 7700 900xxx, +61 491 570 15x),
+  // one digit repeated, counting runs, a North American number whose area code or exchange cannot exist, a number cut short
+  // or with no area code, and one too long to dial.
+  function placeholderPhones(text, opts) {
+    const file = !!(opts && opts.file), s = String(text == null ? "" : text).replace(EMAIL_TOKEN_RE, " ").replace(/\b(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)+\/\S*/gi, " "), out = [];
+    for (const m of s.matchAll(/(?:\(\s*([xXnNdD#])\1{2}\s*\)|(?<![A-Za-z#])([xXnNdD#])\2{2})[\s.-]*([xXnNdD#])\3{2}[\s.-]*([xXnNdD#])\4{3}(?![A-Za-z#])/g)) out.push(m[0]);
+    for (const m of s.matchAll(/[\[<{]+\s*(?:phone|mobile|tel)[^\]>}|]*[\]>}]+|\bphone number\b/gi)) out.push(m[0]);
+    for (const m of s.matchAll(/(?<![\d$.,@\w\/=_-])\+?\(?\d[\d\s().-]{4,}\d(?![\d%\w@])(?:\s*\(TEST\))?/g)) {
+      const fixture = /\(TEST\)$/.test(m[0]), t = m[0].replace(/\s*\(TEST\)$/, "").trim(), d = t.replace(/\D/g, ""), plus = t[0] === "+";
+      // North American only when it says so (+1, or 1 and ten digits) or has the shape: ten digits 3-3-4, the first 2-9. An
+      // Irish, South African or Ghanaian mobile ("087 412 9906") is not one.
+      const nanp = plus ? (d[0] === "1" ? d.slice(1) : null) : d.length === 11 && d[0] === "1" ? d.slice(1)
+        : d.length === 10 && /^[2-9]/.test(d) && /^\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}$/.test(t) ? d : null;
+      const counting = (x) => x.length >= 7 && ("01234567890123456789".includes(x) || "98765432109876543210".includes(x));
+      // A placeholder ONLY when it matches a known fiction or template pattern; any other number is accepted as written.
+      // NOT refused: "+1 555-01xx (TEST)", the fixture marker this repo's tests print after a test person's phone
+      // (r9-resume-fit-send-20261108.test.ts:115 and :159, resume-design.test.ts:317-327 pin it). Without "(TEST)" it is refused.
+      let bad = false;
+      if (fixture && plus && /^155501\d\d$/.test(d)) continue;
+      if (/^155501\d\d$/.test(d) && plus) bad = true;                                        // +1 555-01xx
+      else if (/^55501\d\d$/.test(d)) bad = true;                                             // 555-01xx
+      else if (d.length >= 7 && /^(\d)\1+$/.test(d)) bad = true;                               // one digit repeated
+      else if (counting(d) || (nanp && counting(nanp))) bad = true;                            // 123-456-7890, 987-654-3210
+      else if (nanp !== null) bad = nanp.length !== 10 ? !file : /^555|^\d{3}55501|^\d{3}0{7}$|^\d{3}1234567$|^(\d)\1{2}(\d)\2{2}(\d)\3{3}$/.test(nanp);
+      else if (d.length > 15 || (plus && d[0] === "0")) bad = !file;                           // longer than E.164 allows
+      else bad = /^(?:44|0)(?:7700900|2079460)\d{3}$/.test(d) || /^(?:61|0)49157015\d$/.test(d); // UK and Australian drama ranges
+      if (bad) out.push(t);
+    }
+    return out;
+  }
+  const TEMPLATE_TEXT_RE = /\[[^\]\n]{0,40}\]|<[^>\n]{1,40}>|\{\{?[^}\n]{0,40}\}?\}|\byour[\s._-]?(?:name|city|email|phone|address|linkedin|github)\b|\byourname\b|\b(?:first|last)\s?name\b|\bcity,\s*(?:state|st)\b|\bphone(?:\s+number)?\s*(?:$|\|)|\/in\/(?:username|yourname|your-name)\b/i;
+  // What is not a usable contact at the top of a resume: [{ field, value, why, level }]; empty when all is.
+  // level "refuse": it can never be theirs (rules 1 and 2, placeholder phones, template text). level "confirm": rule 4,
+  // dropped for an address in opts.checked (the addresses the person typed for their resume).
+  function contactProblems(header, opts) {
+    const h = header || {}, out = [], own = String(h.email == null ? "" : h.email).trim().toLowerCase();
+    const checked = new Set(((opts && opts.checked) || []).map((x) => String(x).trim().toLowerCase()));
+    const email = (value) => {
+      const why = placeholderEmail(value), doubt = why ? null : doubtfulEmail(value);
+      if (why) out.push({ field: "email", value, why, level: "refuse" });
+      else if (doubt && !checked.has(value)) out.push({ field: "email", value, why: doubt, level: "confirm" });
+    };
+    email(own);
+    const rest = [h.contactLine, h.linksLine, h.location, h.phone].filter((x) => typeof x === "string").join(" | ");
+    for (const m of rest.match(EMAIL_TOKEN_RE) || []) if (m.toLowerCase().replace(/^mailto:/, "") !== own || /^mailto:/i.test(m)) email(m.toLowerCase());
+    for (const p of placeholderPhones(rest)) out.push({ field: "phone", value: p, why: "a placeholder or incomplete number", level: "refuse" });
+    const tpl = TEMPLATE_TEXT_RE.exec(rest.replace(EMAIL_TOKEN_RE, " "));
+    if (tpl) out.push({ field: "contact line", value: tpl[0].replace(/\s*\|$/, ""), why: "a template's own text, not their details", level: "refuse" });
+    return out;
+  }
+  // ================= the contact read from a file (the gates that hold only its bytes) =================
+  // Round 3 of the #776/#785 review: never worse than trunk. Trunk had no file gate, so a file gate refuses ONLY what it read
+  // with confidence: a well-formed address on a reserved domain, template text, a fiction-range or counting phone, or a
+  // well-formed address that is not one the person confirmed (opts.confirmed). A file whose contact it cannot read with
+  // confidence (a scan, a font it cannot decode, a line broken where it cannot mend it, no address at all) is NOT refused: it
+  // passes as it did on trunk, and its status says "unread" so the caller can say so.
+  // Only printable lines are read: Chrome's PDFs (Skia) carry font programs that read back as bytes, and an "address" found in
+  // them is noise, never the person's (the first cut of this gate refused every Chrome-printed resume for one).
+  const FILE_TEXT_RE = /[\p{L}\p{N}\s.,;:'"’‘“”()\[\]\-–—@+\/|&%$#·•*!?_~]/gu;
+  function printableLine(l) {
+    const s = String(l == null ? "" : l);
+    if (!s.trim() || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f�]/.test(s)) return false;
+    return (s.match(FILE_TEXT_RE) || []).length / s.length >= 0.9;
+  }
+  const WELL_FORMED = (e) => placeholderEmail(e) === null || /reserved domain/.test(String(placeholderEmail(e)));
+  // A contact line: every part between separators is an address, a phone, a link or a few words (a city). A sentence that
+  // mentions an address ("answered help@acme.com tickets") is not one.
+  function contactLike(line) {
+    return line.split(/\s[|·•]\s|\s{2,}|\t/).every((part) => part.replace(EMAIL_TOKEN_RE, " ").replace(/\+?\(?\d[\d\s().-]{5,}\d/g, " ")
+      .replace(/\b(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)+\/\S*/gi, " ").split(/\s+/).filter((w) => /[\p{L}]/u.test(w)).length <= 3);
+  }
+  // { status: "ok" | "unconfirmed" | "unread", problems, emails }.
+  function fileContactRead(lines, opts) {
+    const all = (lines || []).map((l) => String(l == null ? "" : l)).filter(printableLine).map((l) => l.trim());
+    const confirmed = ((opts && opts.confirmed) || []).map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+    const contact = all.filter((l) => contactLike(l) && (/[^\s|,;<>()\[\]{}]+@[^\s|,;<>()\[\]{}]+/.test(l) || TEMPLATE_TEXT_RE.test(l.replace(EMAIL_TOKEN_RE, " "))));
+    const emails = [], out = [];
+    for (const l of contact) for (const raw of l.match(EMAIL_TOKEN_RE) || []) {
+      let e = raw.replace(/[.,;:]+$/, "");
+      if (!WELL_FORMED(e)) {
+        // A line broken inside the address ("other" / ".person@gmail.com"): mended from a neighbouring line, else not read.
+        const at = all.indexOf(l), near = [all[at - 1], all[at + 1]].filter(Boolean);
+        const mended = near.map((n) => /^[.@]/.test(e) ? `${(/[\p{L}\p{N}._%+'-]+$/u.exec(n) || [""])[0]}${e}` : `${e}${(/^[\p{L}\p{N}.-]+/u.exec(n) || [""])[0]}`).find(WELL_FORMED);
+        if (!mended) continue;
+        e = mended;
+      }
+      emails.push(e.toLowerCase());
+    }
+    for (const e of emails) { const w = placeholderEmail(e); if (w) out.push({ field: "email", value: e, why: w, level: "refuse" }); }
+    const real = emails.filter((e) => !placeholderEmail(e));
+    if (confirmed.length && real.length && !real.some((e) => confirmed.includes(e))) out.push({ field: "email", value: real[0], why: `not the email they confirmed (${confirmed[0]})`, level: "refuse" });
+    for (const l of contact) {
+      for (const p of placeholderPhones(l, { file: true })) out.push({ field: "phone", value: p, why: "a placeholder number", level: "refuse" });
+      const tpl = TEMPLATE_TEXT_RE.exec(l.replace(EMAIL_TOKEN_RE, " "));
+      if (tpl) out.push({ field: "contact line", value: tpl[0].replace(/\s*\|$/, ""), why: "a template's own text, not their details", level: "refuse" });
+    }
+    return { status: out.length ? "unconfirmed" : real.length ? "ok" : "unread", problems: out, emails };
+  }
+  const fileContactProblems = (lines, opts) => fileContactRead(lines, opts).problems;
+  // Truthful either way: what cannot be theirs is said as that; a doubtful one is said as needing their word.
+  const contactReason = (p) => p.level === "confirm"
+    ? `the ${p.field} at the top of the resume (${p.value}) is ${p.why}: it needs the person to confirm it is theirs before this resume is ready to submit`
+    : `the ${p.field} at the top of the resume (${p.value || "none"}) is ${p.why}: the ${p.field} is not confirmed, so this resume is not ready to submit`;
   const NUMERIC_DATE_RES = [/\b\d{1,2}\/\d{4}\b/g, /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, /\b\d{4}-\d{2}(?:-\d{2})?\b/g, /\b\d{1,2}-\d{4}\b/g];
   function diffSequences(expected, actual) {
     // returns { missing:[], extra:[], moved:bool }
@@ -56454,6 +57047,9 @@ const CareerRender = (() => {
       }
     }
 
+    // Fail closed: a contact email or phone that is a placeholder is never a pass. (A resume with no email at all is failed
+    // by the renderer's verdict, career_tailor.ts contactProblems: this check also serves layout files that carry no header.)
+    if (resume) for (const p of contactProblems(resume.header)) if (p.why !== "missing" && p.level === "refuse") add("contact_unconfirmed", "fail", contactReason(p));
     // BUG-2026-10-14-NDER (brief B6): two source-level FAILs.
     // (1) duplicate_line — a content line belongs in exactly one section;
     //     the same normalized line twice in the source document fails.
@@ -56587,7 +57183,7 @@ const CareerRender = (() => {
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
   // RELEASE 9: the byte primitives career_resume_design.ts builds its two layouts with (same codec, same ZIP writer).
   const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlibDeflateFixed(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
-  return { primitives, renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
+  return { primitives, renderPdf, renderDocx, parseCheck, placeholderEmail, doubtfulEmail, placeholderPhones, contactProblems, fileContactProblems, fileContactRead, contactReason, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);
 })();
@@ -61273,7 +61869,7 @@ const CareerApplyLedger = (() => {
       return { kind: "change_after_approval", attachment: /\battach(?:ment|ed)?\b|\bresume file\b/.test(t), email: /\be-?mail\b/.test(t) };
     }
     if (/\b(?:portal|site|website|employer|application|form|page|workday|greenhouse|lever|ashby|taleo|icims|smartrecruiters|ats)\b[^.?]*\b(?:requires?|required|needs?|asks? (?:for|me (?:to|for))|asking (?:for|me to)|wants?|makes? me|forces? me to|won'?t let me)\b[^.?]*\b(?:an? |my |another |their |its )?(?:accounts?|account'?s|sign[- ]?in|log[- ]?in|login|register|registration|sign[- ]?up|passwords?|username)\b/.test(t)
-      || /\b(?:do i|should i|will you|can you)\s+(?:need to\s+)?(?:create|make|open|register)\s+(?:an? )?account\b/.test(t)) return { kind: "portal_account", password: /\bpassword/.test(t) };
+      || /\b(?:do i|should i|will you|can you)\s+(?:need to\s+)?(?:create|make|open|register)\s+(?:an? )?account\b/.test(t)) return { kind: "portal_account", password: /\bpassword/.test(t), short: SHORT_ANSWER_RE.test(t) };
     if (/\b(?:distinguish|tell apart|tell the difference|difference between|differ|separate|keep apart)\b/.test(t) && /\b(?:prepared|submitted|approved|sent)\b/.test(t)) return { kind: "prepared_vs_submitted" };
     if (/\bprepared\b[^.?]*\b(?:vs\.?|versus|or|and|from)\b[^.?]*\b(?:submitted|sent)\b/.test(t)) return { kind: "prepared_vs_submitted" };
     if (/^(?:so |and |ok |okay |but )?(?:was|were|did|has|have|is)\b[^.?]{0,60}\b(?:the|my|that|this|it|any|those|these)?\s*(?:application|applications|apps?|it|that one|they|them)?\b[^.?]{0,30}\b(?:actually|really|truly|definitely|for real)\b[^.?]{0,20}\b(?:submitted|sent|go(?:ne)? through|get (?:sent|submitted)|been (?:sent|submitted)|land(?:ed)?)\b/.test(t)
@@ -61312,6 +61908,8 @@ const CareerApplyLedger = (() => {
     return n ? `text "show my applications" to open the card, then reply "only ${n}" (or "only" and the number the card shows for it)`
       : "text \"show my applications\" to open the card, then reply \"only\" and the number the card shows for it";
   }
+  // A person asking for a short answer ("in two lines", "short version", "keep it brief").
+  const SHORT_ANSWER_RE = /\b(?:keep it (?:short|brief)|short (?:version|answer)|(?:in )?(?:one or two|one|two) (?:lines?|sentences?)|briefly|be brief|tl;?dr)\b/;
   function answer(ask, ctx, trackRows) {
     const led = ledgerOf(ctx, trackRows);
     const facts = [];
@@ -61362,11 +61960,15 @@ const CareerApplyLedger = (() => {
         return out("career_answer_change_after_approval", "Changing anything after you approve cancels that approval; nothing changed is sent on the old yes.", live.length ? "Which answer should change, and to what?" : "Want to change an answer on an application?");
       }
       case "portal_account": {
-        push("I never create an account or sign in for you, and I never take a password in this chat.");
-        push("When an employer's site needs an account, that application stops at that step and comes back to you with its link; you sign in or create the account yourself, on their page.");
+        // MIRROR-1000 gaps (2026-11-11): "in two lines" / "short version" gets the two lines.
+        if (ask.short) push("I never sign in, create an account or take a password for you; a site that needs one stops that application and sends you its link.");
+        else {
+          push("I never create an account or sign in for you, and I never take a password in this chat.");
+          push("When an employer's site needs an account, that application stops at that step and comes back to you with its link; you sign in or create the account yourself, on their page.");
+        }
         const stopped = led.entries.filter((e) => e.state === "needs_you" && /login|sign|account/i.test(s(e.reason)));
         if (stopped.length) push(`Waiting on a sign-in now: ${stopped.map(nameOf).join("; ")}.`);
-        if (ask.password) push("If a site asks for another account's password, don't type it anywhere I can see it; that sign-in is yours alone.");
+        if (ask.password && !ask.short) push("If a site asks for another account's password, don't type it anywhere I can see it; that sign-in is yours alone.");
         return out("career_portal_account", "An employer account is yours to sign in to; I hand that step to you.", stopped.length ? "Open its link to sign in, then tell me when you're done?" : "Want me to keep going with the applications that don't need an account?");
       }
       case "prepared_vs_submitted": {

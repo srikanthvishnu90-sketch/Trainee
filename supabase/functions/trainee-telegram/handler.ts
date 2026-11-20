@@ -44,7 +44,8 @@ export function webhookDeps(adapter: ChannelAdapter, d: ProviderWebhookDeps): Co
     env: d.env, now: d.now, store: d.store(), render: adapter.render, chat: d.chat, deliver: d.deliver,
     reply: async (contact, bubbles, opts) => await adapter.send(addressOf(contact), bubbles, opts),
     // N12/N13: typing at once and every typingEveryMs while a message is handled; one interim when a turn runs past the budget.
-    ...(adapter.typing ? { typing: async (address: string) => await adapter.typing!(address, null), typingEveryMs: adapter.typingEveryMs ?? LATENCY_BUDGET.typingEveryMs } : {}),
+    // D-066 (P11): with the id of the message it answers (WhatsApp shows its indicator only against the person's own message).
+    ...(adapter.typing ? { typing: async (address: string, inboundId?: string | null) => await adapter.typing!(address, inboundId ?? null), typingEveryMs: adapter.typingEveryMs ?? LATENCY_BUDGET.typingEveryMs } : {}),
     ackAfterMs: LATENCY_BUDGET.ackAfterMs,
     ...(d.timers ? { timers: d.timers } : {}),
     ...(admin && adapter.fetchFile ? {

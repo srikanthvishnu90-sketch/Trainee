@@ -54,13 +54,28 @@ export const SHARED_REPLY_MODULES = [
   "research_dns.ts", "contact_sources/web_gate.ts", "contact_sources/types.ts", "contact_sources/suppression.ts",
   // R9 free sources (2026-11-08): the no-key sources and the reader's robots.txt check.
   "research_free_sources.ts", "research_never.ts",
+  // D-060 (2026-11-11): web research (CAREER_KNOWLEDGE): Claude's web search as a search provider, source kinds, the posting re-check.
+  "research_web.ts",
+  // D-062 (2026-11-11): any posting's requirements: the Workday posting reader (check_posting_open, the search's open check) and
+  // the read-only apply-flow reader (inspect_apply_flow), with the form schema reader it builds on.
+  "workday_posting.ts", "posting_requirements.ts", "posting_schema.ts", "posting_fetch.ts",
   // R10 WO-H fix 14b (2026-11-09): the follow-up and thank-you draft check (draft_followup).
   "followup_draft.ts",
   // R9 outreach (2026-11-08): who may be written to (no-reply, role and ATS/job-board inboxes never) and the staged route's
   // reading of an ask to write to someone.
-  "automated_inbox.ts", "outreach_ask.ts",
+  "automated_inbox.ts", "outreach_ask.ts", "ask_language.ts",
   // R10 F.3 (2026-11-09): a stop turn's reply, built from the control state it wrote and read back (handler-career.ts).
   "career_stop_truth.ts",
+  // D-072 (2026-11-12): a review of a practice answer is checked with the rubric's answers-first rule (career_brain.ts processCheck).
+  "reply_rubric.ts",
+  // D-072 (files reachable, 2026-11-12): the staged route's reading of a File ask, the File family maker behind open_record_file
+  // (what it makes and the holds the reply may say), and its deployed wiring (handler-career.ts).
+  "file_family_ask.ts", "file_family_make.ts", "file_family_make_supabase.ts",
+  // D-072 (files writers, 2026-11-12): the writers the turn runs (the search plan after a search or watch, a material version for each
+  // delivered tailored file or cover letter, a path comparison from compare_paths) and the path-compare ask the staged route reads.
+  "career_search_plan_writer.ts", "career_material_writer.ts", "career_path_comparisons.ts",
+  // Mass apply (2026-11-17): the route each approved application takes, said on the card's yes (career_apply_cards.ts).
+  "career_apply_send_route.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that
@@ -93,8 +108,21 @@ export const RELEASE_FLAG_PATHS = [
   "supabase/functions/_shared/career_digest.ts",
   "supabase/functions/_shared/career_people_reminders.ts",
   "supabase/functions/_shared/career_inbox_followups.ts",
+  // D-062: several Google accounts per person (read, named on evidence, a reply from the account the email reached).
+  "supabase/functions/_shared/career_google_accounts.ts",
   // Release 9 E (proposal D-043): the contact connector's switches (CAREER_PEOPLE_SEARCH + CAREER_CONTACT_OUTREACH) are read here only.
   "supabase/functions/_shared/career_contact_pipeline.ts",
+  // D-062 (2026-11-11): the capability tools' modules: the application record and tracker (CAREER_MAIL_TRACKING), public people
+  // search (CAREER_PEOPLE_SEARCH), answering an email (CAREER_EMAIL_SEND), their stores, and the follow-up turn that takes the yes.
+  "supabase/functions/_shared/career_application_record.ts",
+  "supabase/functions/_shared/career_alumni_search.ts",
+  "supabase/functions/_shared/career_mail_reply.ts",
+  // What of an inbox may reach a model (security mail withheld, codes and sign-in links taken out): read by career_mail_reply.ts.
+  "supabase/functions/_shared/mail_security.ts",
+  "supabase/functions/_shared/career_capability_stores.ts",
+  "supabase/functions/_shared/career_inbox_followups.ts",
+  // D-062: several Google accounts per person (read, named on evidence, a reply from the account the email reached).
+  "supabase/functions/_shared/career_google_accounts.ts",
   // D-049: the chat File card (CAREER_FILE_CARD) and the outbox's resolver for it.
   "supabase/functions/_shared/file_card.ts",
   "supabase/functions/_shared/channel_runtime.ts",

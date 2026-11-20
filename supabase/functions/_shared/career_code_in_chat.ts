@@ -14,7 +14,8 @@
 import { normalizeChatText } from "./identity_redact.ts";
 export const CODE_IN_CHAT_INTENT = "career_code_in_chat";
 // Fixed safety text (ARCHITECTURE §3.1: safety text is code's).
-export const CODE_IN_CHAT_REPLY = "Please don't share one-time codes or passwords in chat, with me or anyone. " +
+// MIRROR-1000: the answer comes first: a code or password in chat is never used, and Trainee never signs in for the person.
+export const CODE_IN_CHAT_REPLY = "I won't use a code or password sent in chat, and I don't sign in for you. Please don't share one-time codes or passwords in chat, with me or anyone. " +
   "If your Gmail is connected, Trainee reads an employer's emailed code itself, and only during an application you approved. " +
   "Otherwise, type the code into the employer's portal yourself, and sign in there with your own password.";
 

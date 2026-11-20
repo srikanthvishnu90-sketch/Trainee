@@ -95,8 +95,9 @@ Deno.test({
         if (/has no company file yet/.test(pay.reply)) failures.push(`B pay: stopped at the no-file answer | ${pay.reply.slice(0, 200)}`);
         const mid = wire.chat;
         const about = await say("tell me about Applebee's");
-        if (wire.chat !== mid) failures.push(`B about: the model was called for a no-file company question (${about.intent})`);
-        if (!/has no company file yet/.test(about.reply)) failures.push(`B about: not the router's no-file answer (${about.intent}) | ${about.reply.slice(0, 200)}`);
+        // Architect amendment (D-061): G1 and G14 with web research on (D-060): a question about a firm is the brain's research turn,
+        // with the router's no-file answer as data; nothing about the firm comes from the model unsourced (enforceCompanyReply).
+        if (wire.chat === mid) failures.push(`B about: a company question was not the brain's research turn (${about.intent}) | ${about.reply.slice(0, 200)}`);
       });
 
       assertNode.deepStrictEqual(failures, [], failures.join("\n"));

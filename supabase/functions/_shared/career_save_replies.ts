@@ -43,6 +43,11 @@ export function trackTurnEffects(effects: TurnEffects): typeof fetch {
       if (!m || method === "GET" || method === "HEAD") return res;
       const name = (m[1] ? "rpc:" : "table:") + m[2];
       if (BOOKKEEPING.has(name) || READ_RPC.test(name) || !res.ok) return res;
+      // D-075: the untold fact-stop read runs on every reply and changes something only when it returns a stop (marked told).
+      if (name === "rpc:career_apply_fact_stops_untold") {
+        const rows = await res.clone().json().catch(() => null);
+        if (Array.isArray(rows) && rows.length === 0) return res;
+      }
       effects.writes.add(name);
       if (name === "rpc:career_apply_card_answer_as") {
         const rows = await res.clone().json().catch(() => null);

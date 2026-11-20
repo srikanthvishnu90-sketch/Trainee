@@ -160,9 +160,12 @@ Deno.test("R9 STOP, pause and erase are the host's controls; a paused account se
 
 Deno.test("R10 a bare approval and every action stay code's under the release default", () => {
   eq([decide("yes").brain, decide("yes").reason], [false, "action"], "a bare yes is answered by code (what it approves is code's)");
-  for (const m of ["apply to the Backend Software Engineer role at Ironstack Payments", "send it", "pause everything", "write my cover letter for the Stripe role", "what's my GPA?"]) {
+  for (const m of ["apply to the Backend Software Engineer role at Ironstack Payments", "send it", "pause everything", "what's my GPA?"]) {
     eq(decide(m).brain, false, m);
   }
+  // Architect amendment (D-061): G1 and G10 (D-059): a cover letter the router does not write (its reply explains instead) is the
+  // brain's draft, shown as a draft; it still cannot send or submit (STAGED_WITHHELD_TOOLS), and nothing is sent.
+  eq(decide("write my cover letter for the Stripe role").brain, true, "write my cover letter for the Stripe role");
   eq(decide("how should I follow up after an interview?").brain, true, "advice is the brain's");
 });
 

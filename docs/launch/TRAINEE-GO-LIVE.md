@@ -90,6 +90,63 @@ read from the environment or asked on a hidden prompt; none is echoed, written t
 | `--allow-send` | the smoke also sends `HELP` to `trainee-inbound` as if from `TRAINEE_SMOKE_CONTACT`, and **the help reply is texted to that number**. Use your own |
 | `--no-wait` | the smoke does not wait (up to 7 minutes) for each schedule to fire once |
 
+## S3 on the owner's subscription (D-091)
+
+The release's reply-quality check (deploy standard S3) can be measured on your Claude subscription instead of an API run
+in CI ($0 API spend; it uses your subscription's limits and takes a few hours). CI cannot run it: the `claude` CLI runs
+only on your machine. Run it on the **final** release candidate, after everything for the release has merged. The
+`claude` CLI must be signed in to your subscription: `claude -p --output-format stream-json --verbose` must report
+`apiKeySource: none`, and the runner refuses otherwise (on every call). `--brain` is the brain the candidate serves
+(`PRODUCTION_BRAIN` in `supabase/functions/agent-chat/release_config.ts`, `staged` today). The runner also refuses when
+your environment sets anything that changes the brain, the gateway or the judges (`CAREER_*`, `ANTHROPIC_*` other than
+the removed key, `MODEL_*`, `EVAL_*` and the release switches; it names what to unset).
+
+**Before your first sitting: both copies of the brain-eval workflow must ignore sittings.** A push to `ci/brain-eval`
+runs that branch's own `.github/workflows/brain-eval.yml`, and a push under `evals/career/**` starts a PAID API eval
+(about $8.50 for five passes). Do not push any sitting until both trunk's copy and `ci/brain-eval`'s copy list
+`'!evals/career/subscription/**'` right after `evals/career/**`:
+`git fetch origin && git show origin/ci/brain-eval:.github/workflows/brain-eval.yml | grep -n "evals/career/subscription"` and the
+same with `origin/trunk` must both print the line. If either does not, stop: pushing a sitting would spend money.
+
+**One sitting, and every sitting is pushed.** A sitting is the five passes run one after another, within 24 hours,
+packed together. Push every sitting you start, including one that is BELOW the bar, refused or given up after a pass or
+two: S3 is decided by the FIRST sitting recorded on `ci/brain-eval` for the candidate's reply code and eval code
+(`scripts/launch/s3-subscription.ts`), and a later sitting for the same code never replaces it. An empty commit or a
+docs-only commit does not change that code, so it does not give a second chance; a real change to the reply code (or the
+eval code) is a new measurement.
+
+```
+SHA=<the 40-character release candidate>
+git fetch origin && git worktree add --detach ~/trainee-s3-$SHA $SHA && cd ~/trainee-s3-$SHA
+for p in 1 2 3 4 5; do
+  env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN deno run -A evals/career/run.ts --subscription --brain staged --set dev --label s3sub-$SHA-p$p || break
+done
+# pack the passes that exist (all five, or fewer if the sitting stopped): the packer records an incomplete sitting too
+env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN deno run -A scripts/launch/s3-subscription.ts --sha $SHA --out ~/trainee-s3-evidence $(ls evals/career/results/s3sub-$SHA-p*.json)
+git worktree add --detach ~/trainee-brain-eval-$SHA origin/ci/brain-eval
+cp -R ~/trainee-s3-evidence/evals ~/trainee-brain-eval-$SHA/
+git -C ~/trainee-brain-eval-$SHA add evals/career/subscription
+git -C ~/trainee-brain-eval-$SHA commit -m "S3 subscription sitting for $SHA (D-091)"
+git -C ~/trainee-brain-eval-$SHA push origin HEAD:ci/brain-eval
+```
+
+The runner refuses a checkout with changes under `supabase/`, `packages/` or `evals/` (results aside). The packer refuses
+the same file, label or run time twice, checks the sitting exactly as S3 will, writes it to
+`evals/career/subscription/<sha>/<first pass's run time>.json` and prints `MEETS`, `BELOW the bar` or `REFUSED` with the
+reason; push it in every case (never edit or delete a sitting file: S3 reads each one as the commit that added it wrote it).
+If the push is refused because CI wrote to `ci/brain-eval` meanwhile, run
+`git -C ~/trainee-brain-eval-$SHA pull --rebase origin ci/brain-eval` and push again (never force-push `ci/brain-eval`).
+Then push `$SHA` to `release/production` as usual. `deploy-production.yml`'s measure job finds the sitting and makes no API
+measurement; S3 prints `SUBSCRIPTION (D-091): staged worst pass N/38 >= 95%`. The same sitting also counts for a later
+SHA within 10 first-parent commits whose reply code and eval code are unchanged. A CI measurement of the candidate, when
+one exists, is judged instead (as before D-091).
+
+S3's other paths are unchanged and apply to subscription sittings too: against the deployed SHA named by owner ruling D-056
+the bar alone decides; the one-time `S3_WAIVER` (D-039, deployed SHA `33f7d00`) applies only to CI measurements, so
+against that deployed SHA a subscription sitting needs a comparable deployed sitting, which cannot exist (S3 fails); against
+any other deployed SHA the candidate's mean must also be at least the deployed SHA's own first subscription sitting on the
+same set size and eval code.
+
 ## What you are asked for
 
 | Input | What it is | Where it ends up |
@@ -119,7 +176,7 @@ Function secrets are project-wide in Supabase: every function sees every one.
 the deployed code, not a secret. `CAREER_REPLY_MODEL` and `CAREER_MODEL` cannot move it (any other value is ignored and
 logged once); unset them if they are still set. There is no per-person AI cap: `CAREER_MODEL_DAILY_USD` and
 `CAREER_MODEL_DAILY_CALLS` are ignored (logged once while set; `supabase secrets unset CAREER_MODEL_DAILY_USD
-CAREER_MODEL_DAILY_CALLS --project-ref <ref>` removes the log line). The global model budget still stops every call at the $70
+CAREER_MODEL_DAILY_CALLS --project-ref <ref>` removes the log line). The global model budget still stops every call at the $80
 total (`MODEL_BUDGET_TARGET_USD` / `MODEL_BUDGET_HARD_USD`; `MODEL_BUDGET_PAUSED=on` stops all model calls at once), and the
 reply then says the AI budget is used up. Sonnet 5.5 is $2 / $10 per million input / output tokens (about 20 times Haiku
 5.5), so a typical brain turn is estimated at $0.03 to $0.09 before prompt caching.
@@ -318,6 +375,11 @@ per-person or per-site number only when one is given (none by default: the owner
 turns anything on by itself: `CLOUD_RUNNER_ENABLED=on` / `CLOUD_PREPARE_ENABLED=on` only when given, and the database's
 `CAREER_AGENT_SUBMIT` / `CAREER_CLOUD_APPLY` / `CAREER_CLOUD_TEXT_CARDS` only by the owner's SQL. Everything else (the route, the limits, the
 recommended first-wave numbers, the gate): docs/launch/CLOUD-RUNNER.md. `CAREER_CLOUD_TEXT_CARDS` is also in the release switch set (`release-db-switches.sql`): a plain go-live writes it `on` only when its row is missing and keeps an existing row, and with `CAREER_AGENT_SUBMIT` or `CAREER_CLOUD_APPLY` off the route stays closed. `trainee-go-live.sh --verify` and `secrets-audit.sh` end with a hosted-apply block (`scripts/launch/hosted-apply-setup.cjs`, names only): "off by design" when a switch is not `on`; "ON but NOT READY" (verify fails) when all three are on and a prerequisite is missing. The owner's first run: docs/launch/RAMP-FIRST-RUN.md.
+Migration `20261116120000_career_apply_one_fact_set.sql` (preparation and send read one fact set,
+`career_apply_profile_for`) changes the cloud send's source snapshot and digest for anyone whose raw stored profile held a
+fact that function drops. An approval in flight when it applies, built on such a fact, is refused at authorize ("approved
+sources changed"), fail closed: nothing is sent on it, and that application is prepared and approved again. Rollback:
+`supabase/rollbacks/20261116120000_career_apply_one_fact_set.down.sql`.
 ## Running mass submission
 
 There is no volume number of Trainee's own (owner, 2026-10-27). Every executor runs as many applications as its machine

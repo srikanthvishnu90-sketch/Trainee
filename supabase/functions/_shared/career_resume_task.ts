@@ -43,7 +43,7 @@ export interface ResumeTask {
   // Round 6: the task has no target of the person's yet (it began with that question); nothing is built until one is named.
   noTarget?: boolean;
 }
-type Doc = { kind: "document"; format: string; filename: string; mime: string; base64: string; sha256: string };
+type Doc = { kind: "document"; format: string; filename: string; mime: string; base64: string; sha256: string; material?: Record<string, unknown> };
 export type ResumeTurn = { reply: string; intent: string; resultStatus: string; documents: Doc[]; link: string | null; task: ResumeTask };
 
 const lc = (s: unknown) => String(s ?? "").toLowerCase().replace(/[’‘]/g, "'");
@@ -548,14 +548,16 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
     const clean = after ? after.replace(/^[-•\s"]+|["\s]+$/g, "").replace(/\s+/g, " ") : "";
     const audit = clean && clean !== pick.text ? auditRewrite({ original: pick.text, proposed: clean, fact: pick.fact, profile }) : { ok: false, reasons: [] };
     // Tone gate (tests/architect/instinct-tone-gate.test.ts): the outcome first, then why; not a refusal opener.
-    if (!audit.ok) return reply(`It stays as written: "${pick.text}". A shorter version changed what it says, so I didn't use it.`, RESUME_TASK_INTENT, "completed");
+    // R-rules "Rewrite one bullet": any number the bullet rests on is named for the person to confirm, kept or not.
+    const keptNum = (pick.text.match(/\d[\d,.]*\+?%?/g) ?? [])[0];
+    if (!audit.ok) return reply(`It stays as written: "${pick.text}". A shorter version changed what it says, so I didn't use it.${keptNum ? ` If ${keptNum} is not accurate, tell me the supported count.` : ""}`, RESUME_TASK_INTENT, "completed");
     task.proposed = [{ before: pick.text, after: clean }]; task.proposedHash = await proposalHash(task.proposed);
     const nums = (clean.match(/\d[\d,.]*\+?%?/g) ?? []).filter((n) => pick.text.includes(n.replace(/\+$/, "")));
     return reply([`Proposed replacement: ${clean}`, `Now: ${pick.text}`, ...nums.slice(0, 1).map((n) => `This keeps the ${n} already in your intake. If ${n} is not accurate, tell me the supported number before we use it.`), "Say if it's fine and I'll put it in the PDF."].join("\n"));
   }
   if (ask === "send_to") {
     const who = sendTo(o.message)!;
-    return reply(`Which ${who} do you mean, and where should I send the resume PDF?`, RESUME_CLARIFY_INTENT);
+    return reply(`Which ${who}, and where should I send it?`, RESUME_CLARIFY_INTENT);
   }
   if (ask === "ask_send") {
     task.pending = "send_choice";
@@ -563,7 +565,8 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
     const n = shortlist.length;
     const which = n === 0 ? "the application on your card" : n === 1 ? "the job I listed" : `one of the ${n} jobs I listed`;
     const held = task.limits.includes("no_apply") ? " You asked me not to apply, so I haven't approved anything." : "";
-    return { reply: `${n === 0 ? `Submit ${which}` : `Apply to ${which}`}, or send you the resume PDF for ${task.file!.label}?${held} Nothing is sent until you say.`, intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", documents: [], link: null, task };
+    // Same length as Instinct (owner, 2026-11-11): the two choices are the reply; the question itself sends nothing.
+    return { reply: `${n === 0 ? `Submit ${which}` : `Apply to ${which}`}, or send you the resume PDF for ${task.file!.label}?${held}`, intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", documents: [], link: null, task };
   }
   // The last resume file this person was given, by its target: ours, or the posting tailor's (142 _careerRouterArtifacts).
   const lastWasOther = ask === "correct" && (routerLast && (!prior?.file || Date.parse(routerLast.at || routerLast.created_at || "") > Date.parse(prior.at)) || (prior?.file && prior.file.label !== target.label));
@@ -585,7 +588,13 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
     return { reply: `I couldn't make a PDF for ${target.label} that reads back correctly, so I haven't sent one. Ask me again and I'll rebuild it.`, intent: RESUME_TASK_INTENT, resultStatus: "failed", documents: [], link: null, task };
   }
   const sha = await hex(out.pdf), filename = `${fileStem(target)}.pdf`;
-  const documents: Doc[] = [{ kind: "document", format: "pdf", filename, mime: "application/pdf", base64: b64(out.pdf), sha256: sha }];
+  // D-072 (files writers): the delivered PDF is a version of the resume for this target on the Materials File (career_material_writer.ts),
+  // with what changed as this build itself reports it (order moved, bullets reworded as approved, bullets left off to fit).
+  const material = { doc_kind: "resume", target: target.label, role_job_id: null, based_on: source, format_check: "The words read back out of the PDF are exactly the lines built",
+    changes: [...built.moved.map((m) => ({ kind: "Emphasis", after: `Moved ${m}`, text: "Order changed; no fact changed." })),
+      ...(task.swaps ?? []).map((w) => ({ kind: "Wording", before: w.before, after: w.after, text: "Reworded as you approved." })),
+      ...built.left.map((l) => ({ kind: "Emphasis", after: `Left off: ${l}`, text: "Left off to fit the page; still on your record." }))].slice(0, 20) };
+  const documents: Doc[] = [{ kind: "document", format: "pdf", filename, mime: "application/pdf", base64: b64(out.pdf), sha256: sha, material }];
   if (/\b(docx|word)\b/.test(t)) documents.push({ kind: "document", format: "docx", filename: `${fileStem(target)}.docx`, mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: b64(out.docx), sha256: await hex(out.docx) });
   // A link only when the person asks for one (T3: "send a download link … the attachment isn't opening"): the File page, sign-in first.
   const wantsLink = ask === "link" || /\b(link|download)\b/.test(t);
@@ -604,10 +613,21 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
     if (built.contactMissing || built.gpaConflict || built.unconfirmed) say.push("This is a review draft, not ready for an employer.");
   } else if (ask === "make" && movedBefore && built.moved.length && !named) {
     say.push(`Here is the ${pages} PDF for ${target.label}: I put ${built.moved[0]}${task.limits.includes("one_page") ? ", kept it to one page" : ""} and left the experience itself unchanged.`);
+    // R-rules "Edit the resume": what changes, the source used, what is still missing.
+    if (task.said.includes("source")) say.push(`I used ${source}.`);
+  } else if (ask === "send_pdf" && prior?.pending === "send_choice" && documents.length === 1) {
+    // The person picked the PDF from the two choices just asked: the file is the answer.
+    say.push("Here is the resume PDF.");
+  } else if (ask === "send_pdf" && documents.length === 1) {
+    // R-rules "Give me the PDF": the attachment, plus what is still open on it and that it is a review draft.
+    say.push(`Here is the ${pages} resume PDF for ${target.label}.`);
+    const open = [noGpa || built.gpaConflict ? "GPA is left off" : null, built.contactMissing ? "the contact details are still placeholders" : null].filter(Boolean);
+    if (open.length) say.push(`${open.join(" and ").replace(/^./, (c) => c.toUpperCase())}.`);
+    if (built.contactMissing || built.gpaConflict || built.unconfirmed) say.push("This is a review draft, not ready for an employer.");
   } else if (ask === "make" || ask === "send_pdf") say.push(documents.length > 1 ? `Here are the PDF and Word (DOCX) files of your resume for ${target.label}.`
     : ask === "send_pdf" || prior?.file?.label === target.label && !named ? `Here is the resume PDF for ${target.label}.` : `Here is your ${pages} resume PDF for ${target.label}.`);
   else if (ask === "link" && !say.length) say.push(`Here is the resume PDF for ${target.label} again.`);
-  if (!task.said.includes("general") && ask !== "send_pdf") { say.push("It's a general version; send me a posting and I'll tailor it to that."); task.said.push("general"); }
+  if (!task.said.includes("general") && ask !== "send_pdf") { say.push("It's general; send a posting to tailor it."); task.said.push("general"); }
   if (!task.said.includes("source")) {
     say.push(`I used ${source}${built.unconfirmed ? " (not yet confirmed by you)" : ""}, kept every fact as written and added no experience.`);
     task.said.push("source");

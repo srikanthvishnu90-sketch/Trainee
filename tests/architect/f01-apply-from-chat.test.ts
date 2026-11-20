@@ -62,7 +62,10 @@ Deno.test("F01 positions: '1 and 3', '#2', 'the 2nd one', 'the first and third',
   eq(applyManyAsk("apply to the first and third ones"), { kind: "pick", is: [1, 3] });
   eq(applyManyAsk("apply to all of them"), { kind: "all" });
   eq(applyManyAsk("apply to 3 roles"), { kind: "first", n: 3 });
-  for (const m of ["apply to 25 data analyst jobs", "apply to 3", "how do I apply to 1 and 3?", "I applied to 1 and 3", "apply to the Data Analyst role at Acme"]) eq(applyManyAsk(m), null, m);
+  // architect amendment (D-092, owner 2026-11-16): a count with a role is the searched first-N ask, no longer the batch
+  // delegation's; only that case moved out of the null list.
+  eq(applyManyAsk("apply to 25 data analyst jobs")?.kind, "first");
+  for (const m of ["apply to 3", "how do I apply to 1 and 3?", "I applied to 1 and 3", "apply to the Data Analyst role at Acme"]) eq(applyManyAsk(m), null, m);
 });
 
 Deno.test("F01 'apply to 1 and 3' queues exactly those two from the list when they pass; the coverage line comes first; the prepare is asked for exactly the rows queued", async () => {

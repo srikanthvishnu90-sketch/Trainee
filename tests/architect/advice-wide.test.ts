@@ -34,7 +34,11 @@ Deno.test("AW-2 open phrasings the old regex missed go to the brain", () => {
 Deno.test("AW-3 company asks stay with code: the router claims them and the decision is the code route, not the brain", () => {
   for (const m of ["is Stripe worth it?", "should I go into the interview at Goldman Sachs?", "what does it take to get hired at Goldman Sachs as an analyst?", "is Goldman a good bet?",
     "How do I get hired at Acmeworks?", "how do I get a job at Acmeworks as a nurse", "apply to the Backend Software Engineer role at Ironstack Payments", "find me nurse jobs in Chicago", "watch data analyst roles in Austin"]) {
-    const d = decide(m); assertNode.equal(d.brain, false, `${m}: ${d.reason}/${d.intent}`);
+    const d = decide(m);
+    // Architect amendment (D-061): G1 and G14 with web research on (D-060): a firm's company file is the brain's data for a research
+    // turn (g1_model_decides on company_intel); it is still never the open-question route, and every action stays code's.
+    if (d.intent === "company_intel" && d.reason === "g1_model_decides") continue;
+    assertNode.equal(d.brain, false, `${m}: ${d.reason}/${d.intent}`);
     assertNode.ok(["code_product", "action", "router_claimed", "kept_on_router", "host_control"].includes(d.reason), `${m}: ${d.reason}`);
   }
   // brands the router does not claim never become an OPEN question (known employers, or a name after at/for/with/from)

@@ -21,11 +21,13 @@ const RECORDS: Source = "From Trainee's records";
 export const MADE: Source = "Made by Trainee";
 const MADE_OK = new Set<string>(["plan_review"]);
 export const RESUME_B64_MAX = 400_000; // about 290 KB of PDF
-export const KIND_IDS = ["job_list", "introduction", "application_proof", "application_review", "plan_review", "comparison", "draft", "research_brief"] as const;
+export const KIND_IDS = ["job_list", "introduction", "application_proof", "application_review", "plan_review", "comparison", "draft", "research_brief", "tracker"] as const;
 export type KindId = typeof KIND_IDS[number];
-export const KIND_LABEL: Record<KindId, string> = { job_list: "Your jobs", introduction: "Introduction", application_proof: "Application proof", application_review: "Application review", plan_review: "Plan review", comparison: "Comparison", draft: "Draft", research_brief: "Research brief" };
+export const KIND_LABEL: Record<KindId, string> = { job_list: "Your jobs", introduction: "Introduction", application_proof: "Application proof", application_review: "Application review", plan_review: "Plan review", comparison: "Comparison", draft: "Draft", research_brief: "Research brief", tracker: "Application tracker" };
 // WO-G: the application review (spec C.11 F-09) is built by code from a prepared application only, never by a model.
-export const MODEL_KINDS = KIND_IDS.filter((k) => k !== "job_list" && k !== "application_review");
+// D-062 (MIRROR-PROCESS C16): the application tracker is built by code from the person's records and Gmail confirmations only
+// (_shared/career_application_record.ts trackerData, the export_tracker tool), never by a model.
+export const MODEL_KINDS = KIND_IDS.filter((k) => k !== "job_list" && k !== "application_review" && k !== "tracker");
 
 export interface FileRecord {
   id: string; userId: string; kind: KindId; data: any; state: Record<string, any>;
@@ -94,7 +96,8 @@ class V {
     return v as Source;
   }
   list(v: unknown, path: string, min: number, max: number): any[] {
-    if (!Array.isArray(v)) { this.err(path, "must be a list"); return []; }
+    // D-071 (live-8 C1: "sections: must be a list", twice): the error says what came instead, so the model can fix that exactly.
+    if (!Array.isArray(v)) { this.err(path, `must be a list (a JSON array), got ${v === undefined ? "nothing" : v === null ? "null" : typeof v === "string" ? "text" : typeof v === "object" ? "an object" : typeof v}`); return []; }
     if (v.length < min || v.length > max) this.err(path, `needs ${min === max ? min : `${min} to ${max}`} item(s), has ${v.length}`);
     return v.slice(0, max);
   }
@@ -120,6 +123,31 @@ class V {
   }
 }
 
+// D-094 (owner, 2026-11-16): the batch File lists every application of one batch, numbered 1..N as the card numbers them, each
+// with exactly what its payload sends (employer, role, application page, resume, files, every answer word for word) and the
+// payload hash the yes binds. Its stored data is what the card's file_sha covers (20261116140000), so nothing here is optional
+// guesswork: an item that does not validate refuses the whole File, and the card is then shown as before.
+export const BATCH_FILE_MAX = 10000;
+export const BATCH_FILE_BYTES = 5_000_000; // a sanity bound on the stored File (career_watch_kv), far above a batch of hundreds
+function batchOf(raw: unknown, v: V) {
+  const b = v.obj(raw, "batch");
+  const items = v.list(b.items, "batch.items", 1, BATCH_FILE_MAX).map((it: any, i: number) => {
+    const p = `batch.items[${i}]`;
+    if (it?.n !== i + 1) v.err(`${p}.n`, "must number the applications 1..N in card order");
+    if (typeof it?.prepared_id !== "string" || !/^[0-9a-f-]{36}$/i.test(it.prepared_id)) v.err(`${p}.prepared_id`, "must be the prepared application's id");
+    if (typeof it?.payload_hash !== "string" || !/^[0-9a-f]{64}$/.test(it.payload_hash)) v.err(`${p}.payload_hash`, "must be the payload's sha256");
+    return { n: i + 1, prepared_id: String(it?.prepared_id ?? ""), payload_hash: String(it?.payload_hash ?? ""),
+      employer: v.str(it?.employer, `${p}.employer`, { max: 100, templ: true }), role: v.str(it?.role, `${p}.role`, { max: 120, opt: true, templ: true }),
+      url: v.str(it?.url, `${p}.url`, { max: 500, opt: true, templ: true }), resume: v.str(it?.resume, `${p}.resume`, { max: 200, opt: true, templ: true }),
+      files: v.list(it?.files ?? [], `${p}.files`, 0, 6).map((f, k) => v.str(f, `${p}.files[${k}]`, { max: 160, templ: true })),
+      answers: v.list(it?.answers ?? [], `${p}.answers`, 0, 60).map((a, k) => ({ question: v.str(a?.question, `${p}.answers[${k}].question`, { max: 200, templ: true }),
+        answer: v.str(a?.answer, `${p}.answers[${k}].answer`, { max: 4000, multi: true, templ: true }) })),
+      unresolved: v.list(it?.unresolved ?? [], `${p}.unresolved`, 0, 20).map((u, k) => ({ question: v.str(u?.question, `${p}.unresolved[${k}].question`, { max: 200, templ: true }),
+        ask: v.str(u?.ask, `${p}.unresolved[${k}].ask`, { max: 600, templ: true }) })),
+      approvable: it?.approvable === true };
+  });
+  return { count: items.length, items };
+}
 // WO-G (fixes 12, 13): code-built proofs carry the one visible stage (application_review.ts stageOf) and, for a prepared
 // application, the review: what the approval covers, every answer word for word, every unresolved required question.
 // Only code builds these (trusted): a model never writes a stage, an answer or a question here.
@@ -175,6 +203,11 @@ const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = 
   },
   application_review(raw, v) {
     const x = v.obj(raw, "data");
+    // D-094: a batch's File (every application of one batch, each with its exact payload), built by code from the prepared rows.
+    if (v.trusted && x.batch && !x.review) {
+      return { from_prepared: true, title: v.str(x.title, "title", { max: 80 }), status: "prepared", prepared_at: v.time(x.prepared_at, "prepared_at"),
+        as_of: v.time(x.as_of, "as_of", false), batch: batchOf(x.batch, v) };
+    }
     if (!v.trusted || !x.review) { v.err("data", "an application review is built by Trainee from a prepared application only"); return {}; }
     return { from_prepared: true, title: v.str(x.title, "title", { max: 80 }), company: v.str(x.company, "company", { max: 100 }), role: v.str(x.role, "role", { max: 120, opt: true }),
       destination: v.str(x.destination, "destination", { max: 120, opt: true }), resume: v.str(x.resume, "resume", { max: 100, opt: true }), ids: v.str(x.ids, "ids", { max: 60, opt: true }),
@@ -206,6 +239,25 @@ const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = 
     }
     return { title: v.str(x.title, "title", { max: 80 }), type: v.one(x.type, "type", ["email", "cover_letter", "message"] as const), to: v.str(x.to, "to", { max: 120, opt: true }), subject: v.str(x.subject, "subject", { max: 140, opt: true, templ: true }),
       body: v.str(x.body, "body", { max: 4000, multi: true, templ: true }), basis: v.list(x.basis ?? [], "basis", 0, 10).map((f, i) => v.fact(f, `basis[${i}]`)) };
+  },
+  // D-062 (C16): code-built only (trusted). Past applications with their evidence and dates, researched roles, unsubmitted drafts,
+  // each with its status, and what the record covers (Gmail-based). Every value is read from a record; nothing is a model's.
+  tracker(raw, v) {
+    const x = v.obj(raw, "data");
+    if (!v.trusted) { v.err("data", "an application tracker is built by Trainee from your records and Gmail confirmations, not by create_file"); return {}; }
+    const day = (t: unknown, path: string) => (t === undefined ? {} : typeof t === "string" && /^\d{4}-\d{2}-\d{2}$/.test(t) ? { [path]: t } : (v.err(path, "is a date like 2026-11-11"), {}));
+    const applied = v.list(x.applied ?? [], "applied", 0, 60).map((r, i) => { const q = v.obj(r, `applied[${i}]`); const p = `applied[${i}]`;
+      return { company: v.str(q.company, `${p}.company`, { max: 120, fact: true, links: false }), ...(q.role !== undefined ? { role: v.str(q.role, `${p}.role`, { max: 160, fact: true, links: false }) } : {}),
+        ...day(q.applied_on, "applied_on"), status: v.str(q.status, `${p}.status`, { max: 120 }), source: v.one(q.source, `${p}.source`, ["employer email", "Trainee's submission record", "your word"] as const),
+        evidence: v.list(q.evidence ?? [], `${p}.evidence`, 0, 6).map((e, j) => { const z = v.obj(e, `${p}.evidence[${j}]`); return { what: v.str(z.what, `${p}.evidence[${j}].what`, { max: 120 }), ...day(z.on, "on"), ...(z.text !== undefined ? { text: v.str(z.text, `${p}.evidence[${j}].text`, { max: 200, links: false }) } : {}) }; }) }; });
+    const researched = v.list(x.researched ?? [], "researched", 0, 30).map((r, i) => { const q = v.obj(r, `researched[${i}]`); const p = `researched[${i}]`;
+      return { company: v.str(q.company, `${p}.company`, { max: 120, fact: true, links: false }), ...(q.role !== undefined ? { role: v.str(q.role, `${p}.role`, { max: 160, fact: true, links: false }) } : {}),
+        ...(q.url !== undefined ? { url: v.https(q.url, `${p}.url`) } : {}), status: v.str(q.status, `${p}.status`, { max: 80 }) }; });
+    const drafts = v.list(x.drafts ?? [], "drafts", 0, 30).map((r, i) => { const q = v.obj(r, `drafts[${i}]`); const p = `drafts[${i}]`;
+      return { ...(q.company !== undefined ? { company: v.str(q.company, `${p}.company`, { max: 120, links: false }) } : {}), what: v.str(q.what, `${p}.what`, { max: 120 }), status: v.str(q.status, `${p}.status`, { max: 120 }), ...day(q.since, "since") }; });
+    return { title: v.str(x.title, "title", { max: 80 }), as_of: v.time(x.as_of, "as_of", false), applied, researched, drafts,
+      coverage: v.list(x.coverage, "coverage", 1, 8).map((c, i) => v.str(c, `coverage[${i}]`, { max: 300 })),
+      ...(x.changes !== undefined ? { changes: v.list(x.changes, "changes", 1, 10).map((c, i) => v.str(c, `changes[${i}]`, { max: 300 })) } : {}) };
   },
   research_brief(raw, v) {
     const x = v.obj(raw, "data");
@@ -266,7 +318,9 @@ function marketBrief(x: Record<string, any>, v: V) {
   const line = (r: unknown, path: string, sourced: boolean) => {
     const q = v.obj(r, path), f = sourced ? v.fact(q, path, { valueKey: "text", labelKey: null }) : { text: v.str(q.text, `${path}.text`, { max: 400, links: false }) };
     if (sourced && typeof q.text === "string" && URL_RX.test(q.text)) v.err(`${path}.text`, "must not contain links; cite the source number");
-    return { ...f, cite: cite(q.cite, `${path}.cite`) };
+    // D-073 review 2: a reading (a condition or a risk) no sentence of its cited page says is marked by code (market.ts, the check
+    // the chat reply uses); the page shows it apart, labelled as not confirmed. Only `true` is kept, and only on a reading.
+    return { ...f, cite: cite(q.cite, `${path}.cite`), ...(!sourced && q.unconfirmed === true ? { unconfirmed: true } : {}) };
   };
   let comparison: unknown;
   if (x.comparison !== undefined) {
@@ -313,7 +367,8 @@ export function validateKind(kind: string, raw: unknown, o: { trusted?: boolean;
   let data: any;
   try { data = fn(raw, v); } catch (e) { return { ok: false, errors: [`data: could not be read (${e instanceof Error ? e.message : String(e)})`] }; }
   // A resume File carries its PDF (re-review of #644 (4): a real one- or two-page resume runs to tens of KB); every other kind stays small.
-  const max = kind === "draft" && data?.variant === "resume" ? RESUME_B64_MAX + 8_000 : 24_000;
+  // D-094: a batch File lists every application of the batch with its exact answers, so it is bounded by the batch, not a page.
+  const max = kind === "draft" && data?.variant === "resume" ? RESUME_B64_MAX + 8_000 : kind === "application_review" && data?.batch ? BATCH_FILE_BYTES : 24_000;
   if (!v.errors.length && JSON.stringify(data).length > max) v.err("data", `is over ${Math.round(max / 1000)} KB`);
   return v.errors.length ? { ok: false, errors: v.errors.slice(0, 12) } : { ok: true, data: JSON.parse(JSON.stringify(data)) };
 }
@@ -390,6 +445,28 @@ const reviewLines = (d: any, tz?: string | null): string[] => {
     "## Exact answers that will be sent", ...(r.answers ?? []).map((a: any) => `- ${a.question}: ${a.answer}${a.sensitive ? " (your answer)" : ""}`), "",
     "## Conditions - in plain words", ...conditions(r, tz).map((c) => `- ${c}`), "", `What happens after approval. ${AFTER}`, "",
     "## Proof panel", `No submission confirmation. ${PROOF_BODY.none}`, "", APPROVE(r)];
+};
+// D-094: the batch File's page and its plain-text twin. One section per application, numbered as the card numbers them; the
+// approval is the chat card's one yes (hash-bound to this File), and this page cannot submit anything.
+const BATCH_HEAD = (n: number) => `${n === 1 ? "1 application" : `${n} applications`} - your yes approves exactly this list`;
+const BATCH_HOW = "Nothing is submitted from this page. Reply \"yes\" to the card in your Trainee chat to send every application below exactly as listed; \"yes except 2\" or \"only 1, 3\" use the numbers here. If this list changes after you saw it, a yes approves nothing.";
+const batchRows = (it: any): [string, string][] => [["Application page", it.url ?? "Employer application page"], ["Resume", it.resume ?? "None, so this cannot be sent"],
+  ...((it.files ?? []).length ? [["Files", it.files.join("; ")] as [string, string]] : []), ["Approval", it.payload_hash.slice(0, 12)]];
+const batchPageHtml = (d: any, tz?: string | null) => {
+  const items = d.batch.items ?? [];
+  return `<section class="r-hero"><p class="r-kick">${esc(BATCH_HEAD(items.length))}</p><p class="r-title">${esc(d.title)}</p><p class="r-sub">Prepared ${esc(whenIn(d.prepared_at, tz))}</p></section>`
+    + `<p class="state prepared" role="status"><strong>${esc(STAGE_LABEL.prepared)}.</strong> ${esc(BATCH_HOW)}</p>`
+    + items.map((it: any) => card(`${it.n}. ${it.employer}${it.role ? ` - ${it.role}` : ""}`, `<dl class="r-rows">${batchRows(it).map(([k, v]) => rowHtml(k, v)).join("")}</dl>`
+      + ((it.unresolved ?? []).length ? `<ul class="r-need">${it.unresolved.map((u: any) => `<li><strong>${esc(u.question)}: not entered.</strong> ${esc(u.ask)}</li>`).join("")}</ul>` : "")
+      + `<dl class="r-ans">${(it.answers ?? []).map((a: any) => `<div><dt>${esc(a.question)}</dt><dd>${esc(a.answer)}</dd></div>`).join("")}</dl>`, (it.unresolved ?? []).length ? "r-warn" : "")).join("")
+    + `<p class="r-approve" role="note">${esc(BATCH_HOW)}</p>`;
+};
+const batchLines = (d: any, tz?: string | null): string[] => {
+  const items = d.batch.items ?? [];
+  return [BATCH_HEAD(items.length).toUpperCase(), `Prepared ${whenIn(d.prepared_at, tz)}`, "", `Status: ${STAGE_LABEL.prepared}. ${BATCH_HOW}`, "",
+    ...items.flatMap((it: any) => [`## ${it.n}. ${it.employer}${it.role ? ` - ${it.role}` : ""}`, ...batchRows(it).map(([k, v]) => `- ${k}: ${v}`),
+      ...(it.unresolved ?? []).map((u: any) => `- Needs your answer: ${u.question}: not entered. ${u.ask}`),
+      ...(it.answers ?? []).map((a: any) => `- ${a.question}: ${a.answer}`), ""])];
 };
 const STATUS_NOTE: Record<string, string> = { queued: "Queued. Nothing has been submitted yet.", prepared: "Prepared. Nothing has been submitted yet.", submitted: "Submitted. The employer hasn't confirmed it.", uncertain: "Submission may have landed; the employer has not confirmed it.", confirmed: "Confirmed by the employer.", failed: "Failed. It was not submitted." };
 
@@ -485,6 +562,7 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
       break;
     }
     case "application_review":
+      if (d.batch) { main = `<style>${PROOF_CSS}</style>` + batchPageHtml(d, o.tz); break; }
       // The p-67 header's mono ids and its overflow menu (the plain-text version); the shell above carries the title.
       main = `<style>${PROOF_CSS}</style><div class="rv-top">${d.ids ? `<p class="rv-ids">${esc(d.ids)}</p>` : ""}<details class="rv-more"><summary aria-label="More">\u22EE</summary><a href="?format=text">Plain text version</a></details></div>`
         + reviewPageHtml(d, o.tz) + sec("Flagged by you", `<ul class="why">${(Array.isArray(rec.state?.flags) ? rec.state.flags : []).map((f: any) => `<li>${esc(when(f.at))}: ${esc(f.note)}</li>`).join("")}</ul>`.replace(/^<ul class="why"><\/ul>$/, ""));
@@ -543,6 +621,17 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
         + sec("What it says about you", dl(Fs(d.basis).map((f) => factHtml(f, f.label)).join("")))
         + `<p class="meta">This page cannot send it. To send it, ask Trainee in Telegram; you approve the exact message first.</p>`;
       break;
+    case "tracker": {
+      const tr = (cells: string[]) => `<tr>${cells.map((c) => `<td>${c}</td>`).join("")}</tr>`;
+      const table = (label: string, head: string[], rows: string[]) => rows.length ? `<div class="tbl" tabindex="0" role="region" aria-label="${esc(label)}"><table><thead><tr>${head.map((h) => `<th scope="col">${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>` : `<p class="meta">None on record.</p>`;
+      main = (d.changes?.length ? sec("Corrected since last time", `<ul class="why">${d.changes.map((c: string) => `<li>${esc(c)}</li>`).join("")}</ul>`) : "")
+        + sec("Applications", table("Applications", ["Company", "Role", "Applied", "Status", "Evidence"], (d.applied ?? []).map((a: any) => tr([esc(a.company), esc(a.role ?? ""), esc(a.applied_on ?? ""), `${esc(a.status)}<br><span class="meta">${esc(a.source)}</span>`,
+          (a.evidence ?? []).map((e: any) => `${esc(e.what)}${e.on ? ` (${esc(e.on)})` : ""}${e.text ? `: ${esc(e.text)}` : ""}`).join("<br>")]))))
+        + sec("Researched, not applied", table("Researched roles", ["Company", "Role", "Status"], (d.researched ?? []).map((r: any) => tr([esc(r.company), r.url ? linkHtml(r.url, r.role ?? "posting") : esc(r.role ?? ""), esc(r.status)]))))
+        + sec("Drafts, not submitted or sent", table("Drafts", ["Company", "What", "Status", "Since"], (d.drafts ?? []).map((x: any) => tr([esc(x.company ?? ""), esc(x.what), esc(x.status), esc(x.since ?? "")]))))
+        + sec("What this covers", `<ul class="why">${(d.coverage ?? []).map((c: string) => `<li>${esc(c)}</li>`).join("")}</ul>`);
+      break;
+    }
     case "research_brief":
       if (d.variant === "market") { main = marketHtml(d); break; }
       if (d.variant === "company") { main = companyHtml(d); break; }
@@ -561,19 +650,24 @@ export const marketReadOn = (d: any) => { const ts = (d?.sources ?? []).map((s: 
 const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
 const cites = (c: unknown) => Array.isArray(c) && c.length ? ` <span class="rb-cite">${c.map((i) => `[${esc(i)}]`).join("")}</span>` : "";
 const READING = `<span class="src rb-read">Trainee's reading</span>`;
+export const UNCONFIRMED_HEAD = "Not confirmed: no sentence of the cited page says these.", UNCONFIRMED_TAG = "Trainee's reading, not confirmed by a source";
 const MARK = `<svg class="rb-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="var(--accent)"/><text x="32" y="45" font-family="Georgia,serif" font-size="40" font-weight="700" text-anchor="middle" fill="var(--accent-ink)">T</text></svg>`;
 function marketHtml(d: any): string {
   const n = (d.sources ?? []).length, read = marketReadOn(d);
   const cover = `<section class="rb-cover" aria-label="Cover"><p class="rb-brand">${MARK}<span>Trainee</span><span class="rb-dot" aria-hidden="true">·</span><span>Research brief</span></p>`
     + `<p class="rb-thesis">${esc(d.thesis)}${cites(d.thesis_cite)}</p>${d.thesis_summary ? `<p class="rb-basis">A summary of the cited sections below.</p>` : ""}<p class="rb-date">${read ? `Sources read ${esc(read)} · ` : ""}${n} source${n === 1 ? "" : "s"}</p></section>`;
   const list = (xs: any[], sourced: boolean) => `<ul class="rb-list">${xs.filter((f) => sourced ? hasSrc(f) : !!f?.text).map((f) => `<li><span class="rb-t">${esc(f.text)}${cites(f.cite)}</span>${sourced ? src(f.source) : READING}</li>`).join("")}</ul>`;
+  // D-073 review 2: a reading no sentence of its page says is never listed among the others: it is under its own label, in its own
+  // list, and each line says so. The chat reply never states such a reading (market.ts `answerable`); the File agrees.
+  const readings = (xs: any[]) => { const said = xs.filter((f) => f?.text && !f.unconfirmed), not = xs.filter((f) => f?.text && f.unconfirmed);
+    return (said.length ? list(said, false) : "") + (not.length ? `<p class="rb-basis rb-unconfirmed-head">${esc(UNCONFIRMED_HEAD)}</p><ul class="rb-list rb-unconfirmed">${not.map((f) => `<li><span class="rb-t">${esc(f.text)}${cites(f.cite)}</span><span class="src rb-read">${esc(UNCONFIRMED_TAG)}</span></li>`).join("")}</ul>` : ""); };
   const c = d.comparison, opts = (c?.options ?? []).map((o: any) => o.name);
   const cell = (x: any) => hasSrc(x) ? `${esc(x.value)}${cites(x.cite)}<br>${src(x.source)}` : `<span class="meta">Not stated</span>`;
   // Under 560 px each row stacks as a card of option/value pairs (KIND_CSS .rb-tbl): the option name is repeated in each cell as a
   // visual label (aria-hidden; the table's own headers still name the cell), so no column is ever cut off at phone width.
   const table = c ? `<div class="tbl rb-tbl" tabindex="0" role="region" aria-label="Comparison table"><table><caption class="sr">Comparison</caption><thead><tr><th scope="col"><span class="sr">Item</span></th>${opts.map((o: string) => `<th scope="col">${esc(o)}</th>`).join("")}</tr></thead><tbody>${(c.rows ?? []).map((r: any) => `<tr><th scope="row">${esc(r.label)}</th>${(r.cells ?? []).map((x: any, i: number) => `<td><span class="rb-k" aria-hidden="true">${esc(opts[i] ?? "")}</span><span class="rb-v">${cell(x)}</span></td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
   const srcs = `<ol class="rb-src">${(d.sources ?? []).map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta"><span class="rb-host" title="${esc(hostOf(s.url))}">${esc(hostOf(s.url))}</span> · Read ${esc(DAY(s.fetched_at))}</span></li>`).join("")}</ol>`;
-  return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("Where the sources differ", (d.disagreements ?? []).length ? `<ul class="rb-list rb-differ">${d.disagreements.map((x: any) => `<li><span class="rb-t">${esc(x.label)}: ${x.values.map((y: any) => `${esc(y.value)}${cites(y.cite)}`).join(" · ")}. The sources differ; Trainee has not picked one.</span></li>`).join("")}</ul>` : "") + sec("What would have to be true", list(d.conditions ?? [], false)) + sec("Risks", list(d.risks ?? [], false))
+  return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("Where the sources differ", (d.disagreements ?? []).length ? `<ul class="rb-list rb-differ">${d.disagreements.map((x: any) => `<li><span class="rb-t">${esc(x.label)}: ${x.values.map((y: any) => `${esc(y.value)}${cites(y.cite)}`).join(" · ")}. The sources differ; Trainee has not picked one.</span></li>`).join("")}</ul>` : "") + sec("What would have to be true", readings(d.conditions ?? [])) + sec("Risks", readings(d.risks ?? []))
     + sec("How the sources were chosen", (d.basis ?? []).length ? `<ul class="rb-list rb-basis-list">${d.basis.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "")
     + sec("Not found in a free source", (d.gaps ?? []).length ? `<ul class="rb-list rb-gaps">${d.gaps.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "") + sec("Sources", srcs);
 }
@@ -655,8 +749,12 @@ function marketText(d: any, L: string[]) {
     L.push("## Comparison"); (d.comparison.rows ?? []).forEach((r: any) => { L.push(`### ${r.label}`); (r.cells ?? []).forEach((x: any, i: number) => L.push(hasSrc(x) ? `- ${opts[i]}: ${x.value}${c(x)} [${x.source}]` : `- ${opts[i]}: Not stated`)); }); L.push("");
   }
   if ((d.disagreements ?? []).length) { L.push("## Where the sources differ"); d.disagreements.forEach((x: any) => L.push(`- ${x.label}: ${x.values.map((y: any) => `${y.value}${c(y)}`).join(" · ")}. The sources differ; Trainee has not picked one.`)); L.push(""); }
-  L.push("## What would have to be true"); (d.conditions ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
-  L.push("## Risks"); (d.risks ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
+  const readings = (xs: any[]) => { const not = xs.filter((f) => f?.unconfirmed);
+    xs.filter((f) => !f?.unconfirmed).forEach((f) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`));
+    if (not.length) { L.push(UNCONFIRMED_HEAD); not.forEach((f) => L.push(`- ${f.text}${c(f)} [${UNCONFIRMED_TAG}]`)); }
+    L.push(""); };
+  L.push("## What would have to be true"); readings(d.conditions ?? []);
+  L.push("## Risks"); readings(d.risks ?? []);
   if ((d.basis ?? []).length) { L.push("## How the sources were chosen"); d.basis.forEach((g: string) => L.push(`- ${g}`)); L.push(""); }
   if ((d.gaps ?? []).length) { L.push("## Not found in a free source"); d.gaps.forEach((g: string) => L.push(`- ${g}`)); L.push(""); }
   L.push("## Sources"); (d.sources ?? []).forEach((s: any, i: number) => L.push(`${i + 1}. ${s.title}: ${s.url} (read ${DAY(s.fetched_at)})`)); L.push("");
@@ -675,6 +773,7 @@ export function textOf(rec: FileRecord, o: { now: number; url?: string }): strin
       break;
     }
     case "application_review":
+      if (d.batch) { L.push(...batchLines(d), ""); break; }
       if (d.ids) L.push(d.ids, "");
       L.push(...reviewLines(d), "");
       break;
@@ -708,6 +807,16 @@ export function textOf(rec: FileRecord, o: { now: number; url?: string }): strin
       L.push(`${cap1(String(d.type).replace("_", " "))}${d.to ? ` to ${d.to}` : ""}`); if (d.subject) L.push(`Subject: ${d.subject}`); L.push("", d.body, "");
       if (Fs(d.basis).length) { h("What it says about you"); Fs(d.basis).forEach((f) => L.push(factText(f, f.label))); L.push(""); }
       L.push("Sending: not from this file. Ask Trainee in Telegram; you approve the exact message first.", "");
+      break;
+    case "tracker":
+      if (d.changes?.length) { h("Corrected since last time"); d.changes.forEach((c: string) => L.push(`- ${c}`)); L.push(""); }
+      h("Applications"); if (!(d.applied ?? []).length) L.push("None on record.");
+      (d.applied ?? []).forEach((a: any) => { L.push(`- ${a.company}${a.role ? `, ${a.role}` : ""}${a.applied_on ? `, applied ${a.applied_on}` : ""}: ${a.status} [${a.source}]`); (a.evidence ?? []).forEach((e: any) => L.push(`  - ${e.what}${e.on ? ` (${e.on})` : ""}${e.text ? `: ${e.text}` : ""}`)); });
+      L.push(""); h("Researched, not applied"); if (!(d.researched ?? []).length) L.push("None on record.");
+      (d.researched ?? []).forEach((r: any) => L.push(`- ${r.company}${r.role ? `, ${r.role}` : ""}: ${r.status}${r.url ? ` ${r.url}` : ""}`));
+      L.push(""); h("Drafts, not submitted or sent"); if (!(d.drafts ?? []).length) L.push("None on record.");
+      (d.drafts ?? []).forEach((x: any) => L.push(`- ${x.company ? `${x.company}: ` : ""}${x.what}, ${x.status}${x.since ? ` (since ${x.since})` : ""}`));
+      L.push(""); h("What this covers"); (d.coverage ?? []).forEach((c: string) => L.push(`- ${c}`)); L.push("");
       break;
     case "research_brief":
       if (d.variant === "market") { marketText(d, L); break; }

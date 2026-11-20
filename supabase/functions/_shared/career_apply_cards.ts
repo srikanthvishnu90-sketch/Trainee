@@ -22,7 +22,8 @@
 import { type EventStore, recordEvents } from "./agent/timeline.ts";
 import { sameCompany } from "./career_mail.ts";
 import { approvalWords, NEGATIONS } from "./approval_words.ts";
-import { guardedAnswer, unresolvedOf } from "./application_review.ts";
+import { guardedAnswer, narrowQuestion, unresolvedOf } from "./application_review.ts";
+import { type ItemRoute, routeLine } from "./career_apply_send_route.ts";
 
 export interface Prepared {
   id: string;
@@ -33,6 +34,36 @@ export interface Prepared {
   // Architect ruling on #674 (a): the role, read from the posting row the application was prepared for (career_postings, by the
   // payload's job id), when its employer is this application's. Shown beside the employer; null when it cannot be read.
   role?: string | null;
+  // MASS APPLY CONVERSATIONS (2026-11-16): what the posting itself states, said under the employer and role so the person
+  // decides on the card alone: where, the pay and the deadline exactly as posted (postingDetailLines). Never the person's
+  // answers (those are card_lines), never a guess: a posting that states no pay shows none.
+  details?: string[];
+}
+// The pay and the deadline a posting states in its own words, or null for each when it states none. Only an amount with a
+// currency sign is pay; only a full date after "apply by" / "applications close" / "deadline" is a deadline.
+export function postedTerms(description: unknown): { pay: string | null; deadline: string | null } {
+  const d = String(description ?? "").replace(/\s+/g, " ");
+  const pay = /\b(?:pay(?:\s+range)?|salary(?:\s+range)?|compensation|base\s+pay|hourly\s+rate)\s*[:\-–]\s*([^.;]*?\$\s?\d[^.;]*?)(?:\.(?:\s|$)|;|$)/i.exec(d)?.[1]
+    ?? /(\$\s?\d[\d,]*(?:\.\d+)?(?:\s*(?:-|–|to)\s*\$?\s?\d[\d,]*(?:\.\d+)?)?\s*(?:per\s+hour|an\s+hour|\/\s*h(?:ou)?r|per\s+year|a\s+year|\/\s*year|annually))/i.exec(d)?.[1] ?? null;
+  const deadline = /\b(?:apply\s+by|applications?\s+(?:close|closes|are\s+due|due)(?:\s+on)?|deadline(?:\s+to\s+apply)?)\s*:?\s*((?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2},?\s+\d{4})/i.exec(d)?.[1] ?? null;
+  return { pay: pay ? pay.trim().slice(0, 120) : null, deadline: deadline ? deadline.trim() : null };
+}
+// The lines a card shows under one application's employer and role, from the posting row it was prepared for.
+export function postingDetailLines(p: { location?: string | null; description?: string | null }, confirmed: string[] = []): string[] {
+  const { pay, deadline } = postedTerms(p.description);
+  const where = String(p.location ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+  const fit = fitLine(p.description, confirmed);
+  return [...(where ? [`Where: ${where}`] : []), ...(pay ? [`Pay (as posted): ${pay}`] : []), ...(deadline ? [`Apply by (as posted): ${deadline}`] : []), ...(fit ? [fit] : [])];
+}
+// "Why it fits": the posting's own requirements that a CONFIRMED fact of theirs names, word for word (case aside), and only
+// those; no confirmed fact, no requirements list, or nothing shared: no line (never a guess at fit).
+export function fitLine(description: unknown, confirmed: string[]): string | null {
+  const req = /\brequirements?\s*:\s*([^.]+)/i.exec(String(description ?? ""))?.[1];
+  if (!req || !confirmed.length) return null;
+  const said = ` ${confirmed.join(" \n ").toLowerCase()} `;
+  const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const hits = req.split(/\s*,\s*|\s+and\s+/).map((x) => x.trim()).filter((x) => x && x.length <= 40 && new RegExp(`(?:^|[^a-z0-9+#])${esc(x.toLowerCase())}(?:$|[^a-z0-9+#])`).test(said));
+  return hits.length ? `Why it fits: it asks for ${hits.slice(0, 4).join(", ")}, which your confirmed resume has` : null;
 }
 export interface Card {
   id: string;
@@ -53,6 +84,8 @@ export interface CardStore {
   // card closes the person's other open cards, so an open and an answer in two calls let two approvals at once close each
   // other's card and both approve nothing. Throws card_changed (a hash differs) or invalid card (no longer open to approve).
   confirm?(userId: string, ids: string[], hashes: string[]): Promise<{ card: Card; results: CardResult[] }>;
+  // D-094: open a card bound to a batch File (career_apply_card_open_batch_as): the File must list exactly these, in order.
+  openBatch?(userId: string, ids: string[], fileId: string): Promise<Card>;
   // Architect ruling on #674 (c): the questions still open for this person (career_apply_questions), named on the card.
   openQuestions?(userId: string): Promise<{ label: string; company: string | null }[]>;
   latestOpen(userId: string): Promise<Card | null>;
@@ -84,7 +117,9 @@ export type CardReply =
   | { kind: "no" }
   | { kind: "hold" }
   | { kind: "unclear" }
-  | { kind: "change"; n: number };
+  | { kind: "change"; n: number }
+  // R10 fix 12 (spec B.6 continuation 3, E.3 31): "use that" approves wording, never a send and never an unknown answer.
+  | { kind: "wording" };
 
 export const CARD_INTENT = "career_apply_card";
 // "Submit job 2", "send application #3", "apply to job 1": a submit aimed at one numbered application (spec B.4).
@@ -122,6 +157,8 @@ const NO =
   /^(?:no|nope|nah|n|none|no thanks|no thank you|send none|skip all|skip them|skip them all|decline|decline all|decline them|reject|reject all|cancel|cancel it|cancel all|cancel them|none of them|no to all|not any|don'?t send(?: (?:them|any|it|anything))?|do not send(?: (?:them|any|it|anything))?|no,? don'?t send(?: (?:them|any|it|anything))?)$/;
 const HOLD =
   /^(?:wait|wait a (?:sec|second|minute|moment)|hold on|hold up|hang on|not yet|not now|later|one sec(?:ond)?|give me a (?:sec|second|minute|moment)|let me (?:think|check|look)(?: (?:about it|first|again))?|pause|stop,? (?:don'?t|do not) send(?: (?:it|them|anything))?(?: yet)?|wait,? (?:don'?t|do not) send(?: (?:it|them|anything))?(?: yet)?|(?:don'?t|do not) send (?:it|them|anything) yet|wait,? stop|stop,? wait|hold off|hold them|hold it)(?:,? please)?$/;
+// "Use that.", "keep those answers", "go with that wording": the wording shown is fine. Not a yes (spec E.3 31).
+const WORDING = /^(?:(?:ok(?:ay)?|sure|great|perfect|nice|good),? )?(?:use|keep|go with) (?:that|this|it|those|these|them)(?: (?:one|wording|answer|answers|version|text))?(?:,? please)?$/;
 const UNCLEAR =
   /^(?:maybe|maybe later|perhaps|possibly|probably|i guess|i think so|not sure|unsure|idk|i don'?t know|dunno|hmm+|um+|ok|okay|k|kk|sure|yes but|yes and no|kind of|sort of|yes no|no yes|only|just|except|but)$/;
 const DEFER_OR_NONE =
@@ -199,6 +236,7 @@ export function parseCardReply(text: string): CardReply | null {
   // "stop" alone is the carrier's opt-out (and the host's pause): never a card answer.
   if (t === "stop") return null;
   if (HOLD.test(t)) return { kind: "hold" };
+  if (WORDING.test(t)) return { kind: "wording" };
   if (NO.test(t)) return asked ? { kind: "unclear" } : { kind: "no" };
   if (UNCLEAR.test(t)) return { kind: "unclear" };
   // Fail closed (owner, 2026-10-28): a reply that also says "none", "nothing", "later", "wait", "hold" or names a time
@@ -299,7 +337,8 @@ const one = (p: Prepared, n: number) => {
   const [head, ...rest] = p.card_lines.map((l) => String(l).replace(/\s+/g, " ").trim()).filter(Boolean);
   const first = head ?? p.company, role = String(p.role ?? "").replace(/\s+/g, " ").trim().slice(0, 160);
   // The card line stays whole (the database checks the card carries every line); the role is said after it.
-  return [`${n}. ${role && first === p.company ? `${first} — ${role}` : first}`, ...rest.map((l) => `   ${l}`)].join("\n");
+  const details = (p.details ?? []).map((l) => String(l).replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 4);
+  return [`${n}. ${role && first === p.company ? `${first} — ${role}` : first}`, ...details.map((l) => `   ${l}`), ...rest.map((l) => `   ${l}`)].join("\n");
 };
 // Architect ruling on #674 (c): "Needs you: ..." names each question still open, in the form's words, with its employer, so
 // asking for one answer never hides the work waiting on it (C.24 Needs input; RESPONSE-RULES E4). At most 5, then a count.
@@ -400,6 +439,26 @@ export function batchFor(pending: Prepared[], o: { max?: number; needs?: string 
   return { take: p.take, text: p.pages.join("\n\n"), parts: p.pages.length > 1 ? p.pages : [], more: p.more, skipped };
 }
 
+// D-094 (owner, 2026-11-16): a batch too big for one card text is shown as a short summary (the count, the first few, the File
+// link and how to answer) plus a File listing every application with its exact payload (application_review_links.ts
+// supabaseBatchFile). The File is the batch shown: the one yes approves exactly what it lists, by payload hash, and its numbers
+// are the card's (career_apply_card_push_batch_for checks the File lists exactly the card's items, in order).
+export const BATCH_TOP = 5;
+export function batchSummaryText(take: Prepared[], url: string): string {
+  const n = take.length, top = take.slice(0, BATCH_TOP), more = n - top.length;
+  const head = (p: Prepared) => {
+    const first = String(p.card_lines[0] ?? p.company).replace(/\s+/g, " ").trim() || p.company, role = String(p.role ?? "").replace(/\s+/g, " ").trim();
+    return (role && first === p.company ? `${first} — ${role}` : first).slice(0, 120);
+  };
+  return [
+    `${n === 1 ? "1 application is" : `${n} applications are`} ready. Nothing has been sent.`,
+    [...top.map((p, i) => `${i + 1}. ${head(p)}`), ...(more > 0 ? [`and ${more} more.`] : [])].join("\n"),
+    `Every one of the ${n}, with the exact answers, resume and link each sends: ${url}`,
+    n === 1 ? `Reply "yes" to send it exactly as the File shows, or "no".`
+      : `Reply "yes" to send all ${n} exactly as that File lists them, "yes except 2" or "only 1, 3" (the File's numbers) to send some, or "no".`,
+  ].join("\n\n");
+}
+
 const RESULT: Record<string, string> = {
   queued: "approved; it is sent next, from your computer or, if you turned it on, the cloud",
   declined: "not sent",
@@ -418,15 +477,17 @@ const RESULT: Record<string, string> = {
   refused: "not sent: the queue refused it",
 };
 // The answer in the person's words, from the database's own per-item results (never from what was asked). `declined`
-// says why an item the person did not approve was not sent.
-export function answerText(results: CardResult[], o: { declined?: "left_out" | "said_no" } = {}): string {
+// says why an item the person did not approve was not sent. `routes` (MASS APPLY CONVERSATIONS, 2026-11-17): what will
+// actually happen to EACH approved application, by item number (career_apply_send_route.ts); an item it does not name is
+// said as unconfirmed. Absent, every approved item is said as before.
+export function answerText(results: CardResult[], o: { declined?: "left_out" | "said_no"; routes?: Map<number, ItemRoute> | null } = {}): string {
   const queued = results.filter((r) => r.result === "queued").length;
   const notSent = results.length - queued;
   // WHOLE JOURNEYS R2: an item whose prepared application is gone (a newer resume or a corrected entry discarded it after the
   // card was shown) has no company in the database's result; it read "1. null: not sent: ...". Said plainly instead.
   const lines = results.map((r) =>
     `${r.n}. ${(r.company === null || r.company === undefined ? "" : String(r.company)).replace(/\s+/g, " ").trim().slice(0, 80) || "An application no longer on file"}: ${
-      r.said ?? (r.result === "declined" && o.declined ? RESULT[o.declined] : RESULT[r.result] ?? RESULT.refused)
+      r.said ?? (r.result === "declined" && o.declined ? RESULT[o.declined] : r.result === "queued" && o.routes ? routeLine(o.routes.get(r.n)) : RESULT[r.result] ?? RESULT.refused)
     }`
   );
   const changed = results.filter((r) => r.result === "changed").length;
@@ -483,13 +544,21 @@ const HOW = (count: number) =>
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 export const HOLD_TEXT = (count: number) =>
   `Okay, holding: nothing was approved and nothing was sent. When you're ready, ${lowerFirst(HOW(count))} A text yes counts within 10 minutes of the card; after that, say "show my applications" for a fresh one.`;
+// R10 fix 12: a wording approval keeps the answers as shown and approves nothing else; an open required question stays open.
+export const WORDING_TEXT = (count: number, open: { label: string; company: string | null }[], unread = false) =>
+  `I'll keep the wording exactly as shown. That is not a yes to send, and it answers none of the form's questions: nothing was submitted.` +
+  (open.length
+    ? ` Still unanswered: ${narrowQuestion({ label: open[0].label, company: open[0].company })}${open.length > 1 ? ` ${open.length - 1} more required question${open.length === 2 ? " is" : "s are"} still open too.` : ""}`
+    : unread ? ` I couldn't read the form's open questions just now, so I can't say none are left. ${HOW(count)}` : ` ${HOW(count)}`);
 export const UNCLEAR_TEXT = (count: number) => `I couldn't tell which ones you mean, so nothing was approved. ${HOW(count)}`;
 // "send it" on a card of more than one: "it" is one application, so the card asks which (S2 review of #614).
 export const IT_UNCLEAR_TEXT = (count: number) =>
   `"It" is one application and this card has ${count}, so nothing was approved. Send all ${count}, or which ones? ${HOW(count)}`;
 // The statuses after which the card is still waiting for its answer: the handler keeps it the thread's last word, with
 // its id on the reply, so the next "yes" answers it. "card_outdated" waits only when it carries the current card's id.
-export const CARD_WAITING = ["shown", "not_on_card", "change", "hold", "unclear", "not_named", "count_mismatch", "nothing_left", "confirm_except"];
+// D-094: "file_changed" too: the card is still open and still the thread's last word, so a second yes reaches the database again
+// and is told again that the File changed (never "That card was already answered").
+export const CARD_WAITING = ["shown", "not_on_card", "change", "hold", "wording", "unclear", "not_named", "count_mismatch", "nothing_left", "confirm_except", "file_changed"];
 // WHOLE JOURNEYS R2 (2026-11-02): "show my applications" that showed no card (nothing ready, no resume on file, one too long
 // to show, the resume check not made) is not a card's answer. It was recorded as CARD_ANSWER_INTENT, so the person's next
 // "yes" was told "That card was already answered. Nothing more was sent." about a card that never existed. Its own intent.
@@ -511,6 +580,12 @@ export async function cardTurn(
     // WO-G (fix 12): the review File of each application on the card (application_review.ts, built by code from the prepared
     // payloads): a line per application with its link, or null. A review that cannot be made never changes the card.
     review?: (shown: Prepared[]) => Promise<string | null>;
+    // D-094: the File of a batch (application_review_links.ts supabaseBatchFile). Present, "show my applications" of a batch
+    // that would page is a short summary plus this File, the card bound to it (store.openBatch); absent or failing, paged.
+    batchFile?: (shown: Prepared[]) => Promise<{ id: string; url: string } | null>;
+    // The route each approved application takes, by prepared id (career_apply_send_route.ts supabaseSendRoutes); absent:
+    // said as before; failing: each approved item is said as unconfirmed.
+    routes?: (preparedIds: string[]) => Promise<Map<string, ItemRoute>>;
   },
 ): Promise<{ reply: string; status: string; card_id?: string; parts?: string[] } | null> {
   const withReview = async (c: Batch, out: { reply: string; status: string; card_id?: string; parts?: string[] }) => {
@@ -555,6 +630,16 @@ export async function cardTurn(
           `The application to ${c.tooLong.company} is too long to show in a text. Open it in the app to approve it.`,
         status: "too_long",
       };
+    }
+    // D-094: a batch that would page is shown as a summary plus the File of every application, the card bound to the File's
+    // hash; the File is the batch shown, and the yes approves exactly what it lists. Without a File, paged as before.
+    if (c.parts.length >= 2 && !lead && o.batchFile && o.store.openBatch) {
+      const take = c.take, file = await o.batchFile(take).catch(() => null);
+      const opened = file ? await o.store.openBatch(o.userId, take.map((p) => p.id), file.id).catch((e) => { console.error("batch card:", (e as Error)?.message ?? e); return null; }) : null;
+      if (file && opened) {
+        const notes = [...(c.skipped.length ? [`Too long to list, so not on this card: ${c.skipped.map((p) => p.company).join("; ")}. Open ${c.skipped.length === 1 ? "it" : "them"} in the app.`] : []), ...(needs ? [needs] : [])];
+        return { reply: [batchSummaryText(take, file.url), ...notes].join("\n\n"), status: "shown", card_id: opened.id };
+      }
     }
     // R9-G2 (D-MS-1, one card per batch): a PAGED card the preparation pushed for exactly this batch in the last 5 minutes
     // is shown again as that same card, never replaced by a second card of the same applications; its yes still needs every
@@ -627,6 +712,14 @@ export async function cardTurn(
   // "send 1" / "approve 1" may be a count or a number, but on a card of one they say the same: that one application.
   if (r.kind === "unclear" && total === 1 && /^(?:send|approve) 1$/.test(approvalWords(o.message).trim().toLowerCase())) r = { kind: "only", only: [1] };
   if (r.kind === "hold") return waiting(HOLD_TEXT(total), "hold");
+  if (r.kind === "wording") {
+    // The card's own employers' open required questions, in the form's words: still open, named, and asked narrowly.
+    const ids = card.items.map((i) => i.prepared_id);
+    const companies = o.store.cardCompanies ? await o.store.cardCompanies(o.userId, ids).catch(() => null) : null;
+    const open = o.store.openQuestions ? await o.store.openQuestions(o.userId).catch(() => null) : null;
+    const mine = (open ?? []).filter((q) => !companies || [...companies.values()].some((c) => sameCompany(c, q.company ?? "")));
+    return waiting(WORDING_TEXT(total, mine, open === null), "wording");
+  }
   if (r.kind === "unclear") return waiting(UNCLEAR_TEXT(total), "unclear");
   // "it" (one item) on a card of more than one is not an answer anyone can act on: nothing is approved.
   if (r.kind === "yes" && r.it && total !== 1) return waiting(IT_UNCLEAR_TEXT(total), "unclear");
@@ -695,7 +788,14 @@ export async function cardTurn(
       detail: { card: card.id, n: x.n, result: x.result },
       source: "card",
     })));
-    const reply = answerText(results, { declined: r.kind === "no" ? "said_no" : "left_out" });
+    // Each approved application's own route, read only when something was approved (never one line for the person).
+    const queuedN = new Set(results.filter((x) => x.result === "queued").map((x) => x.n));
+    const routes = queuedN.size && o.routes ? await (async () => {
+      const ids = new Map(card.items.filter((i) => queuedN.has(i.n)).map((i) => [i.n, i.prepared_id] as const));
+      const got = await o.routes!([...ids.values()]).catch(() => null);
+      return new Map([...ids].flatMap(([n, id]) => { const g = got?.get(id); return g ? [[n, g] as const] : []; }));
+    })() : null;
+    const reply = answerText(results, { declined: r.kind === "no" ? "said_no" : "left_out", routes });
     const parts = pagesOf(reply);
     return { reply, status: "answered", ...(parts.length ? { parts } : {}) };
   } catch (e: any) {
@@ -723,6 +823,10 @@ export async function cardTurn(
     // applications are exactly the set it showed.
     if (/card_pages_undelivered/.test(msg)) {
       return { reply: `Not every page of that card has reached you yet, so nothing was approved and nothing was sent. Say "show my applications" to see the whole card again.`, status: "pages_undelivered" };
+    }
+    // D-094: the File a summary card was shown with changed after it was shown: the File is the batch shown, so nothing goes.
+    if (/FILE_CHANGED/.test(msg)) {
+      return { reply: `The File listing these applications changed after it was shown, so nothing was approved and nothing was sent. Say "show my applications" for the current list.`, status: "file_changed", card_id: card.id };
     }
     if (/APPROVAL_SET_CHANGED/.test(msg)) {
       return { reply: `The applications on that card changed after it was shown (APPROVAL_SET_CHANGED), so nothing was approved and nothing was sent. Say "show my applications" for the current card.`, status: "set_changed" };
@@ -779,6 +883,9 @@ export function supabaseCardStore(admin: any): CardStore {
     },
     async open(userId, ids) {
       return must(await admin.rpc("career_apply_card_open_as", { p_user: userId, p_ids: ids }), "open a card");
+    },
+    async openBatch(userId, ids, fileId) {
+      return must(await admin.rpc("career_apply_card_open_batch_as", { p_user: userId, p_ids: ids, p_file: fileId }), "open a batch card");
     },
     async confirm(userId, ids, hashes) {
       // WO-G: an application whose posting still has an open required question is never confirmed (application_review.ts).
@@ -873,7 +980,7 @@ export function supabaseCardStore(admin: any): CardStore {
 // (career_apply_prepare_attempts.prepared_id). Only a posting of the same employer gives the role; anything unreadable gives
 // none, and the card is shown as before. Never fails the card.
 // deno-lint-ignore no-explicit-any
-async function withRoles(admin: any, userId: string, rows: (Prepared & { job_id?: string | null })[]): Promise<Prepared[]> {
+export async function withRoles(admin: any, userId: string, rows: (Prepared & { job_id?: string | null })[]): Promise<Prepared[]> {
   const strip = ({ job_id: _j, ...p }: Prepared & { job_id?: string | null }): Prepared => p;
   if (!rows.length) return rows.map(strip);
   try {
@@ -883,11 +990,18 @@ async function withRoles(admin: any, userId: string, rows: (Prepared & { job_id?
     const att = await admin.from("career_apply_prepare_attempts").select("prepared_id,posting_job_id").eq("user_id", userId).in("prepared_id", rows.map((r) => r.id));
     const viaAttempt = new Map<string, string>((att?.data ?? []).map((a: any) => [String(a.prepared_id), String(a.posting_job_id)]));
     const jobs = [...new Set([...byPrepared.values(), ...viaAttempt.values()])].slice(0, 500);
-    const got = jobs.length ? await admin.from("career_postings").select("job_id,title,company").in("job_id", jobs) : { data: [] };
-    const posting = new Map<string, { title: string; company: string }>((got?.data ?? []).map((p: any) => [String(p.job_id), { title: String(p.title ?? ""), company: String(p.company ?? "") }]));
+    const got = jobs.length ? await admin.from("career_postings").select("job_id,title,company,location,description").in("job_id", jobs) : { data: [] };
+    const posting = new Map<string, { title: string; company: string; location: string | null; description: string | null }>((got?.data ?? []).map((p: any) => [String(p.job_id),
+      { title: String(p.title ?? ""), company: String(p.company ?? ""), location: p.location ?? null, description: p.description ?? null }]));
+    // Their confirmed facts' words, for "why it fits" (the profile the preparation reads, career_apply_profile_for: only facts
+    // the person confirmed with an event). Unreadable: no fit line, the card as before.
+    let prof: any = null;
+    try { prof = typeof admin.rpc === "function" ? await admin.rpc("career_apply_profile_for", { p_user: userId }) : null; } catch { prof = null; }
+    const confirmed = (Array.isArray(prof?.data?.facts) ? prof.data.facts : []).filter((f: any) => f && f.status === "confirmed" && f.needs_confirmation === false && f.confirmation_event_id)
+      .map((f: any) => [f.text, f.title, ...(Array.isArray(f.bullets) ? f.bullets : [])].filter((x) => typeof x === "string").join(" "));
     return rows.map((r) => {
       const hit = [byPrepared.get(r.id), viaAttempt.get(r.id)].map((j) => (j ? posting.get(j) : undefined)).find((p) => p && p.title && norm(p.company) === norm(r.company));
-      return { ...strip(r), role: hit ? hit.title : null };
+      return { ...strip(r), role: hit ? hit.title : null, ...(hit ? { details: postingDetailLines(hit, confirmed) } : {}) };
     });
   } catch {
     return rows.map(strip);

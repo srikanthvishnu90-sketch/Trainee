@@ -57,6 +57,134 @@ export function linksAsk(message: string): { asks: LinkAsk[]; unread: string[] }
   }
   return asks.length >= 2 ? { asks, unread } : null;
 }
+// MASS APPLY CONVERSATIONS (2026-11-17, ag/ma-09-link-list-input; eval MA14: 122 pasted links were refused "message too
+// long"): the one shape of text allowed past the chat's 4,000-character cap. It must parse as an apply ask (linksAsk), and
+// every link in it must be a posting link a reader here knows (linkOf: Greenhouse, Lever or Ashby postings; never LinkedIn,
+// Indeed or Handshake); at most LINK_LIST_MAX_LINKS links of at most LINK_MAX_CHARS each, at most LINK_LIST_MAX_WORDS
+// characters of other words, LINK_LIST_MAX_CHARS in all. Anything else over the cap is refused as before (chat_input.ts). A
+// text let through here is read only by code: the turn refuses every model call (handler-career.ts), and later turns see it
+// clipped (career_brain.ts historyWindow). These bound one message's size, not how many applications a person may make
+// (D-NO-LIMITS): every link is read and screened.
+export const LINK_LIST_MAX_CHARS = 64_000, LINK_LIST_MAX_LINKS = 1_000, LINK_LIST_MAX_WORDS = 500, LINK_MAX_CHARS = 500;
+export function linkListAsk(text: string, o: { crisis?: (words: string) => unknown } = {}): boolean {
+  const t = String(text ?? "");
+  if (t.length > LINK_LIST_MAX_CHARS) return false;
+  const urls = t.match(URL_IN) ?? [];
+  if (urls.length < 2 || urls.length > LINK_LIST_MAX_LINKS) return false;
+  if (urls.some((u) => u.length > LINK_MAX_CHARS || !linkOf(u.replace(/[.,;:!?)\]]+$/, "")))) return false;
+  const words = t.replace(URL_IN, " ").replace(/\s+/g, " ").trim();
+  if (words.length > LINK_LIST_MAX_WORDS) return false;
+  // Review of ag/ma-09 (2026-11-17): the same list beside crisis words passes too (o.crisis, the handler's crisisReply), so
+  // the person gets the crisis reply (overCapRoute gives the words alone as the message) and never a "message too long".
+  return linksAsk(t) !== null || (!!o.crisis && !!o.crisis(words));
+}
+// The links of a pasted list not read within a turn's budget (career_apply_chat.ts linksApplyTurn), kept per person until
+// their "keep going" reads them. Review of ag/ma-09 (2026-11-17, architect ruling):
+//   - every change is one atomic read-modify-write (`update`): the change is computed from the list as stored and written
+//     only if nobody wrote it in between (a version compare-and-set), retried a few times, else it throws and nothing is
+//     written; a read that fails writes nothing either (never a list overwritten from an unread one);
+//   - at most LINK_PENDING_MAX links are kept in all (the rest are named as not read, never silently dropped);
+//   - a kept list expires LINK_PENDING_TTL_MS after it was last written: an expired list is reported, never read.
+export const LINK_PENDING_MAX = 1000, LINK_PENDING_TTL_MS = 24 * 60 * 60 * 1000;
+export type PendingNow = { urls: string[]; expired: number };
+export interface LinkPendingStore {
+  // The kept links now (expired: how many an expired list held; its urls are then []). Throws when unreadable.
+  read(userId: string, now: number): Promise<PendingNow>;
+  // Atomically: next = change(the kept links now, [] when expired), written as the new list ([] removes it). Returns what was
+  // there and what is there now. Throws (nothing written) when it cannot be read or written without a conflict.
+  update(userId: string, now: number, change: (cur: string[]) => string[]): Promise<{ before: PendingNow; after: string[] }>;
+}
+export const LINK_PENDING_KEY = "career:apply-links-reading";
+const pendingOf = (v: any, now: number): PendingNow & { version: number; versioned: boolean } => {
+  const urls = Array.isArray(v?.urls) ? v.urls.filter((u: unknown): u is string => typeof u === "string") : [];
+  const at = Date.parse(String(v?.at ?? ""));
+  const expired = urls.length && (!Number.isFinite(at) || now - at > LINK_PENDING_TTL_MS) ? urls.length : 0;
+  return { urls: expired ? [] : urls, expired, version: Number(v?.version ?? 0) || 0, versioned: v?.version !== undefined && v?.version !== null };
+};
+// The per-person service-role key-value row (career_watch_kv, as career_apply_questions.ts keeps "career:questions-shown"),
+// bound to the account's privacy epoch (career:account): after an erase the kept links are gone, never read. The write is a
+// compare-and-set on value->>version (an insert when there is no row; the primary key refuses a second insert).
+// deno-lint-ignore no-explicit-any
+export function supabaseLinkPending(admin: any): LinkPendingStore {
+  const kv = () => admin.from("career_watch_kv");
+  const epochOf = async (userId: string) => {
+    const r = await kv().select("value").eq("user_id", userId).eq("key", "career:account").maybeSingle();
+    if (r?.error) throw Error(`account: ${r.error.message}`);
+    return Number(r?.data?.value?.epoch ?? 0);
+  };
+  const row = async (userId: string) => {
+    const r = await kv().select("value").eq("user_id", userId).eq("key", LINK_PENDING_KEY).maybeSingle();
+    if (r?.error) throw Error(`links still being read: ${r.error.message}`);
+    return r?.data?.value ?? null;
+  };
+  // The compare-and-set filter: the version read, or, for a row written without one, a row that still has none.
+  const same = (q: any, cur: { version: number; versioned: boolean }) => cur.versioned ? q.eq("value->>version", String(cur.version)) : q.is("value->>version", null);
+  const read = async (userId: string, now: number) => {
+    const v = await row(userId);
+    if (!v) return { present: false, cur: { urls: [], expired: 0, version: 0, versioned: false } };
+    const cur = pendingOf(v, now);
+    // A list kept before an erase is not theirs to read: it reads as none (and is replaced or removed by the next write).
+    if (Number(v.epoch ?? 0) !== await epochOf(userId)) return { present: true, cur: { urls: [], expired: 0, version: cur.version, versioned: cur.versioned } };
+    return { present: true, cur };
+  };
+  return {
+    async read(userId, now) { const { cur } = await read(userId, now); return { urls: cur.urls, expired: cur.expired }; },
+    async update(userId, now, change) {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const { present, cur } = await read(userId, now);
+        const next = [...new Set(change(cur.urls))];
+        const at = new Date(now).toISOString();
+        let r: any;
+        if (!present) {
+          if (!next.length) return { before: { urls: cur.urls, expired: cur.expired }, after: [] };
+          r = await kv().insert({ user_id: userId, key: LINK_PENDING_KEY, value: { urls: next, version: 1, epoch: await epochOf(userId), at }, updated_at: at }).select("key");
+          if (r?.error && /duplicate|23505|conflict/i.test(`${r.error.code ?? ""} ${r.error.message ?? ""}`)) continue;
+        } else if (!next.length) {
+          r = await same(kv().delete().eq("user_id", userId).eq("key", LINK_PENDING_KEY), cur).select("key");
+        } else {
+          r = await same(kv().update({ value: { urls: next, version: cur.version + 1, epoch: await epochOf(userId), at }, updated_at: at })
+            .eq("user_id", userId).eq("key", LINK_PENDING_KEY), cur).select("key");
+        }
+        if (r?.error) throw Error(`keep the links still being read: ${r.error.message}`);
+        if (Array.isArray(r?.data) && r.data.length === 1) return { before: { urls: cur.urls, expired: cur.expired }, after: next };
+        // Someone wrote the list in between (or removed it): read it again and redo the change on what is there now.
+      }
+      throw Error("keep the links still being read: the list kept changing under this write");
+    },
+  };
+}
+// In memory, for tests and the eval world: the same rules (cap enforced by the caller, expiry, one write at a time).
+export function memoryLinkPending(o: { failRead?: () => boolean; failWrite?: () => boolean } = {}): LinkPendingStore & { rows: Map<string, { urls: string[]; at: number }> } {
+  const rows = new Map<string, { urls: string[]; at: number }>();
+  const now0 = (u: string, now: number): PendingNow => {
+    const r = rows.get(u);
+    if (!r) return { urls: [], expired: 0 };
+    return now - r.at > LINK_PENDING_TTL_MS ? { urls: [], expired: r.urls.length } : { urls: [...r.urls], expired: 0 };
+  };
+  return {
+    rows,
+    read: async (u, now) => { if (o.failRead?.()) throw Error("down"); return now0(u, now); },
+    update: async (u, now, change) => {
+      if (o.failRead?.()) throw Error("down");
+      const before = now0(u, now);
+      const next = [...new Set(change(before.urls))];
+      if (o.failWrite?.()) throw Error("down");
+      if (next.length) rows.set(u, { urls: next, at: now }); else rows.delete(u);
+      return { before, after: next };
+    },
+  };
+}
+// Architect ruling (2026-11-17): an over-cap link list goes straight to the link turn; the handler's other code routes never
+// run their patterns over it. They are given OVER_CAP_ROUTE_TEXT (no letters, no digits: nothing matches it) and the link
+// turn the text itself. One exception, for safety: when the words beside the links (at most LINK_LIST_MAX_WORDS characters)
+// are crisis text (`crisis`), those words alone are the message, as any message under the cap is, and no link is read.
+export const OVER_CAP_ROUTE_TEXT = "\u2026";
+export const linkListWords = (text: string) => String(text ?? "").replace(URL_IN, " ").replace(/\s+/g, " ").trim();
+export function overCapRoute(text: string, o: { crisis?: (words: string) => unknown } = {}): { route: string; links: string | null } {
+  const words = linkListWords(text);
+  if (o.crisis && o.crisis(words.slice(0, LINK_LIST_MAX_WORDS))) return { route: words.slice(0, LINK_LIST_MAX_WORDS), links: null };
+  return { route: OVER_CAP_ROUTE_TEXT, links: text };
+}
 export function linkOf(url: string): LinkAsk | null {
   // Never LinkedIn, Indeed or Handshake (owner rule), on any suffix or subdomain: the chat declines those before this turn.
   let host = "";

@@ -129,12 +129,13 @@ export class Ledger {
     for (const f of facts) this.add("record", f, { source: "record" });
     if (absent.length) this.add("absent", `Not on file: ${absent.join(", ")}.`, { source: "record" });
   }
-  // A copy with the person's own messages in this chat added, a sentence per unit, after every unit the draft could cite (S3 r12c,
-  // dev H022): for the check only; the drafting prompt's block is built from the ledger itself, never from this copy.
+  // A copy with the person's own messages in this chat added, a statement per unit, after every unit the draft could cite (S3 r12c,
+  // dev H022): for the check only; the drafting prompt's block is built from the ledger itself, never from this copy. Only what they
+  // said about themselves (ownStatements): never pasted or quoted material, another person's facts, or what they deny.
   withSaid(messages: string[]): Ledger {
     const l = new Ledger(this.now);
     l.units = [...this.units];
-    for (const m of messages) for (const x of String(m ?? "").split("\n").flatMap((t) => splitSentences(t))) if (x.trim().length > 8) l.add("said", x, { source: "said", owner: null });
+    for (const x of ownStatements(messages)) l.add("said", x, { source: "said", owner: null });
     return l;
   }
   block(ids?: string[]): string {
@@ -157,6 +158,38 @@ export function titleYearsCurrent(title: string, now: number): boolean {
   });
 }
 const hostOf = (u: unknown) => { try { return typeof u === "string" ? new URL(u).hostname : null; } catch { return null; } };
+// Review of PR #871 (B1): the person's own words are evidence only for what they said about themselves. A message that carries
+// someone else's text or facts is read as none of theirs: a long message (a paste), a quoted block, a job post or a posting, what a
+// resume, CV or profile "says", or another person's facts ("my friend's resume", "my brother has"). Of the rest, a sentence counts only
+// in the first person and not as a question, and a clause that denies something ("I don't know SQL") is no fact of theirs to say back.
+export const SAID_MAX = 400;
+const PASTED = /```|^\s*>|["“][^"”\n]{40,}["”]|\bjob\s+(?:post(?:ing)?|description|ad|listing|spec)s?\b|\b(?:the|this|that)\s+(?:posting|listing|description|jd)\s+(?:says|said|reads|lists|states|asks|wants|requires)\b|\brequirements?\s*:|\b(?:resume|r[eé]sum[eé]|cv|profile|bio|linkedin|post|ad)\s+(?:says|said|reads|lists|states|shows|has)\b|\b(?:pasted?|copied|copy-paste)\b|\bhere(?:'s|’s| is)\s+(?:the|a|an|his|her|their)\s+(?:job|posting|post|resume|r[eé]sum[eé]|cv|description|listing|role|ad|profile)\b|\b(?:my|his|her|their|our)\s+(?:\w+\s+)?(?:friend|brother|sister|colleague|coworker|co-worker|classmate|roommate|partner|husband|wife|boyfriend|girlfriend|son|daughter|mom|mum|dad|mother|father|cousin|boss|manager|mentor|teammate)s?(?:['’]s)?\b|\b(?:a|some)\s+friend\b/im;
+const FIRST_PERSON = /(?<![\p{L}'’])(?:i|i'm|i’m|i've|i’ve|i'd|i’d|im|ive|my|me|mine|myself)(?![\p{L}'’])/iu;
+const DENIES = /(?<![\p{L}])(?:not|no|never|none|nor|neither|don['’]?t|doesn['’]?t|didn['’]?t|haven['’]?t|hasn['’]?t|hadn['’]?t|can['’]?t|cannot|couldn['’]?t|won['’]?t|wouldn['’]?t|isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t|lack|lacking|without|yet\s+to)(?![\p{L}])/iu;
+const OWN_CLAUSE_SPLIT = /\s*;\s*|,?\s+(?:but|though|although|however|except)\s+|,?\s+(?:and|so)\s+(?=(?:i|i'm|i’m|i've|i’ve|i'd|im|ive|my)(?![\p{L}]))/iu;
+export function ownStatements(messages: string[]): string[] {
+  const out: string[] = [];
+  for (const m of messages) {
+    const t = String(m ?? "");
+    if (!t.trim() || t.replace(/\s+/g, " ").trim().length > SAID_MAX || PASTED.test(t)) continue;
+    for (const x of t.split("\n").flatMap((y) => splitSentences(y))) {
+      // (a question states nothing about them)
+      if (!FIRST_PERSON.test(x) || /\?\s*["'”’)]*\s*$/.test(x)) continue;
+      for (const c of x.split(OWN_CLAUSE_SPLIT).map((y) => y.trim())) if (c.length > 8 && !DENIES.test(c) && !out.includes(c)) out.push(c);
+    }
+  }
+  return out;
+}
+// Review of PR #871 (B2): the sentence uses a word as an employer's name: "Apple has", "Apple's team", "Apple and Google hire",
+// "Goldman would", "at Apple", "for Apple", "joining Apple".
+const FRAME_AFTER = "(?:has|have|had|pays?|paid|hires?|hiring|is\\s+hiring|offers?|recruits?|sponsors?|employs?|wants?|needs?|requires?|expects?|posted|posts|lists?|would|could|will|can|is|was|runs?|values?|looks?\\s+for|teams?|analysts?|engineers?|employees?|staff|interns?|internships?|offices?|roles?|jobs?|positions?|openings?|careers?|recruiters?|alums?|alumni|people|folks|hiring)";
+export function employerFrame(w: string, t: string): boolean {
+  const e = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}])${e}(?:['’]s(?![\\p{L}])|(?:\\s*(?:,|&|and|or)\\s*\\p{Lu}[\\p{L}&.'-]*)*\\s+(?:(?:typically|reportedly|also|really|currently|now|still|usually|often|actually|definitely)\\s+)?${FRAME_AFTER}(?![\\p{L}]))`, "u").test(t) ||
+    new RegExp(`(?<![\\p{L}])(?:at|for|joining|join|by|from)\\s+(?:\\p{Lu}[\\p{L}&.'-]*\\s*(?:,|&|and|or)\\s*)*${e}(?![\\p{L}])`, "iu").test(t);
+}
+// A number of the claim is the said unit's only as a whole token: "12 years" is not in "I graduated in 2012".
+const wholeNumbersIn = (claim: string, unit: string) => (String(claim).match(/\d+(?:[.,]\d+)?/g) ?? []).every((n) => new RegExp(`(?<![\\d.,])${n.replace(/[.]/g, "\\.")}(?![\\d]|[.,]\\d)`).test(unit));
 
 export const LEDGER_RULE = "EVIDENCE: the numbered units below (and any `evidence` in a tool result) are the only facts you may state about the world, " +
   "the posting or the person. End each factual sentence with the ids it rests on, like [E3] or [E3,E7]; a sentence with no figure, name or date " +
@@ -249,9 +282,6 @@ export function missingSpecifics(clause: string, units: EvidenceUnit[], strict =
 // (S3 r12: a clause that says something is open, posted or hiring is a posting claim; a suggestion unit never holds one)
 const POSTING_CLAIM = /\b(?:openings?|postings?|posted|vacanc(?:y|ies)|hiring|hires|listings?|listed|job ads?|positions? (?:open|available)|(?:is|are) open|apply (?:to|for|at)|apply you|now accepting|(?:send|submit) (?:your|my|the) (?:resume|application)s? to|available (?:near|in|around|now|right now)|(?:jobs?|roles?|positions?|work)\s+(?:\w+\s+){0,4}?(?:near|around|close to)\s+(?:you|your|me|here)|(?:near|around) (?:you|your|me)\b[^.?!]{0,40}\b(?:jobs?|roles?)|in your (?:city|area|town))\b/i;
 // (a posting denied, "not postings", "no openings", claims none)
-// (S3 r12c: words that carry no fact of the person's own; and the claims about applications, sends and saves that are never theirs to back)
-const COMMON_WORD = /^(?:the|and|for|with|which|what|that|this|those|these|from|into|have|has|had|did|does|done|know|knew|want|wants|like|just|also|about|after|before|years?|months?|weeks?|days?|role|roles|job|jobs|work|skills?|match|matches|fit|fits|good|any|all|some|can|could|would|should|will|not|but|you|your|yours|mine|me|i'm|i've|ive|im|are|was|were|been|being|get|got|make|made|more|most|much|many|very|really|thanks|thank|please|okay|yes|now|then|there|here|their|them|they|our|out|how|why|who|when|where|one|two|three)$/;
-const STATUS_WORD = /\b(?:appl(?:y|ied|ies|ying|ications?)|submit\w*|sent|send(?:ing)?|queued|saved|recorded|confirmed|interview\w*|offers?|rejected|replied)\b/i;
 const NO_POSTING = /\b(?:not|no|never|nor|zero|0)\s+(?:an?\s+|any\s+)?(?:[\p{L}-]+\s+){0,2}?(?:openings?|postings?|listings?|vacanc(?:y|ies))\b/giu;
 const forClaim = (us: EvidenceUnit[], text: string) => POSTING_CLAIM.test(String(text).replace(NO_POSTING, " ")) ? us.filter((u) => u.kind !== "suggestion" && u.kind !== "said") : us;
 const TAG_AFTER_STOP = /([.!?])(["'\u201d)\]]*)[ \t]*(\[E\d+(?:\s*,\s*E\d+)*\])/g;
@@ -359,16 +389,31 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
   // so every sentence mapping the person's own skills to a role was dropped. A word the person's own lines (their record, what they
   // said in this chat) or a suggestion unit use as a plain word, never as an employer there, names no employer here either; a record
   // line that uses it as one, "Intern at Stripe", still makes it a subject, as round 12 B1 has it)
+  // (review of PR #871, B2: what they said clears a word only where this sentence does not use it as an employer. "I love Apple
+  // products" said, "Apple has a data analyst team that would suit you" written: Apple is the sentence's subject, so their words, which
+  // back no employer claim, are kept out of its units; their record and code's suggestions clear a word as before)
   const ownWords = ledger.units.filter((u) => u.kind === "record" || u.kind === "said" || u.kind === "suggestion");
-  const plainOwnWord = (w: string) => ownWords.some((u) => nameFoundIn(w, u.text)) &&
-    !ownWords.some((u) => unitNames({ ...u, kind: "page", host: null, owner: null }, true).some((n) => nameFoundIn(w, n) || nameFoundIn(n, w)));
+  const usedAsName = (us: EvidenceUnit[], w: string) => us.some((u) => unitNames({ ...u, kind: "page", host: null, owner: null }, true).some((n) => nameFoundIn(w, n) || nameFoundIn(n, w)));
+  const plainOwnWord = (w: string, t: string) => {
+    if (usedAsName(ownWords, w)) return false;
+    const strong = ownWords.filter((u) => u.kind !== "said");
+    if (strong.some((u) => nameFoundIn(w, u.text))) return true;
+    return ownWords.some((u) => u.kind === "said" && nameFoundIn(w, u.text)) && !employerFrame(w, t);
+  };
   // (S3 r12c, dev H022 turn 1 in the probes: "… a reporting analyst, BI analyst, data analyst …" made "BI" an unknown employer, carried
   // it, and every later sentence failed "no cited unit is about BI". A word written straight before a job title's singular head
   // noun is that title's qualifier, "BI analyst", "Reporting analyst", never an employer; an employer is read with the plural, "Citadel
   // analysts", as unitNames reads it)
   const jobTitleWord = (w: string, t: string) => new RegExp(`(?<![\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(?:analyst|engineer|developer|scientist|designer|manager|specialist|coordinator|consultant|associate|assistant|technician|administrator|architect|intern|representative|clerk|tester)(?![\\p{L}])`, "iu").test(t);
+  // (review of PR #871, B2: a sentence that uses any name as an employer, "Goldman would be a great first employer for you", rests
+  // on no word of theirs, whether or not code reads that name as its subject: their words back no employer claim)
+  const saidBarred = (t: string) => [...bare(t).matchAll(/(?<![\p{L}])\p{Lu}[\p{L}&.'-]+/gu)].some((m) => {
+    const w = m[0].replace(/['’]s$/, "");
+    const opens = /^\W*$/.test(bare(t).slice(0, m.index!));
+    return w !== "I" && !SOURCE.test(w) && !jobTitleWord(w, t) && !(opens && FUNCTION_OPENER(w)) && !NOT_NAME.test(w) && employerFrame(w, t);
+  });
   const unknownIn = (t: string): string | null => unitNames({ id: "", kind: "page", text: t, host: null }, true).find((w) => {
-    if (owners.some((x) => nameFoundIn(x, w) || nameFoundIn(w, x)) || SOURCE.test(w) || plainOwnWord(w) || jobTitleWord(w, t)) return false;
+    if (owners.some((x) => nameFoundIn(x, w) || nameFoundIn(w, x)) || SOURCE.test(w) || plainOwnWord(w, t) || jobTitleWord(w, t)) return false;
     const opens = bare(t).replace(/^["'“‘(]+/, "").toLowerCase().startsWith(w.toLowerCase());
     return !(opens && !/\s/.test(w) && FUNCTION_OPENER(w));
   }) ?? null;
@@ -397,21 +442,6 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
     return DIRECTIVE.test(w) && plainTalk(`${w.toLowerCase()}${b.slice(w.length)}`, allowed);
   };
   const free = (t: string) => plain(t) || ownAction(t, known);
-  // S3 r12c (dev H022, the probes after the said units: "All three of your skills match a data analyst role: SQL for pulling data,
-  // Excel for analysis and Tableau for dashboards" still failed "no unit holds it"). On a turn whose tools read nothing (every unit a
-  // tool gave is the count line of an empty search, and suggestions), what the turn's evidence could check is only the search itself;
-  // a sentence about the person's own stated work, the judgement the same brain gives on any turn without a tool, has nothing here to
-  // be checked against, so it is not dropped for want of a unit. Only such a sentence: to the person ("you", "your"), naming
-  // something from their own words, no employer (named or unknown), no posting claim, no figure they did not say, no claim of an
-  // application, a send or a save.
-  const toolUnits = ledger0.units.filter((u) => (u.kind === "page" || u.kind === "chat") && u.source !== "an earlier reply in this chat");
-  const readNothing = !!o.said?.length && toolUnits.length > 0 && toolUnits.every((u) => u.empty);
-  const saidText = (o.said ?? []).join("\n");
-  const saidWords = new Set((saidText.match(/[\p{L}][\p{L}+#/-]{2,}/gu) ?? []).map((w) => w.toLowerCase()).filter((w) => !COMMON_WORD.test(w)));
-  const aboutTheirWords = (t: string) => readNothing && /(?<![\p{L}])(?:you|your|you've|you're|yours)(?![\p{L}])/iu.test(t) &&
-    !POSTING_CLAIM.test(t.replace(NO_POSTING, " ")) && !STATUS_WORD.test(t) && !mentioned(t).length && !unknownIn(t) &&
-    (t.match(/\d+(?:[.,]\d+)?/g) ?? []).every((n) => saidText.includes(n)) &&
-    (t.match(/[\p{L}][\p{L}+#/-]{2,}/gu) ?? []).some((w) => saidWords.has(w.toLowerCase()));
   lines.forEach((l, a) => l.forEach((x, b) => {
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
     const { ids, text } = tagsOf(x);
@@ -420,11 +450,10 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
     if (rec(text) === true) return carryPast(text);
     // The record's verdict comes before the plain-sentence rule: a sentence about the record that the record contradicts fails.
     if (rec(text) === false) { failures.push({ sentence: text, reason: "it is not what the person's record holds" }); bad.add(`${a}:${b}`); return; }
-    if (aboutTheirWords(text)) return carryPast(text);
     if (free(text)) {
       const subj = mentioned(text)[0] ?? unknownIn(text) ?? carried;
       const pool0 = forClaim(ids.length ? ids.map((id) => ledger.get(id)).filter((u): u is EvidenceUnit => !!u) : ledger.units, text);
-      const pool = pool0.filter((u) => u.source !== "an earlier reply in this chat" && !(u.kind === "said" && subj) && (subj ? mine(u, subj) || (!unknownSubject(subj) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
+      const pool = pool0.filter((u) => u.source !== "an earlier reply in this chat" && !(u.kind === "said" && (subj || saidBarred(text))) && (subj ? mine(u, subj) || (!unknownSubject(subj) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
       if (ids.length) citeAt.set(`${a}:${b}`, ids);
       checks.push({ a, b, clause: text, units: pool, claim: text, subject: subj, advice: true, untagged: !ids.length });
       return carryPast(text, false);
@@ -463,7 +492,7 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
       // (round 12: an unknown subject rests only on a unit that names it as its employer; a carried subject never rests on a posting
       // record whose employer code cannot tell, which is some other employer's posting)
       // (S3 r12c: the person's own words back only a clause about them, never one about an employer)
-      const allowedUnits = forClaim(units, c).filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") && !(u.kind === "said" && subject) &&
+      const allowedUnits = forClaim(units, c).filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") && !(u.kind === "said" && (subject || saidBarred(c) || saidBarred(text))) &&
         (unknownSubject(subject) ? namesAsEmployer(u, subject!) :
           mine(u, subject) || (!!subject && !ownSubj && !u.owner && !u.posting && (anyNamed.get(u.id) ?? []).length === 0)));
       if (!allowedUnits.length) return fail(a, b, text, subject ? `no cited unit is about ${subject}` : "it names no employer, and every unit that could hold it is one employer's", subject);
@@ -533,6 +562,8 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
     }
     if (!f) { const miss = missingSpecifics(c.clause, c.units); failures.push({ sentence: c.claim, reason: c.untagged ? "it states a fact and cites no evidence unit, and no unit holds it" : miss.length ? miss.map((m) => `'${m}' is in no cited unit`).join("; ") : `no single cited unit holds "${c.clause}"`, subject: c.subject ?? null }); bad.add(`${c.a}:${c.b}`); return; }
     const held = c.units[f.page]; // indexPages makes one page per cited unit, in order
+    // (review of PR #871, B1: a figure their words hold is theirs only as a whole number, never a part of a year)
+    if (held?.kind === "said" && !wholeNumbersIn(c.clause, held.text)) { failures.push({ sentence: c.claim, reason: `a figure of "${c.clause}" is not one the person said`, subject: c.subject ?? null }); bad.add(`${c.a}:${c.b}`); return; }
     const stale = (held?.dated ?? []).filter((y) => !c.clause.includes(y) && !c.clause.includes(`'${y.slice(2)}`) && !c.clause.includes(`’${y.slice(2)}`));
     if (stale.length) { failures.push({ sentence: c.claim, reason: `the unit that holds "${c.clause}" is for a period that has ended (${stale.join(", ")}); the sentence must say so`, subject: c.subject ?? null }); bad.add(`${c.a}:${c.b}`); return; }
     const unitOwner = held?.owner ?? null;
@@ -651,7 +682,7 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
       tooLong ? `LENGTH: ${tooLong}. The sentences that stood:\n${v1.text}` : "", miss.length ? `MISSING: ${miss.join("; ")}.` : "",
       `EVIDENCE:\n${ledger.block()}`,
       // (S3 r12c: the check reads the person's own words too, so the repair sees them, as what they said and nothing more)
-      o.said?.length ? `THE PERSON'S OWN WORDS IN THIS CHAT (say them back only as what they told you, never as confirmed, never as a fact about an employer or a posting):\n${o.said.map((x) => `- ${x.replace(/\s+/g, " ").trim().slice(0, 300)}`).join("\n")}` : ""].filter(Boolean).join("\n\n");
+      ownStatements(o.said ?? []).length ? `THE PERSON'S OWN WORDS IN THIS CHAT (say them back only as what they told you, never as confirmed, never as a fact about an employer or a posting):\n${ownStatements(o.said ?? []).map((x) => `- ${x.replace(/\s+/g, " ").trim().slice(0, 300)}`).join("\n")}` : ""].filter(Boolean).join("\n\n");
     calls = 1;
     const out = await o.repair({ system: REPAIR_SYSTEM, user }).catch(() => "");
     if (out.trim()) {

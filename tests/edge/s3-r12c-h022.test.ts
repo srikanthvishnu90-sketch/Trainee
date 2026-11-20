@@ -68,14 +68,20 @@ const MAPPED = "All three of your skills match a data analyst role: SQL for pull
 const oneHit = () => { const l = new Ledger(NOW); l.fromToolResult("search_jobs", { postings: [{ company: "Riverside Health", title: "Data Analyst", location: "Columbus, OH", url: "https://jobs.example.com/da-1", state: "open" }] }); return l; };
 const no = async (cs: unknown[]) => cs.map(() => "no" as const);
 
-Deno.test("S3 r12c / H022: on a turn whose tools read nothing, a sentence mapping their own stated work stands (no judge needed)", async () => {
-  const v = await verifyTagged(MAPPED, await h022Ledger(), { ask: H022, judge: no, said: SAID });
-  assert(!v.failures.length && v.text.includes("SQL for pulling data"), JSON.stringify(v));
-  // (tagged with the empty search's own unit, the same)
-  const l = await h022Ledger();
-  const e = l.units.find((u) => u.empty)!.id;
-  const t = await verifyTagged(`${MAPPED} [${e}]`, l, { ask: H022, judge: no, said: SAID });
-  assert(!t.failures.length, JSON.stringify(t));
+// (review of PR #871, B1: the no-judge path this test once pinned is gone; it now pins that the judge decides, and that a figure
+// they never said, "All three of your skills", fails whatever the judge says)
+Deno.test("S3 r12c / H022: on a turn whose tools read nothing, a sentence about their stated work goes to the judge with their words", async () => {
+  const SAYS_BACK = "Your 2 years of reporting is the closest experience to a data analyst role, per what you told me.";
+  const asked: { claim: string; source: string }[] = [];
+  const rec = async (cs: { claim: string; source: string }[]) => { asked.push(...cs); return cs.map(() => "yes" as const); };
+  const v = await verifyTagged(SAYS_BACK, await h022Ledger(), { ask: H022, judge: rec, said: SAID });
+  assert(!v.failures.length && asked.some((x) => x.source.includes("did 2 years of reporting")), JSON.stringify({ v, asked }));
+  const n = await verifyTagged(SAYS_BACK, await h022Ledger(), { ask: H022, judge: no, said: SAID });
+  assert(n.failures.length && !n.text.includes("2 years"), JSON.stringify(n));
+  for (const j of [yes, no]) {
+    const m = await verifyTagged(MAPPED, await h022Ledger(), { ask: H022, judge: j, said: SAID });
+    assert(m.failures.length && !m.text.includes("SQL for pulling data"), JSON.stringify(m));
+  }
 });
 
 Deno.test("S3 r12c / H022: the same sentence on a turn that read a posting is checked as before", async () => {

@@ -38,3 +38,13 @@ Deno.test("S3 r12c / H015: no company named keeps the general alternative; no ro
   assert(/someone in the role you name at Google/.test(norole.reply) && !/say "/.test(norole.reply), norole.reply);
   for (const r of [plain.reply, norole.reply]) assert(!/\b(?:introduced|introduction (?:was|has been) made)\b/i.test(r), r);
 });
+
+// (review of PR #871, non-blocking: the draft names a company only when the ask names one, as the one they want to reach)
+Deno.test("S3 r12c / H015: two companies named, or one that is where someone else is, keep the general alternative", () => {
+  for (const ask of ["my friend at Google said Bluepeak is hiring, can you introduce me to an alum there?", "introduce me to an alum at Bluepeak Networks or Ridgeway Capital",
+    "someone at Google said they know people at Bluepeak, introduce me to an alum"]) {
+    const [stop] = turns([ask]);
+    assert(stop.intent === "people_matching_stop", `${ask}: ${stop.intent}`);
+    assert(/draft a coffee-chat email to a role at a named company/.test(stop.reply) && !/say "/.test(stop.reply) && !/at Google,|at Google —/.test(stop.reply), `${ask}: ${stop.reply}`);
+  }
+});

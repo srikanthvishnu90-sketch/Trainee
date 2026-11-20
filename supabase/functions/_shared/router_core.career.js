@@ -14621,12 +14621,28 @@ const CareerRouter = (() => {
     return { intent: "outreach_draft", reply, resultStatus: "awaiting_user", sends: 0, draft };
   }
 
+  function severalCompanies(raw) {
+    const names = new Set();
+    for (const m of s(raw).matchAll(/(?<![\p{L}])\p{Lu}[\p{L}0-9&.'-]*(?:\s+\p{Lu}[\p{L}0-9&.'-]*)*/gu)) {
+      const before = s(raw).slice(0, m.index);
+      const w = m[0].replace(/[.'-]+$/, "");
+      if (/^(?:I|I'm|I've|I'd|I'll)$/.test(w) || (/^\s*$|[.!?]\s*$/.test(before) && w.split(/\s+/).length === 1) || FACT_CITIES.some((ct) => lc(ct) === lc(w))) continue;
+      names.add(lc(w));
+    }
+    return names.size >= 2;
+  }
+  function hearsayCompany(raw, company) {
+    const esc = s(company).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const at = `(?:\\s+who\\s+(?:works|worked|is)\\s+|\\s+)(?:at|from)\\s+${esc}\\b`;
+    return new RegExp(`\\b(?:my|a|his|her|their|our)\\s+(?:\\w+\\s+)?(?:friend|contact|colleague|coworker|co-worker|cousin|brother|sister|mom|dad|mentor|classmate|roommate|recruiter)s?${at}`, "i").test(s(raw)) ||
+      new RegExp(`\\b(?:someone|somebody|a\\s+guy|a\\s+person|people)${at}\\s+(?:said|says|told|tells|mentioned|thinks|heard)\\b`, "i").test(s(raw));
+  }
   function handlePeopleMatchingStop(text, ctx, said) {
     const t = lc(text);
     const raw = s(text);
     if (namedRecipientFromAsk(raw)) return null;
     const company = companyFromText(raw, ctx);
-    const ownCompany = company ? saidCompany(raw, said) : null;
+    const ownCompany = company && !severalCompanies(said ? s(said) : raw) && !hearsayCompany(said ? s(said) : raw, company) ? saidCompany(raw, said) : null;
     if (company) {
       try {
         const gs = graphStoreOf(ctx);

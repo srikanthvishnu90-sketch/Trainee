@@ -1058,3 +1058,47 @@ Branch `ag/s3-r12c-replies`. Probes: `--subscription --brain staged --set dev --
   The people stop names a company only when the ask names one to reach (two companies or hearsay: the general alternative).
   Re-run at c3f636b07 (5 cases a pass): 4 passes, 20/20.
 - Proof: `tests/edge/s3-r12c-h022.test.ts`, `-h013.test.ts`, `-h015.test.ts` (offline, in gate.sh).
+
+---
+
+## S3 sitting #6 on 52e2025c9 (subscription, dev, bar 37/38 per pass, D-056): H019 (both judges), H022 (both judges), H009 (split)
+Branch `ag/s3-r12e`. Sitting: p1 37/38 (H019), p2 37/38 (H009), p3 36/38 (H009, H022). Probes: `--subscription --brain staged --set dev
+--only H019,H022,H009,H013,H015,H002,H005`, 7 cases a pass. A scratch replay (not committed) logged every model call of H022, so the
+draft, the code reasons and what the judge was shown are read from the calls, not guessed.
+- H019 (p1, both judges): "show me exactly what you changed and why" with no tailoring. The router claims it (career_tailor_diff,
+  "No tailoring has run in this conversation yet …"), but D-061 G1 sent it to the brain (g1_model_decides) with that line as data.
+  No brain tool reads the tailoring diff (it lives on the thread record, handleTailorDiffAsk); the brain looked at list_applications,
+  and the applications hold (career_brain.ts applicationsEnforced, look.own) kept only code's status line, "Trainee's saved record
+  shows no applications of yours …": an answer to a question nobody asked. Line: `career_staged.ts` g1CodeAnswers (G1_ACTIONS).
+  Fix: career_tailor_diff is code's, G1 (b), as career_list_reference is: the change list (or its honest absence) is code's own
+  record of its tailoring. A hypothetical or several asks beside it stay the brain's (G8, G13). The hold is unchanged.
+- H022 (p3, both judges): turn 2 searched (0 postings), so the reply pipeline ran. The person's words are check-only units (withSaid,
+  S3 r12c), never in the drafting ledger, so the draft can never cite them. A sentence the draft tagged with what it could cite (the
+  search's count line, [E2]) was checked against the cited units alone (`cited = ids`): their words were never put beside it, and
+  every mapping sentence failed in code before any judge ("'2' is in no cited unit", "'excel' is in no cited unit"). The replay showed
+  the same in turn 1 ("With SQL, Excel, Tableau and 2 years of reporting, you could get hired as …": "cites no evidence unit"); the
+  untagged form of the same sentences stood. Of the four candidate causes: ownStatements keeps their sentence ("I know SQL, Excel and
+  Tableau and did 2 years of reporting" is one said unit); the drafts saved as facts are not needed (the said unit carries the words);
+  the "couldn't verify" text is the fallback after the repair, a consequence. The cause is that the judge (and code's layer A) was not
+  shown the said units for a tagged sentence. Line: `reply_pipeline.ts` verifyTagged (the free path's pool and the cited-unit path).
+  Fix (partial): their words join a tagged sentence's units as they join an untagged one's (`withSaidUnits`). Nothing else moves: a said unit
+  backs only a clause with no employer subject and no employer frame (saidBarred), a figure only as a whole number they said, never a
+  posting claim (forClaim), and every clause still goes to code's check and the support judge; a judge "no" drops it.
+  Left as is (seen in the replay, rarer): "SQL is your strongest card" reads "SQL is" as an employer frame and drops the sentence.
+  Loosening that would touch the B2 rule of the review of #871, so it stays.
+  NOT FIXED (probes 3 and 4 of 4 still fail H022): asked with the real support judge (subscription, scratch replay), every mapping
+  sentence is refused against their words even once they are shown, and rightly by the judge's rule: "SQL, Excel and Tableau are the
+  core tools of data analyst work" is general career knowledge that no unit states, and a clause may rest on one unit only (CodeRabbit
+  on #849). A second cause sits beside it: a clause with a figure they said ("2 years of reporting") must be placed in one unit by
+  layer A before any judge, which a mapping never is ("it states a fact … no unit holds it"). An untagged draft on a no-tool turn
+  stands unchecked, which is why the case passes on some passes and fails on others: the outcome turns on whether the brain searches
+  and tags. A legitimate fix needs an architect ruling, not a check loosened here: either code's general career knowledge (the S3 r12
+  entry-route table, entry_routes.ts) also states what each field commonly works with, so the role's half of a mapping has a unit,
+  and a clause may rest on one said unit plus one such knowledge unit; or a read tool the brain calls for what the role needs.
+- H009 (p2, p3, haiku only): the router's move reply "Moved — Cascade Retail Group now sits at the Interview rounds stage on your
+  tracker. The move is recorded as your report … your word is the evidence." Haiku's quoted evidence was the stored row's JSON, which
+  the code check did not find, and its note said the reply never says onsite. Line: `142-career-router.js` handleTrackMove. Fix: the
+  reply names the step in the person's own words (the words the stage matched in their message, never a model's) with the tracker's
+  stage beside it when they differ, "is now at the onsite round (Interview rounds on your tracker)", and the evidence sentence is gone.
+- Proof: `tests/edge/s3-r12e.test.ts` (offline, in gate.sh; the H019, H009 and H022-judge tests fail on 52e2025c9, the two guard tests
+  pass on both).

@@ -810,6 +810,11 @@ const G1_ACTIONS: ReadonlySet<string> = new Set([
   // what the person told Trainee about themselves, read back from what they confirmed (D-007); "the first one" of the list code
   // just showed (G1 b: the answer refers to code's own list)
   "profile_recall", "career_list_reference",
+  // S3 r12e (dev H019, s3sub 52e2025c9 p1): "show me exactly what you changed" is a read of code's own record of its tailoring (the
+  // diff handleTailorDiffAsk keeps on the thread, or its honest absence). No brain tool reads that record, so the brain had only the
+  // router's line as data; it looked at the applications record instead, and the applications hold kept nothing but code's status
+  // line ("no applications"), an answer to a question nobody asked. G1 (b), as for career_list_reference: the answer is code's.
+  "career_tailor_diff",
 ]);
 // Reads of the person's own record (applications, follow-ups, their people): code's when the message asks about that record.
 const G1_RECORD_READS: ReadonlySet<string> = new Set(["tracking_status", "tracking_digest", "career_status_states", "intent_followup_status",

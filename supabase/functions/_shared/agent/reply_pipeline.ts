@@ -442,6 +442,13 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
     return DIRECTIVE.test(w) && plainTalk(`${w.toLowerCase()}${b.slice(w.length)}`, allowed);
   };
   const free = (t: string) => plain(t) || ownAction(t, known);
+  // S3 r12e (dev H022, s3sub 52e2025c9 p3): the person's own words are units of the check only (withSaid), never of the drafting
+  // ledger, so the draft can never cite them. A sentence the draft tagged with what it could cite ("… your 2 years of reporting is the
+  // closest experience to it. [E2]", the empty search's count line) was checked against that unit alone: their words were never
+  // shown to code or to the judge, and every sentence mapping their stated skills failed ("'2' is in no cited unit"). Their words
+  // join the units of a tagged sentence as they join an untagged one's; every rule on them stands (only a clause about them, never
+  // one with an employer subject or an employer frame, a figure only as a whole number, and the judge reads every clause).
+  const withSaidUnits = (us: EvidenceUnit[]) => [...us, ...ledger.units.filter((u) => u.kind === "said" && !us.includes(u))];
   lines.forEach((l, a) => l.forEach((x, b) => {
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
     const { ids, text } = tagsOf(x);
@@ -452,7 +459,7 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
     if (rec(text) === false) { failures.push({ sentence: text, reason: "it is not what the person's record holds" }); bad.add(`${a}:${b}`); return; }
     if (free(text)) {
       const subj = mentioned(text)[0] ?? unknownIn(text) ?? carried;
-      const pool0 = forClaim(ids.length ? ids.map((id) => ledger.get(id)).filter((u): u is EvidenceUnit => !!u) : ledger.units, text);
+      const pool0 = forClaim(ids.length ? withSaidUnits(ids.map((id) => ledger.get(id)).filter((u): u is EvidenceUnit => !!u)) : ledger.units, text);
       const pool = pool0.filter((u) => u.source !== "an earlier reply in this chat" && !(u.kind === "said" && (subj || saidBarred(text))) && (subj ? mine(u, subj) || (!unknownSubject(subj) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
       if (ids.length) citeAt.set(`${a}:${b}`, ids);
       checks.push({ a, b, clause: text, units: pool, claim: text, subject: subj, advice: true, untagged: !ids.length });
@@ -464,9 +471,10 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
     // support check always did; it is neither dropped unread nor let through unread.
     const cited = ids.length ? ids : ledger.units.map((u) => u.id);
 
-    const units = cited.map((id) => ledger.get(id)).filter(Boolean) as EvidenceUnit[];
-    if (units.length < cited.length) { failures.push({ sentence: text, reason: `it cites ${cited.filter((id) => !ledger.get(id)).join(", ")}, which no evidence unit is` }); bad.add(`${a}:${b}`); return; }
-    if (!units.length) { failures.push({ sentence: text, reason: "it states a fact and no evidence unit holds it" }); bad.add(`${a}:${b}`); return; }
+    const units0 = cited.map((id) => ledger.get(id)).filter(Boolean) as EvidenceUnit[];
+    if (units0.length < cited.length) { failures.push({ sentence: text, reason: `it cites ${cited.filter((id) => !ledger.get(id)).join(", ")}, which no evidence unit is` }); bad.add(`${a}:${b}`); return; }
+    if (!units0.length) { failures.push({ sentence: text, reason: "it states a fact and no evidence unit holds it" }); bad.add(`${a}:${b}`); return; }
+    const units = ids.length ? withSaidUnits(units0) : units0;
     citeAt.set(`${a}:${b}`, ids);
     for (const c of clausesOf(text)) {
       if (noClaim(c) || personQuestion(c, allowed) || countedQuestion(c) || rec(c) === true) continue;

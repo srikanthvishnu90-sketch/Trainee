@@ -122,7 +122,7 @@ Deno.test("D-100: an empty search in a field the table holds carries what the fi
 Deno.test("D-100: a sentence mapping their own stated skills to the field is judged against their words and the field's knowledge together", async () => {
   const { l, id } = await fieldLedger();
   for (const d of [`Your SQL, Excel and Power BI are the core of data analysis work, and your 3 years of finance reporting is the recurring reporting it involves. [${id}]`,
-    "With SQL, Excel and Power BI, you already use the query, spreadsheet and dashboard tools data analysis work involves."]) {
+    "With SQL, Excel and Power BI, you cover the query language, spreadsheet and BI tool that data analysis work involves."]) {
     const r = recorder("yes");
     const v = await verifyTagged(d, l, { ask: ASK2, judge: r.judge, said: SAID2 });
     assert(!v.failures.length && v.text.includes("Power BI"), `${d}: ${JSON.stringify(v)}`);
@@ -220,5 +220,43 @@ Deno.test("S3 r12e / review B2: a clause whose subject is the person still rests
     const r = recorder("yes");
     const v = await verifyTagged(d, (await fieldLedger()).l, { ask: "which roles fit me?", judge: r.judge, said: ["I know SQL, Excel and Tableau"] });
     assert(!v.failures.length && r.asked.some((x) => x.source.includes("I know SQL, Excel and Tableau")), `${d}: ${JSON.stringify({ v, asked: r.asked })}`);
+  }
+});
+
+// ---------------------------------------------------------------------------------------------------------------- review B3
+// (independent review of a339b806a, B3: lower-case examples of the field knowledge formed a pair, "Your SQL and power bi skills…";
+// pay and outcome words NOT_PAIR missed; a team frame with no name)
+async function knowledgeTurn(message: string, query = "data analyst") {
+  const t = careerTools({ postings: async () => [] }).find((x) => x.name === "search_jobs")!;
+  const out: any = await t.run({ query }, { userId: "u", threadId: "t", now: NOW, state: {}, turn: { message } } as any);
+  const l = new Ledger(NOW); l.addRecord([], ["city"]); l.fromToolResult("search_jobs", out); return l;
+}
+Deno.test("S3 r12e / review B3: a field-knowledge example or class word credited to them must be in their words, in any case", async () => {
+  const refused: [string, string, string?][] = [
+    ["I know SQL and Excel", "Your SQL and power bi skills are the core of data analysis work."],
+    ["I know SQL and Excel", "Your SQL and Excel, plus your dashboard experience, are the core of data analysis work."],
+    ["I know SQL and Excel", "With SQL and Excel you already know tableau, which data analysis work involves."],
+    ["I know Python", "Your Python and javascript are what software work commonly involves.", "software developer"],
+    ["I know Python", "Your Python and Git are what software work commonly involves.", "software developer"],
+    ["I know SQL and Excel", "Your SQL and Excel fit their reporting team well."],
+    ["I know SQL and Excel", "Your SQL and Excel will land you a callback in data analysis."], ["I know SQL and Excel", "Your SQL and Excel make you a shoo-in for a data analysis raise."],
+    ["I know SQL and Excel", "Your SQL and Excel are worth good money in data analysis."], ["I know SQL and Excel", "Your SQL and Excel got you past the screening stage."],
+    ["I know SQL and Excel", "Your SQL and Excel will get you hired quickly in data analysis."], ["I know SQL and Excel", "Your SQL and Excel mean you will earn well in data analysis."],
+  ];
+  for (const [said, d, q] of refused) {
+    const l = await knowledgeTurn(said, q);
+    for (const tag of ["", ` [${l.units.find((u) => u.kind === "chat")!.id}]`, ` [${l.units.find((u) => u.uses)!.id}]`]) {
+      const r = recorder("yes");
+      await verifyTagged(d + tag, l, { ask: "which of my skills fit?", judge: r.judge, said: [said] });
+      assert(!r.asked.some((x) => /two passages/.test(x.source)), `a pair was formed: ${d}${tag}: ${JSON.stringify(r.asked)}`);
+      assert(!r.asked.some((x) => x.source.includes(said)), `their words were shown: ${d}${tag}: ${JSON.stringify(r.asked)}`);
+    }
+  }
+  // (what they did say still pairs: their tools, in their words, against the field's own)
+  for (const [said, d, q] of [["I know SQL and Excel", "Your SQL and Excel cover the database query language and spreadsheet that data analysis work commonly involves."],
+    ["I know Python and Git", "Your Python and Git are what software work commonly involves.", "software developer"]] as [string, string, string?][]) {
+    const r = recorder("yes");
+    const v = await verifyTagged(d, await knowledgeTurn(said, q), { ask: "which of my skills fit?", judge: r.judge, said: [said] });
+    assert(!v.failures.length && r.asked.some((x) => /two passages/.test(x.source)), `${d}: ${JSON.stringify({ v, asked: r.asked })}`);
   }
 });

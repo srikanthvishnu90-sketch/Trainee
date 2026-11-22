@@ -358,7 +358,19 @@ export function saidSubject(clause: string): boolean {
 }
 // D-100: a pay, status or outcome claim is never judged as a pair (what they are paid, what was sent, applied for or approved, an
 // interview, an offer or a rejection).
-const NOT_PAIR = /[$€£]|\b(?:pay|pays|paid|salary|salaries|wage|wages|comp|compensation|per\s+hour|an\s+hour|a\s+year|offers?|offered|interview(?:s|ed)?|reject\w*|accept(?:ed|s)?|appl(?:ied|ication|ications)|submit\w*|sent|queued|approv\w*|status|hired\s+(?:by|at)|shortlist\w*)\b/i;
+const NOT_PAIR = /[$€£]|\b(?:pay|pays|paid|salary|salaries|wage|wages|comp|compensation|earn\w*|money|raises?|income|worth|per\s+hour|an\s+hour|a\s+year|offers?|offered|interview(?:s|ed)?|screen(?:s|ed|ing)?|stages?|callbacks?|hir(?:e|ed|es|ing)|land(?:s|ed|ing)?|promot\w*|reject\w*|accept(?:ed|s)?|appl(?:ied|ication|ications)|submit\w*|sent|queued|approv\w*|status|shortlist\w*)\b/i;
+// Review of a339b806a (B3): what a field knowledge unit names as an example (a tool, "Power BI", "Git") is theirs only when their own
+// words name it, in any case ("power bi"), anywhere in the clause; and a class word of it (dashboard, spreadsheet, version control)
+// credited to them ("your dashboard experience", "you already know …") is theirs only when their words use it too.
+const USES_STOP = new Set(["a", "an", "the", "and", "or", "such", "as", "of", "to", "in", "on", "for", "with", "work", "commonly", "involves", "general", "career", "knowledge", "not", "postings", "tool", "tools", "system", "basics", "explaining", "users", "data", "analysis", "it", "fixes"]);
+const lowerHas = (hay: string, w: string) => new RegExp(`(?<![\\p{L}\\p{N}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(hay);
+export function usesTermsUnsaid(clause: string, usesText: string, theirs: string): string[] {
+  const examples = [...String(usesText).matchAll(/\(such as ([^)]+)\)/gi)].flatMap((m) => m[1].split(/\s*,\s*|\s+or\s+/i)).map((x) => x.trim()).filter(Boolean);
+  const words = String(usesText).replace(/^General career knowledge, not postings:[^:]*?involves\s*/i, "").replace(/\(such as [^)]+\)/gi, " ").toLowerCase().match(/[\p{L}][\p{L}-]{2,}/gu) ?? [];
+  const classes = [...new Set(words.filter((w) => !USES_STOP.has(w)))];
+  const credited = (w: string) => new RegExp(`(?<![\\p{L}])(?:your\\s+(?:[\\p{L}-]+\\s+){0,4}?|you(?:'ve|’ve|\\s+have)?\\s+(?:already\\s+|also\\s+)?(?:know|use|used|have|had|did|done|built|ran|run|do)\\s+(?:[\\p{L}-]+\\s+){0,4}?)${w}(?![\\p{L}])`, "iu").test(clause);
+  return [...examples.filter((e) => lowerHas(clause, e) && !lowerHas(theirs, e)), ...classes.filter((w) => credited(w) && !lowerHas(theirs, w))];
+}
 // The D-100 pair as one source: both passages marked, each with what it is.
 const pairSource = (theirs: EvidenceUnit, role: EvidenceUnit) => [
   `Page title: ${theirs.kind === "said" ? "What the person said in this chat" : "The person's confirmed record"}, and general career knowledge (two passages)`,
@@ -487,6 +499,8 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
   // about the person: "You know Python" rests on nothing they said. It is only ever the role half of the D-100 pair below.
   const aboutThem = (t: string) => /(?<![\p{L}'’])(?:you|your|you're|you’re|you've|you’ve|yours)(?![\p{L}])/iu.test(t);
   const notUsesFor = (t: string) => (u: EvidenceUnit) => !(u.uses && aboutThem(t));
+  // (review of a339b806a, B3: a field knowledge example or class word credited to them must be in the words of theirs a clause rests on)
+  const usesSaid = (t: string, u: EvidenceUnit) => ledger.units.filter((x) => x.uses).every((x) => !usesTermsUnsaid(t, x.text, u.text).length);
   lines.forEach((l, a) => l.forEach((x, b) => {
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
     const { ids, text } = tagsOf(x);
@@ -498,7 +512,7 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
     if (free(text)) {
       const subj = mentioned(text)[0] ?? unknownIn(text) ?? carried;
       const pool0 = forClaim(ids.length ? withSaidUnits(ids.map((id) => ledger.get(id)).filter((u): u is EvidenceUnit => !!u)) : ledger.units, text);
-      const pool = pool0.filter(notUsesFor(text)).filter((u) => u.source !== "an earlier reply in this chat" && !(u.kind === "said" && (subj || saidBarred(text) || !saidSubject(text))) && (subj ? mine(u, subj) || (!unknownSubject(subj) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
+      const pool = pool0.filter(notUsesFor(text)).filter((u) => u.source !== "an earlier reply in this chat" && !(u.kind === "said" && (subj || saidBarred(text) || !saidSubject(text) || !usesSaid(text, u))) && (subj ? mine(u, subj) || (!unknownSubject(subj) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
       if (ids.length) citeAt.set(`${a}:${b}`, ids);
       checks.push({ a, b, clause: text, units: pool, claim: text, subject: subj, advice: true, untagged: !ids.length });
       return carryPast(text, false);
@@ -538,7 +552,7 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
       // (round 12: an unknown subject rests only on a unit that names it as its employer; a carried subject never rests on a posting
       // record whose employer code cannot tell, which is some other employer's posting)
       // (S3 r12c: the person's own words back only a clause about them, never one about an employer)
-      const allowedUnits = forClaim(units, c).filter(notUsesFor(c)).filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") && !(u.kind === "said" && (subject || saidBarred(c) || saidBarred(text) || !saidSubject(c))) &&
+      const allowedUnits = forClaim(units, c).filter(notUsesFor(c)).filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") && !(u.kind === "said" && (subject || saidBarred(c) || saidBarred(text) || !saidSubject(c) || !usesSaid(c, u))) &&
         (unknownSubject(subject) ? namesAsEmployer(u, subject!) :
           mine(u, subject) || (!!subject && !ownSubj && !u.owner && !u.posting && (anyNamed.get(u.id) ?? []).length === 0)));
       if (!allowedUnits.length) return fail(a, b, text, subject ? `no cited unit is about ${subject}` : "it names no employer, and every unit that could hold it is one employer's", subject);
@@ -613,7 +627,9 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
       const own = (u: EvidenceUnit) => wholeNumbersIn(c.clause, u.text) && !missingSpecifics(c.clause, [u], true).some((m) => /\d/.test(m) || !jobTitleWord(m, c.clause)) &&
         (hp.numbers.length > 0 || hardParts(c.clause).names.length > 0);
       const theirs = c.units.filter((u) => (u.kind === "said" || u.kind === "record") && own(u)).slice(0, 2);
-      const pairs = theirs.flatMap((t) => roleHalf.map((r) => [t, r] as const)).slice(0, 3);
+      // (B3: checked against every field knowledge unit of the turn, so a second suggestion unit never carries what the first refuses)
+      const usesTexts = ledger.units.filter((u) => u.uses).map((u) => u.text);
+      const pairs = theirs.filter((t) => usesTexts.every((x) => !usesTermsUnsaid(c.clause, x, t.text).length)).flatMap((t) => roleHalf.map((r) => [t, r] as const)).slice(0, 3);
       pairAsks = pairs.map(([t, r]) => ({ k, claim: withSubject(c), source: pairSource(t, r) }));
     }
     // (layer A may place the clause in their unit alone, which never states the field's half: the pair is asked beside it, one yes enough)

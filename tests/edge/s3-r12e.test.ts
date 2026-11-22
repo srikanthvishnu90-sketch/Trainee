@@ -7,6 +7,7 @@ import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
 import { g1CodeAnswers, stagedDecision } from "../../supabase/functions/agent-chat/career_staged.ts";
 import { Ledger, verifyTagged } from "../../supabase/functions/_shared/agent/reply_pipeline.ts";
 import { careerTools } from "../../supabase/functions/_shared/agent/career_tools.ts";
+import { careerSystemPrompt } from "../../supabase/functions/_shared/agent/prompt.ts";
 
 function assert(v: unknown, m = "assertion failed"): asserts v { if (!v) throw new Error(m); }
 const host = (CareerHost as any).createCareerHost({ CareerAccess: (core as any).CareerAccess, CareerOnboarding: (core as any).CareerOnboarding, CareerRouter: (core as any).CareerRouter, CareerDoorstep: (core as any).CareerDoorstep, CareerReply: (core as any).CareerReply, CareerContainment: (core as any).CareerContainment });
@@ -154,4 +155,13 @@ Deno.test("D-100: the pair never serves an employer subject or frame, a posting,
     const v = await verifyTagged(d, l, { ask: ASK2, judge: recorder("no").judge, said: SAID2 });
     assert(v.failures.length, `${d}: ${JSON.stringify(v)}`);
   }
+});
+
+// ---------------------------------------------------------------------------------------------------------------- the fit rule
+// (probe-r12e2-3/-4 on abfecdef2: turn 2 took the plain path and the brain credited the person with abilities they never stated;
+// the rule is the brain's, in its system prompt, for every fit or mapping answer; no new check on the plain path)
+Deno.test("S3 r12e / H022: the brain's prompt credits the person, in a fit answer, only with what they stated", () => {
+  const p = careerSystemPrompt("2026-11-21").replace(/\s+/g, " ");
+  assert(/how their skills or experience fit a role, credit them only with what they stated/.test(p), "the fit rule is in the prompt");
+  assert(/add no ability, sub-skill or trait they did not state/.test(p) && /say it about the role, never as something they have/.test(p), "the fit rule's two halves");
 });

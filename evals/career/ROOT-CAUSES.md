@@ -1116,3 +1116,18 @@ draft, the code reasons and what the judge was shown are read from the calls, no
   embellishments were read as unstated skills: "Your 2 years of reporting shows you can turn numbers into something others use" (p3),
   "Excel covers analysis and quick modeling" (p4). Not fixed here: the plain path has no support check by design (an advice turn), and
   checking it is a separate ruling.
+- Fit rule (a339b806a): the brain's system prompt says, for every fit or mapping answer, to credit the person only with what they
+  stated, in their terms, and to say what the role involves about the role. Probes at a339b806a (`--only H022,H019,H009`, stopped
+  for the review after 4 passes): 3/3, 3/3, 2/3 (H022, a split), 3/3.
+- Independent review of a339b806a (REJECT, high), fixed:
+  - B1 (8a0489ddb): the change-list trigger also read "what's different between a data analyst and a data scientist?", "what changed in
+    the job market this year?" and "what did you change in the Acme one?" (another tailoring), and after a tailoring by tailor_resume code
+    said none had run. Code's answer now needs an ask about Trainee's own edit (or one naming a resume, CV, tailoring or bullets), no
+    posting, job, market, role or comparison, a named company equal to the recorded tailoring's, and no tailor_resume mark (tailorTool,
+    which that tool now writes on the thread) without a diff.
+  - B2 (d75c9e6cd): their words backed clauses with no proper name ("The role pays $40 an hour." on "I want $40 an hour"; "Their team needs
+    SQL"; "I applied … for you"). Now their words back only a clause whose subject is the person, tagged or not (`saidSubject`).
+  - B3 (d95f3a5fc): lower-case examples formed a pair ("Your SQL and power bi skills …"), NOT_PAIR missed pay and outcome words, and an
+    unnamed team frame passed. Now every field-knowledge example, and any class word credited to them, must be in their words.
+  - The search_jobs nudge is reverted (4b8607c2a, architect): the field half arrives only with a search result, and a turn with no tool
+    read is unchecked. H009's move reply names the tracker's stage for a verb ("applied") or a negated step word (7852507c7).

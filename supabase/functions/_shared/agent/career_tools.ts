@@ -1117,6 +1117,9 @@ export function careerTools(deps: {
           r = rec ? await tailorForPosting({ ...base, layout: "template", template: rec.template }) : await tailorForPosting(base);
         }
         if (r.ok && t.versions) await recordVersion(t.versions, { userId: c.userId, out: r, now: c.now });
+        // S3 r12e, review of a339b806a (B1): a tailoring this tool made is marked on the thread's record, where code's change-list
+        // answer (142 handleTailorDiffAsk, career_staged.ts tailorDiffCodeAnswers) reads it, so code never says no tailoring has run.
+        if (r.ok) { try { const ts = trackOf(c) as any; ts._careerThread = ts._careerThread && typeof ts._careerThread === "object" ? ts._careerThread : {}; ts._careerThread.tailorTool = { at: new Date(c.now).toISOString(), job_id: (r as any).job_id ?? null }; } catch { /* the reply stands without the mark */ } }
         // A second file for the same posting is its v2 (Instinct C10/C20: "..._v2.pdf"), counted from the person's own version log.
         const nth = r.ok && t.versions && r.job_id ? await versionFor(t.versions, c.userId, r.sha256, r.job_id) : 1;
         if (r.ok && nth > 1) r = { ...r, filename: r.filename.replace(/(\.pdf)?$/i, `_v${nth}.pdf`) };

@@ -810,11 +810,6 @@ const G1_ACTIONS: ReadonlySet<string> = new Set([
   // what the person told Trainee about themselves, read back from what they confirmed (D-007); "the first one" of the list code
   // just showed (G1 b: the answer refers to code's own list)
   "profile_recall", "career_list_reference",
-  // S3 r12e (dev H019, s3sub 52e2025c9 p1): "show me exactly what you changed" is a read of code's own record of its tailoring (the
-  // diff handleTailorDiffAsk keeps on the thread, or its honest absence). No brain tool reads that record, so the brain had only the
-  // router's line as data; it looked at the applications record instead, and the applications hold kept nothing but code's status
-  // line ("no applications"), an answer to a question nobody asked. G1 (b), as for career_list_reference: the answer is code's.
-  "career_tailor_diff",
 ]);
 // Reads of the person's own record (applications, follow-ups, their people): code's when the message asks about that record.
 const G1_RECORD_READS: ReadonlySet<string> = new Set(["tracking_status", "tracking_digest", "career_status_states", "intent_followup_status",
@@ -869,6 +864,9 @@ export function g1CodeAnswers(message: string, intent: string, result: unknown, 
   // A search the router ran on words that ask for a different deliverable (a plan, a strategy, a timeline) and no find ask:
   // the deliverable asked for is the brain's, with the search as data (as adviceOverSearch does for an advice question).
   if (SEARCH_INTENTS.has(intent) && OTHER_DELIVERABLE.test(m) && !SEARCH_ASK.test(m)) return false;
+  // S3 r12e (dev H019, s3sub 52e2025c9 p1) and the review of a339b806a (B1): code's change list (or its honest absence) is code's
+  // answer only for a narrow ask about Trainee's own edit (tailorDiffCodeAnswers); any other reading the router made is the brain's data.
+  if (intent === "career_tailor_diff") return tailorDiffCodeAnswers(m, ctx);
   if (G1_ACTIONS.has(intent)) return true;
   if (G1_RECORD_READS.has(intent)) return OWN_RECORD_ASK.test(m);
   // "What do you know about me?" is a read of their own record (D-007: from what they confirmed); "that X from earlier" is a
@@ -893,6 +891,26 @@ export function g1CodeAnswers(message: string, intent: string, result: unknown, 
   // Everything else (advice and questions, research the router answered from its library, a draft code would write from
   // words, a practice question served from a bank, a recall of the thread): the brain's, with the router's answer as data.
   return false;
+}
+// S3 r12e (dev H019): "show me exactly what you changed" with no tailoring went to the brain, which has no tool that reads the
+// tailoring diff (it is code's record on the thread, handleTailorDiffAsk); it looked at list_applications and the applications hold
+// answered a question nobody asked. Review of a339b806a (B1): the router's trigger also reads "what's different between a data
+// analyst and a data scientist?", "what changed in the job market?" and "what did you change in the Acme one?" (another tailoring).
+// Code answers only an ask about Trainee's own edit ("what did you change/add/remove", "show me what you changed") or one naming a
+// resume, CV, tailoring or bullets; never one about a posting, a job, the market, roles or a comparison ("between"); a company it
+// names is the recorded tailoring's own; and the no-tailoring answer stands only when no tailoring ran on this thread by either path
+// (the router's record, or tailor_resume's mark, career_tools.ts).
+const DIFF_OWN = /\bwhat\s+(?:exactly\s+)?(?:did|have)\s+you\s+(?:change|changed|add|added|remove|removed|drop|dropped|cut|edit|edited|keep|kept)\b|\bshow\s+me\s+(?:exactly\s+)?what\s+you\s+(?:changed|added|removed|edited)\b|\b(?:resume|cv|tailor\w*|tailoring|bullets?)\b/i;
+const DIFF_OTHER = /\b(?:postings?|jobs?|market|roles?|between)\b/i;
+export function tailorDiffCodeAnswers(message: string, ctx?: Record<string, unknown>): boolean {
+  const m = String(message ?? "").replace(/[’`]/g, "'");
+  if (!DIFF_OWN.test(m) || DIFF_OTHER.test(m)) return false;
+  const thread = (ctx as any)?.trackStore?._careerThread ?? null;
+  const rec = thread?.tailor ?? null;
+  if (!rec?.diff && thread?.tailorTool) return false;
+  const named = [...m.matchAll(/(?<![\p{L}'])\p{Lu}[\p{L}&.'-]+/gu)].map((x) => x[0]).filter((w, k) => !(k === 0 && m.trimStart().startsWith(w)) && !/^(?:I|I'm|I've|CV)$/.test(w));
+  const company = String(rec?.company ?? "").toLowerCase();
+  return named.every((w) => !!company && company.includes(w.toLowerCase()));
 }
 // Payload intents whose payload is code's reading of the words, not something the person was shown: the brain writes these
 // (a draft with placeholders, D-059; a practice question asked like an interviewer, G12; a tailored resume only when code

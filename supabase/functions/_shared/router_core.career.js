@@ -24868,6 +24868,9 @@ const CareerRouter = (() => {
     try { const m = threadMirrorOf(ctx); rec = m && m.tailor ? m.tailor : null; } catch { rec = null; }
     const lastSearch = ctx.discovery && ctx.discovery.lastParams;
     if ((!rec || !rec.diff) && lastSearch && !/\b(resume|cv|cover letter|bullets?|tailor\w*)\b/.test(t)) return null;
+    let toolMark = null;
+    try { const m2 = threadMirrorOf(ctx); toolMark = m2 && m2.tailorTool ? m2.tailorTool : null; } catch { toolMark = null; }
+    if ((!rec || !rec.diff) && toolMark) return null;
     if (!rec || !rec.diff) {
       const reply = compose({ headline: "No tailoring has run in this conversation yet, so there is no change list to show.", facts: ["The moment a resume is tailored here, the exact additions, removals and moves — each with its reason — are kept on this thread, and I can walk every one."], nextStep: "Name the role (or paste the posting) and I will tailor first, then show every change." });
       return { intent: "career_tailor_diff", reply, resultStatus: "awaiting_user", sends: 0 };

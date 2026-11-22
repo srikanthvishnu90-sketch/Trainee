@@ -4,7 +4,7 @@
 // Run: deno test -A --no-check tests/edge/s3-r12e.test.ts
 import * as core from "../../supabase/functions/_shared/router_core.career.js";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";
-import { g1CodeAnswers, stagedDecision } from "../../supabase/functions/agent-chat/career_staged.ts";
+import { g1CodeAnswers, stagedDecision, tailorDiffCodeAnswers } from "../../supabase/functions/agent-chat/career_staged.ts";
 import { Ledger, verifyTagged } from "../../supabase/functions/_shared/agent/reply_pipeline.ts";
 import { careerTools } from "../../supabase/functions/_shared/agent/career_tools.ts";
 import { careerSystemPrompt } from "../../supabase/functions/_shared/agent/prompt.ts";
@@ -164,4 +164,32 @@ Deno.test("S3 r12e / H022: the brain's prompt credits the person, in a fit answe
   const p = careerSystemPrompt("2026-11-21").replace(/\s+/g, " ");
   assert(/how their skills or experience fit a role, credit them only with what they stated/.test(p), "the fit rule is in the prompt");
   assert(/add no ability, sub-skill or trait they did not state/.test(p) && /say it about the role, never as something they have/.test(p), "the fit rule's two halves");
+});
+
+// ---------------------------------------------------------------------------------------------------------------- review B1
+// (independent review of a339b806a, B1: the router's change-list trigger also reads asks that are not about Trainee's own edit, and a
+// tailoring made by the brain's tailor_resume left no diff here, so code said no tailoring had run)
+const withTailoring = (mark?: "diff" | "tool") => {
+  const c = ctxAt(null, 0);
+  c.trackStore = c.trackStore || { rows: [] };
+  c.trackStore._careerThread = mark === "tool" ? { tailorTool: { at: new Date(NOW).toISOString(), job_id: "J1" } }
+    : { tailor: { company: "Kestrel Foods", title: "Reporting Analyst", diff: { summary: "2 lines added, 1 removed", added: [{ text: "Built Looker dashboards", reason: "the posting asks for dashboards" }], removed: [{ text: "Led choir", reason: "off-target" }], moved: [] }, gaps: ["Tableau"] } };
+  return c;
+};
+Deno.test("S3 r12e / review B1: only an ask about Trainee's own edit gets code's change list", () => {
+  for (const m of ["what's different between a data analyst and a data scientist?", "what changed in the job market this year?", "what's different about remote roles",
+    "what did you change in the Acme one?", "what exactly changed in the Kestrel posting since yesterday?"]) {
+    const d = stagedDecision({ env: PROD, message: m, ctx: withTailoring(), host, structured: false });
+    assert(d.brain === true, `${m}: ${d.intent}/${d.reason}`);
+  }
+  for (const m of ["what did you change?", "show me exactly what you changed", "what did you change in the Kestrel one?", "what did you change on my resume?"]) {
+    const d = stagedDecision({ env: PROD, message: m, ctx: withTailoring(), host, structured: false });
+    assert(d.brain === false && d.intent === "career_tailor_diff", `${m}: ${d.intent}/${d.reason}`);
+  }
+});
+Deno.test("S3 r12e / review B1: after a tailoring by tailor_resume, code never says no tailoring has run", () => {
+  const r = host.runTurn("what did you change?", withTailoring("tool"));
+  assert(!/No tailoring has run/.test(String(r.reply)), String(r.reply));
+  assert(!tailorDiffCodeAnswers("what did you change?", withTailoring("tool")), "the brain answers it");
+  assert(tailorDiffCodeAnswers("what did you change?", ctxAt(null, 0)), "with no tailoring by either path, code's honest absence stands");
 });

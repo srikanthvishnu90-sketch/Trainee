@@ -1102,3 +1102,17 @@ draft, the code reasons and what the judge was shown are read from the calls, no
   stage beside it when they differ, "is now at the onsite round (Interview rounds on your tracker)", and the evidence sentence is gone.
 - Proof: `tests/edge/s3-r12e.test.ts` (offline, in gate.sh; the H019, H009 and H022-judge tests fail on 52e2025c9, the two guard tests
   pass on both).
+- D-100 (architect ruling on the H022 finding above; abfecdef2): the entry-route table states what each field commonly involves (tool or
+  skill classes, at most two examples each), as its own general-knowledge unit beside the search's suggestion unit; a clause addressed
+  to the person with no employer subject or frame, posting, pay, status or outcome claim may be judged against one said or record unit
+  plus one such unit, both marked in one source; code holds their half (every name and figure in their words, figures whole numbers);
+  a `uses` unit alone never backs a clause about them. The search_jobs description says a skills-fit question with no posting in hand
+  needs no search (steering only). Checked with the real support judge (scratch, subscription): "Your SQL, Excel and Tableau cover the
+  query, spreadsheet and dashboard tools data analysis involves" and "Your 2 years of reporting match the recurring reporting in data
+  analysis work" now stand (yes on the pair, no on their words alone); "Your Python and SQL …" and "You know Power BI …" are refused in
+  code; a comparative ("is the closest experience to it") is still refused by the judge.
+- Probes at abfecdef2 (`--only H022,H019,H009`, 4 passes): 3/3, 3/3, 2/3, 2/3. H019 and H009 4/4. H022 2/4, both failures haiku-only
+  splits on a different class: turn 2 did not search in any pass (the nudge), so the reply took the plain path, and the brain's own
+  embellishments were read as unstated skills: "Your 2 years of reporting shows you can turn numbers into something others use" (p3),
+  "Excel covers analysis and quick modeling" (p4). Not fixed here: the plain path has no support check by design (an advice turn), and
+  checking it is a separate ruling.

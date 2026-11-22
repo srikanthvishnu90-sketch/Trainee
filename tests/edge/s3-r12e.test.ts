@@ -260,3 +260,16 @@ Deno.test("S3 r12e / review B3: a field-knowledge example or class word credited
     assert(!v.failures.length && r.asked.some((x) => /two passages/.test(x.source)), `${d}: ${JSON.stringify({ v, asked: r.asked })}`);
   }
 });
+
+// (review of a339b806a, non-blocking: "applied" is no name for a step; a step word the message negates or calls off is not said
+// back; one short clause says the move rests on their report)
+Deno.test("S3 r12e / H009: a verb or a negated step word is never named as the stage; the move rests on their report", () => {
+  const said = (m: string) => chat(["I applied to the Data Analyst role at Brightmoor Logistics last week", m])[1].reply as string;
+  assert(/^Moved on your report — /.test(said("I moved to the onsite round at Brightmoor Logistics")), said("I moved to the onsite round at Brightmoor Logistics"));
+  const applied = said("update Brightmoor Logistics, I applied");
+  assert(!/the applied/.test(applied) && /the Submitted stage on your tracker/.test(applied), applied);
+  for (const m of ["move Brightmoor Logistics to interview, not onsite yet", "move Brightmoor Logistics to interview, the onsite was cancelled"]) {
+    const r = said(m);
+    assert(!/onsite/i.test(r) && /the Interview rounds stage on your tracker/.test(r), r);
+  }
+});

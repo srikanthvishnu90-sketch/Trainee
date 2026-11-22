@@ -19375,8 +19375,11 @@ const CareerRouter = (() => {
     if (!back || back.stage !== hit[1]) return null;
     const said = (new RegExp(`(?:${hit[0].source})(?:\\s+(?:round|stage|interview|screen))?`).exec(t) || [""])[0].trim();
     const core = said.replace(/\s+(?:round|stage|interview|screen)$/, "");
-    const at = core && !hit[1].toLowerCase().includes(core) ? `the ${said} (${hit[1]} on your tracker)` : `the ${hit[1]} stage on your tracker`;
-    const reply = compose({ headline: `Moved — ${row.company} is now at ${at}.`, facts: [], nextStep: "Want the prep for that stage next?" });
+    const esc = core.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const negated = !!core && (new RegExp(`\\b(?:not|no|never|isn't|wasn't|didn't|hasn't|cancel\\w*|postponed)\\b[^.!?]{0,24}\\b${esc}\\b`).test(t) || new RegExp(`\\b${esc}\\b[^.!?]{0,24}\\b(?:cancel\\w*|postponed|fell through|didn't happen|is off|was off)\\b`).test(t));
+    const ownWord = core && !/^(?:applied|submitted|reject\w*)$/.test(core) && !negated && !hit[1].toLowerCase().includes(core);
+    const at = ownWord ? `the ${said} (${hit[1]} on your tracker)` : `the ${hit[1]} stage on your tracker`;
+    const reply = compose({ headline: `Moved on your report — ${row.company} is now at ${at}.`, facts: [], nextStep: "Want the prep for that stage next?" });
     return emitTrack(ctx, { intent: "tracking_log", reply, resultStatus: "completed", sends: 0, application: back }, { company: row.company, stage: hit[1], event_type: "manual_update", note: "user-reported stage move" });
   }
   function handleTrackStatus(text, ctx) {

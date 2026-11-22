@@ -841,7 +841,7 @@ export function careerTools(deps: {
     },
     {
       name: "search_jobs", effect: "read",
-      description: "Search live job postings by keywords (role, skill, place). Returns real postings with their links, when they were first seen, and, when the person has confirmed facts, a fit score with reasons and gaps (ranked best fit first; a posting they are knocked out of ranks last with the reason). An empty pool is reported as source 'none'. Not needed to say how the skills they told you fit a kind of role.",
+      description: "Search live job postings by keywords (role, skill, place). Returns real postings with their links, when they were first seen, and, when the person has confirmed facts, a fit score with reasons and gaps (ranked best fit first; a posting they are knocked out of ranks last with the reason). An empty pool is reported as source 'none'.",
       input_schema: obj({ query: str("Keywords, e.g. 'data analyst remote'"), limit: { type: "number", description: "Max results, default 10" } }),
       run: async (i, c) => {
         // WO-068: every word must match, so a word the model added ("mid level", "python") can empty a search that has

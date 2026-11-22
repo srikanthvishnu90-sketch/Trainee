@@ -96,3 +96,62 @@ Deno.test("S3 r12e / H022: tagged or not, their words back nothing they did not 
   const bare = await verifyTagged(`Your 3 years of finance reporting is the closest experience to the job. [${id}]`, l, { ask: ASK, judge: yes });
   assert(bare.failures.length, JSON.stringify(bare));
 });
+
+// ---------------------------------------------------------------------------------------------------------------- D-100
+// (architect ruling D-100: the field's knowledge unit and the pair: one said or record unit plus one suggestion unit, judged as one
+// source with both passages marked. Probes probe-r12e-3/-4 on 9775d5129: the real judge refused every mapping against their words
+// alone, rightly: the field's half was in no unit)
+const ASK2 = "which of my strengths fit data analytics work?";
+const SAID2 = ["I use SQL, Excel and Power BI and did 3 years of finance reporting", ASK2];
+async function fieldLedger() {
+  const t = careerTools({ postings: async () => [] }).find((x) => x.name === "search_jobs")!;
+  const out: any = await t.run({ query: "data analyst" }, { userId: "u", threadId: "t", now: NOW, state: {}, turn: { message: ASK2 } } as any);
+  const l = new Ledger(NOW); l.fromToolResult("search_jobs", out);
+  return { l, id: l.units.find((u) => u.kind === "chat")!.id, out };
+}
+const recorder = (answer: "yes" | "no") => { const asked: { claim: string; source: string }[] = []; return { asked, judge: async (cs: { claim: string; source: string }[]) => { asked.push(...cs); return cs.map(() => answer); } }; };
+
+Deno.test("D-100: an empty search in a field the table holds carries what the field commonly involves, as general knowledge", async () => {
+  const { l, out } = await fieldLedger();
+  assert(out.suggestions?.[0]?.uses && !/\d/.test(out.suggestions[0].uses), JSON.stringify(out.suggestions));
+  const u = l.units.find((x) => x.kind === "suggestion" && /commonly involves/.test(x.text));
+  assert(u && /^General career knowledge, not postings: work in data analysis commonly involves .*query language.*Excel/.test(u.text), l.block());
+});
+
+Deno.test("D-100: a sentence mapping their own stated skills to the field is judged against their words and the field's knowledge together", async () => {
+  const { l, id } = await fieldLedger();
+  for (const d of [`Your SQL, Excel and Power BI are the core of data analysis work, and your 3 years of finance reporting is the recurring reporting it involves. [${id}]`,
+    "With SQL, Excel and Power BI, you already use the query, spreadsheet and dashboard tools data analysis work involves."]) {
+    const r = recorder("yes");
+    const v = await verifyTagged(d, l, { ask: ASK2, judge: r.judge, said: SAID2 });
+    assert(!v.failures.length && v.text.includes("Power BI"), `${d}: ${JSON.stringify(v)}`);
+    assert(r.asked.some((x) => x.source.includes("What the person said in this chat: I use SQL") && x.source.includes("General career knowledge, not postings: work in data analysis")), JSON.stringify(r.asked));
+    // (the judge decides: its "no" drops it)
+    const n = recorder("no");
+    const w = await verifyTagged(d, l, { ask: ASK2, judge: n.judge, said: SAID2 });
+    assert(w.failures.length && !w.text.includes("Power BI"), JSON.stringify(w));
+  }
+});
+
+Deno.test("D-100: an invented skill, a knowledge-only claim about them, a figure they never said: refused whatever the judge says", async () => {
+  const { l, id } = await fieldLedger();
+  for (const d of [`Your Python and SQL are the core of data analysis work. [${id}]`, "You know Python.", "You know Tableau, which data analysis work involves.",
+    `Your 5 years of finance reporting are the recurring reporting data analysis involves. [${id}]`, "Your SQL, Excel and Power BI make you a senior analyst with 8 years."]) {
+    const r = recorder("yes");
+    const v = await verifyTagged(d, l, { ask: ASK2, judge: r.judge, said: SAID2 });
+    assert(v.failures.length && !v.text.trim(), `${d}: ${JSON.stringify(v)}`);
+    assert(!r.asked.some((x) => /two passages/.test(x.source)), `the pair was used: ${JSON.stringify(r.asked)}`);
+  }
+});
+
+Deno.test("D-100: the pair never serves an employer subject or frame, a posting, pay, status or outcome claim", async () => {
+  const { l, id } = await fieldLedger();
+  for (const d of [`Your SQL fits Acme's data team. [${id}]`, "Acme hires people with your SQL and Power BI.", "Your SQL and Power BI fit the open data analyst postings near you.",
+    "Your SQL and Power BI get data analysts paid $90 an hour.", "Your SQL application was sent.", "Your SQL and Excel got you an interview."]) {
+    const r = recorder("yes");
+    await verifyTagged(d, l, { ask: ASK2, judge: r.judge, said: SAID2 });
+    assert(!r.asked.some((x) => /two passages/.test(x.source)), `the pair was used: ${d}: ${JSON.stringify(r.asked)}`);
+    const v = await verifyTagged(d, l, { ask: ASK2, judge: recorder("no").judge, said: SAID2 });
+    assert(v.failures.length, `${d}: ${JSON.stringify(v)}`);
+  }
+});

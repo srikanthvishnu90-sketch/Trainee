@@ -74,7 +74,7 @@ Deno.test("S3 r12e / H022: a tagged sentence about their stated skills is checke
   const asked: { claim: string; source: string }[] = [];
   const rec = async (cs: { claim: string; source: string }[]) => { asked.push(...cs); return cs.map(() => "yes" as const); };
   for (const d of [`Your SQL, Looker and Excel are the core tools of reporting work, and your 3 years of finance reporting is the closest experience to it. [${id}]`,
-    `Your 3 years of finance reporting is the closest experience to the job. [${id}]`, `Looker covers dashboards and Excel covers everyday analysis. [${id}]`]) {
+    `Your 3 years of finance reporting is the closest experience to the job. [${id}]`, `Your Looker covers dashboards and your Excel covers everyday analysis. [${id}]`]) {
     asked.length = 0;
     const v = await verifyTagged(d, l, { ask: ASK, judge: rec, said: SAID });
     assert(!v.failures.length && v.text.length > 20, `${d}: ${JSON.stringify(v)}`);
@@ -192,4 +192,33 @@ Deno.test("S3 r12e / review B1: after a tailoring by tailor_resume, code never s
   assert(!/No tailoring has run/.test(String(r.reply)), String(r.reply));
   assert(!tailorDiffCodeAnswers("what did you change?", withTailoring("tool")), "the brain answers it");
   assert(tailorDiffCodeAnswers("what did you change?", ctxAt(null, 0)), "with no tailoring by either path, code's honest absence stands");
+});
+
+// ---------------------------------------------------------------------------------------------------------------- review B2
+// (independent review of a339b806a, B2: a clause with no proper name rested on the person's words, "The role pays $40 an hour." on
+// "I want $40 an hour"; the architect's rule: their words back only a clause whose subject is the person, tagged or not)
+const oneHitRiverside = () => { const l = new Ledger(NOW); l.fromToolResult("search_jobs", { postings: [{ company: "Riverside Health", title: "Data Analyst", location: "Columbus, OH", url: "https://jobs.example.com/da-1", state: "open" }] }); return l; };
+Deno.test("S3 r12e / review B2: their words never back a clause about a third party, Trainee's action, money or status", async () => {
+  const cases: [string, string][] = [
+    ["I applied to Riverside Health yesterday", "I applied to Riverside Health for you yesterday."], ["I applied to Riverside Health yesterday", "You applied to Riverside Health yesterday and it is under review."],
+    ["I want $40 an hour", "This role pays $40 an hour, which is what you want."], ["I want $40 an hour", "The role pays $40 an hour."],
+    ["I applied to Riverside Health yesterday", "Your application was submitted yesterday."], ["I applied to Riverside Health yesterday", "I submitted your application yesterday."],
+    ["I want a remote role in Denver", "The open roles are remote and in Denver."], ["I know SQL", "Riverside Health needs SQL."], ["I know SQL", "Their team needs SQL."],
+    ["I know SQL and Excel", "Your SQL and Excel fit their reporting team well."], ["I want $40 an hour", "You want $40 an hour."],
+  ];
+  for (const [said, d0] of cases) for (const mk of [async () => (await fieldLedger()).l, async () => oneHitRiverside()]) {
+    const l = await mk();
+    for (const id of [null, ...l.units.map((u) => u.id)]) {
+      const r = recorder("yes");
+      await verifyTagged(id ? `${d0} [${id}]` : d0, l, { ask: "which roles fit me?", judge: r.judge, said: [said] });
+      assert(!r.asked.some((x) => x.source.includes(said)), `their words were shown for "${d0}" (${id ?? "untagged"}): ${JSON.stringify(r.asked)}`);
+    }
+  }
+});
+Deno.test("S3 r12e / review B2: a clause whose subject is the person still rests on their words", async () => {
+  for (const d of ["You know SQL, Excel and Tableau.", "With SQL, Excel and Tableau, you already use a data analyst's main tools.", "Saved: you know SQL, Excel and Tableau."]) {
+    const r = recorder("yes");
+    const v = await verifyTagged(d, (await fieldLedger()).l, { ask: "which roles fit me?", judge: r.judge, said: ["I know SQL, Excel and Tableau"] });
+    assert(!v.failures.length && r.asked.some((x) => x.source.includes("I know SQL, Excel and Tableau")), `${d}: ${JSON.stringify({ v, asked: r.asked })}`);
+  }
 });

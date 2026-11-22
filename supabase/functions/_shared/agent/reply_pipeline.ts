@@ -334,6 +334,28 @@ export function dropDanglingCounts(reply: string, dropped = ""): string {
   const out = lines.map((l, a) => l.filter((_, b) => !gone.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return /\p{L}/u.test(out) ? out : String(reply ?? "");
 }
+// Review of a339b806a (B2, architect rule, tagged and untagged alike): the person's own words back only a clause whose grammatical
+// subject is the person ("You …", "Your SQL …", "With SQL and Excel, you …"). Never a clause about a third party (the role, this
+// posting, their team, it, they, the open roles; any team, company or employer frame, named or not), a Trainee first-person action
+// ("I applied … for you"), a money figure, or a status or application claim ("You applied … and it is under review").
+const SAID_LEAD = /^\W*(?:(?:saved|noted|recorded|got it|and|but|so|also|plus|then|yes|overall|honestly)[:,—–-]?\s+)*(?:(?:with|from|given|based on|going by|per|by|on)\b[^.;:]{1,160}?,\s*(?=you|your))?(?:(?:and|but|so|also)\s+)?/i;
+const SAID_SUBJECT = /^(?:you|your|you're|you’re|you've|you’ve|you'd|you’d|you'll|you’ll)(?![\p{L}])/iu;
+const SAID_THIRD = /(?<![\p{L}])(?:their|theirs|its|his|her|they|them|team|teams|company|companies|firm|firms|employer|employers|department|org|organization|recruiters?|managers?|hiring|posting|postings|opening|openings|listing|listings)(?![\p{L}])/iu;
+const SAID_TRAINEE = /(?<![\p{L}'’])(?:I|I'm|I’m|I've|I’ve|I'll|I’ll|I'd|I’d|we|we've|we’ve|we'll|we’ll|Trainee)(?![\p{L}'’])/u;
+const SAID_MONEY = /[$€£¥]|(?<![\p{L}])(?:dollars?|usd|k|per\s+hour|an\s+hour|a\s+year|per\s+year|salary|salaries|pay|pays|paid|wage|wages|earn\w*|income|money|raise|raises|bonus\w*)(?![\p{L}])/iu;
+const SAID_STATUS = /(?<![\p{L}])(?:appl(?:y|ied|ies|ying|ication|ications)|submit\w*|sent|send|queued|approv\w*|under\s+review|interview\w*|offer\w*|reject\w*|shortlist\w*|screen(?:ing|ed)?|callback\w*|status|accepted|declined|withdrawn|promot\w*)(?![\p{L}])/iu;
+// (a list item's label that is a job title, "Reporting analyst: closest to your 2 years of reporting", heads a verbless line about
+// them: the line rests on their words as their own sentence does; with a verb of its own the label is its subject and it does not)
+const TITLE_LABEL = /^\W*(?:\d+[.)]\s*)?[\p{L} /&-]{0,40}?\b(?:analyst|engineer|developer|scientist|designer|manager|specialist|coordinator|consultant|associate|assistant|technician|administrator|architect|intern|representative|clerk|tester)s?:\s*/iu;
+const FINITE = /(?<![\p{L}])(?:is|are|was|were|has|have|had|needs?|requires?|pays?|wants?|uses?|offers?|hires?|expects?|asks?|lists?|involves?|calls?\s+for|demands?)(?![\p{L}])/iu;
+export function saidSubject(clause: string): boolean {
+  const t = stripTags(String(clause ?? "")).replace(/\*+/g, "").trim();
+  const labelled = TITLE_LABEL.exec(t);
+  const rest = labelled ? t.slice(labelled[0].length) : t;
+  const head = rest.replace(SAID_LEAD, "");
+  const fragment = !!labelled && !FINITE.test(rest) && /(?<![\p{L}])your(?![\p{L}])/iu.test(rest);
+  return (SAID_SUBJECT.test(head) || fragment) && !SAID_THIRD.test(t) && !SAID_TRAINEE.test(t) && !SAID_MONEY.test(t) && !SAID_STATUS.test(t);
+}
 // D-100: a pay, status or outcome claim is never judged as a pair (what they are paid, what was sent, applied for or approved, an
 // interview, an offer or a rejection).
 const NOT_PAIR = /[$€£]|\b(?:pay|pays|paid|salary|salaries|wage|wages|comp|compensation|per\s+hour|an\s+hour|a\s+year|offers?|offered|interview(?:s|ed)?|reject\w*|accept(?:ed|s)?|appl(?:ied|ication|ications)|submit\w*|sent|queued|approv\w*|status|hired\s+(?:by|at)|shortlist\w*)\b/i;
@@ -476,7 +498,7 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
     if (free(text)) {
       const subj = mentioned(text)[0] ?? unknownIn(text) ?? carried;
       const pool0 = forClaim(ids.length ? withSaidUnits(ids.map((id) => ledger.get(id)).filter((u): u is EvidenceUnit => !!u)) : ledger.units, text);
-      const pool = pool0.filter(notUsesFor(text)).filter((u) => u.source !== "an earlier reply in this chat" && !(u.kind === "said" && (subj || saidBarred(text))) && (subj ? mine(u, subj) || (!unknownSubject(subj) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
+      const pool = pool0.filter(notUsesFor(text)).filter((u) => u.source !== "an earlier reply in this chat" && !(u.kind === "said" && (subj || saidBarred(text) || !saidSubject(text))) && (subj ? mine(u, subj) || (!unknownSubject(subj) && !u.owner && (anyNamed.get(u.id) ?? []).length === 0) : mine(u, null)));
       if (ids.length) citeAt.set(`${a}:${b}`, ids);
       checks.push({ a, b, clause: text, units: pool, claim: text, subject: subj, advice: true, untagged: !ids.length });
       return carryPast(text, false);
@@ -516,7 +538,7 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
       // (round 12: an unknown subject rests only on a unit that names it as its employer; a carried subject never rests on a posting
       // record whose employer code cannot tell, which is some other employer's posting)
       // (S3 r12c: the person's own words back only a clause about them, never one about an employer)
-      const allowedUnits = forClaim(units, c).filter(notUsesFor(c)).filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") && !(u.kind === "said" && (subject || saidBarred(c) || saidBarred(text))) &&
+      const allowedUnits = forClaim(units, c).filter(notUsesFor(c)).filter((u) => !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat") && !(u.kind === "said" && (subject || saidBarred(c) || saidBarred(text) || !saidSubject(c))) &&
         (unknownSubject(subject) ? namesAsEmployer(u, subject!) :
           mine(u, subject) || (!!subject && !ownSubj && !u.owner && !u.posting && (anyNamed.get(u.id) ?? []).length === 0)));
       if (!allowedUnits.length) return fail(a, b, text, subject ? `no cited unit is about ${subject}` : "it names no employer, and every unit that could hold it is one employer's", subject);
@@ -585,7 +607,7 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
     // it. The judge holds the rest: a yes means each half is stated by its own passage. Never for a clause with an employer subject or
     // frame (c.units holds their unit only then; saidBarred), a posting claim (forClaim), or a pay, status or outcome claim.
     let paired = false, pairAsks: { k: number; claim: string; source: string }[] = [];
-    if (o.judge && !c.subject && aboutThem(c.clause) && !saidBarred(c.clause) && !saidBarred(c.claim) && !NOT_PAIR.test(c.clause) && !POSTING_CLAIM.test(c.clause.replace(NO_POSTING, " ")) &&
+    if (o.judge && !c.subject && saidSubject(c.clause) && !saidBarred(c.clause) && !saidBarred(c.claim) && !NOT_PAIR.test(c.clause) && !POSTING_CLAIM.test(c.clause.replace(NO_POSTING, " ")) &&
       !hp.quant.length && !hp.years.length && hp.numbers.length === (c.clause.match(/\d+(?:[.,]\d+)?/g) ?? []).length) {
       const roleHalf = ledger.units.filter((u) => u.kind === "suggestion");
       const own = (u: EvidenceUnit) => wholeNumbersIn(c.clause, u.text) && !missingSpecifics(c.clause, [u], true).some((m) => /\d/.test(m) || !jobTitleWord(m, c.clause)) &&

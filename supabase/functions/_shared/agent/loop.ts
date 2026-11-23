@@ -117,13 +117,9 @@ export const FILE_MAKERS = ["create_file", "open_record_file", "export_tracker",
 const FILE_NOUN = "(?:file|pdf|page|tracker|spreadsheet|sheet|doc(?:ument)?|word (?:file|copy)|resume|cv|cover letter)";
 const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write"; wrote?: string[] }[] = [
   { kind: FILE_CLAIM, by: FILE_MAKERS, wrote: ["research_market", "research_company", "research_career_question"], said: new RegExp(`${I_HAVE}(?:made|created|built|generated|put together|attached|uploaded|exported)(?: you)? (?:a|an|the|your|this)(?: [\\w-]+){0,3} ${FILE_NOUN}\\b|\\b(?:your|the|this)(?: [\\w-]+){0,3} ${FILE_NOUN} (?:is|are) (?:attached|ready|made|linked|below|done)\\b|^(?:here(?:'s| is) (?:your|the)(?: [\\w-]+){0,3} ${FILE_NOUN})\\b|\\battached (?:is|are|here)\\b|^attached\\b`, "i") },
-  { kind: "an alert set", by: ["set_job_alerts"], said: new RegExp(`${I_HAVE}(?:set|created|turned on|switched on|enabled|added)(?: up)? ${ALERT_NOUN}|\\balerts? (?:is|are) now (?:set|on|live|active)\\b|\\balerts? (?:has|have) been (?:set|turned on|switched on|created|enabled)\\b|^(?:done|all set)\\b.{0,40}\\balerts?\\b` +
-    `|\\balerts? (?:now )?(?:covers?|includes?|watch(?:es)?|lists?)\\b|\\b(?:is|are) (?:now )?(?:on|in) your alerts?(?: now)?\\b`, "i") },
-  { kind: "postings queued", by: ["queue_applications"], said: new RegExp(`\\b(?:were|was|have been|has been|are now|is now) queued\\b|${I_HAVE}queued\\b|^queued\\b|(?:^|${I_HAVE})added (?:\\d+|them|it|these|those|all)\\b[^.]{0,30}\\bto your (?:apply )?queue` +
-    `|\\b(?:apply )?queue (?:now )?(?:shows|includes|has|lists)\\b|\\b(?:is|are) (?:now )?(?:on|in) your (?:apply )?queue(?: now)?\\b`, "i") },
-  { kind: "an application tracked", by: ["track_application"], said: new RegExp(`\\bi(?:'m| am) (?:now )?tracking\\b|\\bnow tracking\\b|(?:^|${I_HAVE})added (?:it|this|that|them)\\b[^.]{0,20}\\bto your (?:tracker|applications)|\\b(?:is|are) now (?:on|in) your tracker|${I_HAVE}(?:tracked|logged)\\b|^tracked\\b` +
-    // (S3 r12f, review of 51c798945: the state of the record said as done is the same claim)
-    `|\\b(?:tracker|applications(?: list)?) (?:now )?(?:shows|includes|has|lists)\\b|\\brecorded (?:in|on) your (?:tracker|applications)\\b|\\b(?:is|are) (?:now )?on your (?:tracker|applications)(?: now)?\\b`, "i") },
+  { kind: "an alert set", by: ["set_job_alerts"], said: new RegExp(`${I_HAVE}(?:set|created|turned on|switched on|enabled|added)(?: up)? ${ALERT_NOUN}|\\balerts? (?:is|are) now (?:set|on|live|active)\\b|\\balerts? (?:has|have) been (?:set|turned on|switched on|created|enabled)\\b|^(?:done|all set)\\b.{0,40}\\balerts?\\b`, "i") },
+  { kind: "postings queued", by: ["queue_applications"], said: new RegExp(`\\b(?:were|was|have been|has been|are now|is now) queued\\b|${I_HAVE}queued\\b|^queued\\b|(?:^|${I_HAVE})added (?:\\d+|them|it|these|those|all)\\b[^.]{0,30}\\bto your (?:apply )?queue`, "i") },
+  { kind: "an application tracked", by: ["track_application"], said: new RegExp(`\\bi(?:'m| am) (?:now )?tracking\\b|\\bnow tracking\\b|(?:^|${I_HAVE})added (?:it|this|that|them)\\b[^.]{0,20}\\bto your (?:tracker|applications)|\\b(?:is|are) now (?:on|in) your tracker|${I_HAVE}(?:tracked|logged)\\b|^tracked\\b`, "i") },
   { kind: "something saved", by: "any_write", said: new RegExp(`\\bkept for good\\b|\\b(?:saved|kept)(?::| as (?:an?|your)\\b| for good\\b| it\\b| that\\b| this\\b| your\\b)|${I_HAVE}(?:saved|kept|stored|recorded|remembered|added|updated) (?:it|that|this|them|these|those|your|to your|the (?:fact|instruction|preference|rule|note|setting)s?\\b|as (?:an?|your)\\b|for (?:good|you|later)\\b)|\\bi(?:'ll| will) (?:keep|remember) (?:that|this|it)\\b|^(?:done|all set)\\b.{0,60}\\b(?:saved|kept|remembered|standing instruction|your profile|your preferences?)\\b`, "i") },
   // ADVERSARIAL ROUND 2 (2026-10-30): "I've confirmed your GPA 4.0" when no confirmation ran (a posting told the model to
   // mark it confirmed) is a false record: only confirm_profile_fact, on the person's own yes, confirms a fact.
@@ -223,14 +219,6 @@ export function scrubError(text: string): string {
 // message like any refusal; the loop then forbids tools on the next call, so the model writes the question and the turn
 // ends on its words, never on max steps.
 export class AskPerson extends Error {}
-// S3 r12f (review of 51c798945): what a tool call dropped unrun on a repair would have changed, by its object.
-const DROPPED_OBJECT: Record<string, RegExp> = {
-  track_application: /(?<![\p{L}])(?:tracker|tracking|tracked|applications?)(?![\p{L}])/iu,
-  set_job_alerts: /(?<![\p{L}])alerts?(?![\p{L}])/iu,
-  queue_applications: /(?<![\p{L}])(?:queue|queued)(?![\p{L}])/iu,
-  __file: /(?<![\p{L}])(?:files?|pages?|links?)(?![\p{L}])/iu,
-};
-const splitSentencesLoop = (l: string) => l.split(/(?<=[.!?])\s+(?=\S)/);
 const MAX_TOKENS = 1200;
 const RESULT_CHARS = 12000; // a tool result larger than this is cut, and the cut is said
 
@@ -433,22 +421,9 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       if (show) return { reply: show.text, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final", show };
       return { reply: saved() ? MODEL_ERROR_AFTER_SAVE_REPLY : MODEL_ERROR_REPLY, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "model_error" };
     }
-    const content0 = Array.isArray(res && res.content) ? res.content : [];
-    // Enforce text-only recovery even if a provider ignores tool_choice. Never repeat effects or enqueue approvals.
-    // S3 r12f (dev H027, probe-r12f-full-2): a repair answer that carries the requested text beside a tool call it was told not to
-    // make is the text: the tool call is dropped unrun (never executed, never recorded as a call), and the text passes every filter
-    // below as any answer does, the proof guards included. Only a repair answer with no text is the unfinished turn.
-    const repairText = repairing && content0.some((b: any) => b && b.type === "tool_use") && content0.some((b: any) => b && b.type === "text" && /[\p{L}\p{N}]/u.test(String(b.text ?? "")));
-    // (review of 51c798945: and every sentence naming the dropped call's object goes with it, so the text never tells of what it
-    // did not do; when nothing else is left, the turn is the unfinished one)
-    let content = repairText ? content0.filter((b: any) => b && b.type === "text") : content0;
-    if (repairText) {
-      const objs = content0.filter((b: any) => b && b.type === "tool_use").map((b: any) => DROPPED_OBJECT[String(b.name)] ?? (FILE_MAKERS.includes(String(b.name)) ? DROPPED_OBJECT.__file : null)).filter(Boolean) as RegExp[];
-      const kept = content.map((b: any) => String(b.text ?? "")).join("").split("\n").map((l) => objs.length ? splitSentencesLoop(l).filter((x) => !objs.some((re) => re.test(x))).join(" ") : l).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-      if (!/[\p{L}\p{N}]/u.test(kept)) return incomplete();
-      content = [{ type: "text", text: kept }];
-    }
+    const content = Array.isArray(res && res.content) ? res.content : [];
     const uses = content.filter((b: any) => b && b.type === "tool_use");
+    // Enforce text-only recovery even if a provider ignores tool_choice. Never repeat effects or enqueue approvals.
     if (repairing && uses.length) return incomplete();
     // The provider explicitly says this generation was cut off; plausible text is not evidence it finished. Do not
     // execute a partial tool request or keep a partial draft as conversation evidence. An exact preview already

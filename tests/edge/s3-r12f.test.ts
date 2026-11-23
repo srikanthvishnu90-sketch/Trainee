@@ -232,13 +232,15 @@ const repairStub = (second: any[]) => {
 };
 const prepTurn = (model: any) => agentTurn({ message: "I have a final round for an analyst job at Quillfeather Partners next week, help me get ready", history: [], stores: { profile: { facts: [] } },
   userId: "u-27", threadId: "t-27", now: NOW, model, postings: async () => [], supportJudge: yes } as any) as Promise<any>;
-Deno.test("H027: a repair answer with the plan beside a tool call it was told not to make is the plan; the tool never runs", async () => {
+// (architect ruling on the review of 39f1f7d30: loop.ts is trunk's. A repair answer that carries a tool call under tool_choice none is
+// the unfinished turn, text and all, and the call never runs; H027 is fixed in the eval bridge alone, below, since the API refuses
+// a tool call under none)
+Deno.test("H027 (loop.ts parity with trunk): a repair answer with text beside a tool call made under tool_choice none is the unfinished turn; the tool never runs", async () => {
   const { fn, seen } = repairStub([{ type: "text", text: PLAN }, { type: "tool_use", id: "x1", name: "track_application", input: { company: "Quillfeather Partners", stage: "Final" } }]);
   const r = await prepTurn(fn);
-  assert(r.stopped === "final" && String(r.reply).includes("rehearse a three-minute walk"), `${r.stopped}: ${r.reply}`);
+  assert(r.stopped === "incomplete_reply" && r.reply === INCOMPLETE_REPLY, `${r.stopped}: ${r.reply}`);
   assert(!(r.tool_calls ?? []).some((c: any) => c.name === "track_application"), "the tool call made under tool_choice none is never run");
   assert(seen.filter((x) => x.tools?.length).at(-1)?.tool_choice?.type === "none", "the repair step asked for text only");
-  assert(r.reply !== INCOMPLETE_REPLY, r.reply);
 });
 Deno.test("H027: a repair answer that is only a tool call is still the unfinished turn (the error text is the last resort)", async () => {
   const { fn } = repairStub([{ type: "tool_use", id: "x1", name: "track_application", input: { company: "Quillfeather Partners", stage: "Final" } }]);
@@ -267,35 +269,5 @@ Deno.test("review of 51c798945, B1: a modal hire with a time or certainty marker
   for (const s of ["You could get hired as a reporting analyst.", "You might get hired into a reporting role."]) {
     const v = await verifyTagged(s, l, { judge: yes, said, ask: "which roles fit me?" });
     assert(!v.failures.length, `a modal possibility still stands: ${s}`);
-  }
-});
-import { unbackedClaims } from "../../supabase/functions/_shared/agent/loop.ts";
-Deno.test("review of 51c798945, B2 (a): the state of a record said as done is a claim no tool backed", () => {
-  for (const s of ["Your tracker now shows Quillfeather Partners at Final.", "Done: Quillfeather is recorded in your applications.", "Quillfeather is on your tracker now.", "Your applications list now includes Quillfeather.",
-    "Your alerts now cover analyst roles.", "Quillfeather is now in your apply queue."])
-    assert(unbackedClaims(s, []).length === 1, `unbacked: ${s}`);
-  assert(!unbackedClaims("Your tracker now shows Quillfeather Partners at Final.", [{ name: "track_application", ok: true, effect: "write_own" }] as any).length, "backed by its tool");
-});
-Deno.test("review of 51c798945, B2 (b): a stray tool call dropped on a repair takes every sentence naming its object with it", async () => {
-  const leaks = ["Your tracker now shows Quillfeather Partners at Final.", "Done: Quillfeather is recorded in your applications.", "I've logged it to your tracker.", "I'm now tracking Quillfeather Partners for you."];
-  for (const last of leaks) {
-    const { fn } = repairStub([{ type: "text", text: `${PLAN}\n${last}` }, { type: "tool_use", id: "x1", name: "track_application", input: { company: "Quillfeather Partners", stage: "Final" } }]);
-    const r = await prepTurn(fn);
-    assert(r.stopped === "final" && String(r.reply).includes("rehearse a three-minute walk") && !String(r.reply).includes(last.slice(0, 25)), `${last}: ${r.reply}`);
-  }
-  for (const [last, name] of [["I've set up an alert for analyst roles.", "set_job_alerts"], ["Quillfeather is now in your apply queue.", "queue_applications"], ["Here is the link to your prep page.", "create_file"]]) {
-    const { fn } = repairStub([{ type: "text", text: `${PLAN}\n${last}` }, { type: "tool_use", id: "x2", name, input: {} }]);
-    const r = await prepTurn(fn);
-    assert(!String(r.reply).includes(last.slice(0, 20)) && String(r.reply).includes("rehearse"), `${name}: ${r.reply}`);
-  }
-  // (claim-only: never an empty reply; the unfinished turn)
-  const { fn } = repairStub([{ type: "text", text: "I've logged it to your tracker." }, { type: "tool_use", id: "x1", name: "track_application", input: { company: "Quillfeather Partners", stage: "Final" } }]);
-  const r = await prepTurn(fn);
-  assert(r.stopped === "incomplete_reply", `${r.stopped}: ${r.reply}`);
-  // (the normal path: no stray call, the same sentences are refused as unbacked)
-  for (const last of ["Your tracker now shows Quillfeather Partners at Final.", "Done: Quillfeather is recorded in your applications.", "Quillfeather is on your tracker now.", "Your applications list now includes Quillfeather."]) {
-    const model = async (p: any) => ({ content: [{ type: "text", text: p.tools?.length ? `${PLAN}\n${last}` : "" }], stop_reason: "end_turn" });
-    const r2 = await prepTurn(model);
-    assert(!String(r2.reply).includes(last.slice(0, 20)), `normal path: ${r2.reply}`);
   }
 });

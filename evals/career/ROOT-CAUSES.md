@@ -1185,8 +1185,15 @@ ledger of H035 and H034.
   reproduce it; the record fits one path only: the first answer failed the completeness check (missingAnswerBody), the one text-only
   repair ran with tool_choice none, and its answer carried a tool call, which loop.ts never runs on a repair, so the turn ended
   unfinished. Two causes: the subscription bridge (evals/subscription/claude_cli.ts render) did not carry tool_choice none to the CLI
-  and still listed the tools (an eval parity gap: the API refuses a tool call under none), and the loop discarded the repair's text
-  with the stray call. Fix: the bridge says text only and lists no tools under none; a repair answer with text beside a stray call is
-  the text (the call dropped unrun, the text through every filter, the proof guards included); a repair that is only a tool call is
-  still the unfinished turn. Not max_tokens: the bridge never reports it. Proof: the H027 group in `tests/edge/s3-r12f.test.ts`
-  (fails on b0d1b51e6).
+  and still listed the tools (an eval parity gap: the API refuses a tool call under none). Fix (03054c8b3): under none the bridge says
+  text only and lists no tools. A loop.ts change that kept the text of such a repair (a5c7add05, then widened in 39f1f7d30) was
+  REVERTED on the architect's ruling after the review of 39f1f7d30: it broke tests/architect/brain-receipt-completeness.test.ts ("a
+  repair that ignores text-only mode cannot repeat the write"), and the widened claim patterns stripped true and generic sentences
+  ("Your tracker has 3 rows" after list_applications; "Job alerts include new postings …"). loop.ts equals trunk's; production never
+  reaches that path, since the API refuses a tool call under none. Not max_tokens: the bridge never reports it. Proof: the H027 group
+  in `tests/edge/s3-r12f.test.ts` (bridge parity fails on b0d1b51e6; loop parity with trunk).
+- Follow-up (not fixed here): a receipt gap on the normal path, on trunk too. A sentence stating a record's new state as done, with no
+  tool that wrote it ("Your tracker now shows <employer> at Final.", "Done: <employer> is recorded in your applications.", "<employer>
+  is on your tracker now.", "Your applications list now includes <employer>."), passes `loop.ts unbackedClaims`. Its fix needs claim
+  patterns that tell a state written this turn from a state read (list_applications) or a general statement about the feature, under
+  brain-receipt-completeness.

@@ -215,3 +215,40 @@ Deno.test("n3 narrowed (architect, H022 replay): a modal hire naming a kind of r
     assert(no.failures.length > 0, `a definite hire is refused (${id})`);
   }
 });
+
+// ------------------------------------------------------------- dev H027 (probe-r12f-full-2): a repair step's text is not lost to a tool call
+import { render } from "../../evals/subscription/claude_cli.ts";
+import { INCOMPLETE_REPLY } from "../../supabase/functions/_shared/agent/loop.ts";
+const PLAN = "Here is a plan for your final round.\n1. Two days out: rehearse a three-minute walk through your resume.\n2. The day before: prepare two questions for each interviewer.\n3. On the day: lead each answer with the result. Nothing was sent.";
+const repairStub = (second: any[]) => {
+  const seen: any[] = [];
+  const fn = async (p: any) => {
+    seen.push(p);
+    if (!p.tools?.length) return { content: [{ type: "text", text: "" }], stop_reason: "end_turn" };
+    return seen.filter((x) => x.tools?.length).length === 1 ? { content: [{ type: "text", text: "Let me put together a prep plan." }], stop_reason: "end_turn" }
+      : { content: second, stop_reason: second.some((b) => b.type === "tool_use") ? "tool_use" : "end_turn" };
+  };
+  return { fn, seen };
+};
+const prepTurn = (model: any) => agentTurn({ message: "I have a final round for an analyst job at Quillfeather Partners next week, help me get ready", history: [], stores: { profile: { facts: [] } },
+  userId: "u-27", threadId: "t-27", now: NOW, model, postings: async () => [], supportJudge: yes } as any) as Promise<any>;
+Deno.test("H027: a repair answer with the plan beside a tool call it was told not to make is the plan; the tool never runs", async () => {
+  const { fn, seen } = repairStub([{ type: "text", text: PLAN }, { type: "tool_use", id: "x1", name: "track_application", input: { company: "Quillfeather Partners", stage: "Final" } }]);
+  const r = await prepTurn(fn);
+  assert(r.stopped === "final" && String(r.reply).includes("rehearse a three-minute walk"), `${r.stopped}: ${r.reply}`);
+  assert(!(r.tool_calls ?? []).some((c: any) => c.name === "track_application"), "the tool call made under tool_choice none is never run");
+  assert(seen.filter((x) => x.tools?.length).at(-1)?.tool_choice?.type === "none", "the repair step asked for text only");
+  assert(r.reply !== INCOMPLETE_REPLY, r.reply);
+});
+Deno.test("H027: a repair answer that is only a tool call is still the unfinished turn (the error text is the last resort)", async () => {
+  const { fn } = repairStub([{ type: "tool_use", id: "x1", name: "track_application", input: { company: "Quillfeather Partners", stage: "Final" } }]);
+  const r = await prepTurn(fn);
+  assert(r.stopped === "incomplete_reply" && !(r.tool_calls ?? []).some((c: any) => c.name === "track_application"), `${r.stopped}: ${r.reply}`);
+});
+Deno.test("H027 (eval bridge parity): tool_choice none reaches the CLI as text only, with no tools listed", () => {
+  const tools = [{ name: "track_application", description: "Record an application", input_schema: { type: "object", properties: {} } }];
+  const none = render({ system: "S", tools, tool_choice: { type: "none" }, messages: [{ role: "user", content: "hi" }] });
+  assert(!none.system.includes("Tools you may call") && /Do not call any tool now/.test(none.system), none.system.slice(-300));
+  const auto = render({ system: "S", tools, messages: [{ role: "user", content: "hi" }] });
+  assert(auto.system.includes("Tools you may call") && !/Do not call any tool now/.test(auto.system), "tools listed otherwise");
+});

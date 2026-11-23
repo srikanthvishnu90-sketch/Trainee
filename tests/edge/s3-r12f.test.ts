@@ -269,3 +269,33 @@ Deno.test("review of 51c798945, B1: a modal hire with a time or certainty marker
     assert(!v.failures.length, `a modal possibility still stands: ${s}`);
   }
 });
+import { unbackedClaims } from "../../supabase/functions/_shared/agent/loop.ts";
+Deno.test("review of 51c798945, B2 (a): the state of a record said as done is a claim no tool backed", () => {
+  for (const s of ["Your tracker now shows Quillfeather Partners at Final.", "Done: Quillfeather is recorded in your applications.", "Quillfeather is on your tracker now.", "Your applications list now includes Quillfeather.",
+    "Your alerts now cover analyst roles.", "Quillfeather is now in your apply queue."])
+    assert(unbackedClaims(s, []).length === 1, `unbacked: ${s}`);
+  assert(!unbackedClaims("Your tracker now shows Quillfeather Partners at Final.", [{ name: "track_application", ok: true, effect: "write_own" }] as any).length, "backed by its tool");
+});
+Deno.test("review of 51c798945, B2 (b): a stray tool call dropped on a repair takes every sentence naming its object with it", async () => {
+  const leaks = ["Your tracker now shows Quillfeather Partners at Final.", "Done: Quillfeather is recorded in your applications.", "I've logged it to your tracker.", "I'm now tracking Quillfeather Partners for you."];
+  for (const last of leaks) {
+    const { fn } = repairStub([{ type: "text", text: `${PLAN}\n${last}` }, { type: "tool_use", id: "x1", name: "track_application", input: { company: "Quillfeather Partners", stage: "Final" } }]);
+    const r = await prepTurn(fn);
+    assert(r.stopped === "final" && String(r.reply).includes("rehearse a three-minute walk") && !String(r.reply).includes(last.slice(0, 25)), `${last}: ${r.reply}`);
+  }
+  for (const [last, name] of [["I've set up an alert for analyst roles.", "set_job_alerts"], ["Quillfeather is now in your apply queue.", "queue_applications"], ["Here is the link to your prep page.", "create_file"]]) {
+    const { fn } = repairStub([{ type: "text", text: `${PLAN}\n${last}` }, { type: "tool_use", id: "x2", name, input: {} }]);
+    const r = await prepTurn(fn);
+    assert(!String(r.reply).includes(last.slice(0, 20)) && String(r.reply).includes("rehearse"), `${name}: ${r.reply}`);
+  }
+  // (claim-only: never an empty reply; the unfinished turn)
+  const { fn } = repairStub([{ type: "text", text: "I've logged it to your tracker." }, { type: "tool_use", id: "x1", name: "track_application", input: { company: "Quillfeather Partners", stage: "Final" } }]);
+  const r = await prepTurn(fn);
+  assert(r.stopped === "incomplete_reply", `${r.stopped}: ${r.reply}`);
+  // (the normal path: no stray call, the same sentences are refused as unbacked)
+  for (const last of ["Your tracker now shows Quillfeather Partners at Final.", "Done: Quillfeather is recorded in your applications.", "Quillfeather is on your tracker now.", "Your applications list now includes Quillfeather."]) {
+    const model = async (p: any) => ({ content: [{ type: "text", text: p.tools?.length ? `${PLAN}\n${last}` : "" }], stop_reason: "end_turn" });
+    const r2 = await prepTurn(model);
+    assert(!String(r2.reply).includes(last.slice(0, 20)), `normal path: ${r2.reply}`);
+  }
+});

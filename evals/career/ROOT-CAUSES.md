@@ -1131,3 +1131,38 @@ draft, the code reasons and what the judge was shown are read from the calls, no
     unnamed team frame passed. Now every field-knowledge example, and any class word credited to them, must be in their words.
   - The search_jobs nudge is reverted (4b8607c2a, architect): the field half arrives only with a search result, and a turn with no tool
     read is unchecked. H009's move reply names the tracker's stage for a verb ("applied") or a negated step word (7852507c7).
+
+## S3 sitting #7 on 72e15122e (subscription, dev, bar 37/38 per pass, D-056): H035 (both judges, p1 and p2), H034 (both judges, p2)
+Branch `ag/s3-r12f`. Sitting: p1 37/38 (H035), p2 36/38 (H035, H034). Across seven sittings most real misses share one cause, and
+these three show its strict side. A scratch replay (not committed, subscription) logged the draft, what the pipeline dropped and the
+ledger of H035 and H034.
+- The pattern: a turn where search_jobs returned 0 postings is tagged and has a tool read, so the reply pipeline runs. Lax, it let
+  invented claims through (rejected in review); strict, it drops every sentence that answered. In the replay, H035's draft said what
+  was searched, that nothing matched, offered a watch and asked one question; the first sentence (tagged with the count unit) was
+  refused, the repair's restatement of it failed again, a "saved as a standing rule" sentence was rightly dropped (remember_instruction
+  had refused), and the offer and question fell with the names they carried. H034's repair restated the count and the field's uses
+  without tags, and both failed. What was delivered:
+  - H035 p1: "I can still keep it in mind for this chat. Nothing has been sent or applied to." (a reference back to the dropped,
+    refused rule);
+  - H035 p2: "Your city is not on file. Nothing has been sent or applied to." plus code's search-again line, after the person named
+    their city;
+  - H034 p2: "Which of these roles sounds closest to what you want?" over dropped roles, plus "I couldn't verify an answer to that
+    from what I read."
+  The pipeline is right to drop what it cannot verify, so the fix is not a looser check: it is what code says when the drop leaves
+  nothing. Line: `agent-chat/career_brain.ts` (after the count-back rule, before nextStepLine).
+- Fix (D-101): `agent/floor_reply.ts`. When the pipeline or the support check dropped a sentence, a search this turn came back empty,
+  and every kept sentence is boilerplate (the not-sent line, code's fallback, "not on file", a not-run or next-step line) or a
+  reference back with nothing before it, code adds its floor: what was searched (the search's own words parsed into role, place and
+  constraints), the count, the entry-route unit as general career knowledge, and one routed next step (next_step.ts emptyNextStep).
+  The dangling sentences and the fallback go; a city "not on file" goes when the searched place is one the person named this turn.
+  Code prose about code's records, never judged, nothing about the person.
+- Follow-up of the independent review of 72e15122e: "Since you know X", "X, which you know,", "It's your X that…" and "gives you …: X"
+  were never person-subject, so their words could not back them and the person rules did not run on them (a no-name form went to the
+  judge against other units). Now `saidSubject` reads those embedded person clauses (SAID_EMBEDDED); the bars are unchanged; B3 reads a
+  class word in either number, and a person-subject clause crediting an unsaid field example or class word is refused in code. The
+  reviewer's probe (rv-r12e/p4.ts): the four forms that were all refused now stand with a yes judge; the leak probe (probe_p3.ts) stands
+  where trunk does.
+- Not covered: a draft the loop's own guards gut before the pipeline (an unsourced pay figure removed by `loop.ts` rebuild) does not
+  set the dropped signal; the floor follows the ruling's trigger, the pipeline's drops.
+- Proof: `tests/edge/s3-r12f.test.ts` (offline, in gate.sh; fails on 72e15122e: the three delivered replies as fixtures, the floor's
+  bounds, a turn through agentTurn, the embedded person clauses and their bars).

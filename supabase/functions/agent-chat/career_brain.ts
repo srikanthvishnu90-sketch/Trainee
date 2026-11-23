@@ -26,7 +26,8 @@ import { confirmedRow, factRows } from "../_shared/agent/memory.ts";
 import { dropDanglingCounts, evidenceTurn, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
 import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
 import { recordPrepAsked } from "./career_staged.ts";
-import { nextStepLine, watchVerified } from "../_shared/agent/next_step.ts";
+import { emptyNextStep, nextStepLine, watchVerified } from "../_shared/agent/next_step.ts";
+import { floorReply } from "../_shared/agent/floor_reply.ts"; // D-101
 import { hasProfileOn, routerWatchProbe, watchHostReady } from "./career_staged.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
@@ -625,6 +626,22 @@ export async function agentTurn(o: {
     (withSupport as any).reply = withNotRun(dropDanglingCounts(String(withSupport.reply), droppedLines.join("\n")), nrLines);
   }
   if ((ctx.turn as any)?.emptySearch) await watchHostReady.catch(() => null);
+  // D-101 (architect ruling, S3 r12f): when the pipeline (or the support check) dropped sentences after an empty search and what is
+  // left answers nothing (only boilerplate, or a reference back to dropped items), code's floor reply takes its place: what was
+  // searched, the count, the entry-route unit when the search gave one, and one next step that really routes. Code's own records only;
+  // never judged (floor_reply.ts).
+  const emptyQ: string | null = (ctx.turn as any)?.emptySearch ?? null;
+  if (emptyQ && withSupport.reply && withSupport.stopped === "final" && !withSupport.show) {
+    const dropped = !!piped && (piped.dropped.length > 0 || piped.fallback) || !!supportTrace?.refused.length;
+    const verify = (q: string) => watchVerified(q, { hasProfile: hasProfileOn(o.stores), probe: routerWatchProbe(o.stores as Record<string, unknown>) });
+    const routes = ledger?.units.find((u) => u.kind === "suggestion" && !u.uses)?.text ?? null;
+    const finalNow = String(withSupport.reply).replace(/\s+/g, " ");
+    const droppedText = [...(piped?.dropped ?? []).map((f) => f.sentence), ...(supportTrace?.refused ?? []).map((f) => f.sentence),
+      ...stripTags(draft0).split("\n").filter((l) => /\p{L}/u.test(l) && !finalNow.includes(l.replace(/^\s*(?:\d{1,2}[.)]|[-\u2022*])\s+/, "").replace(/\s+/g, " ").trim()))].join("\n");
+    const floored = floorReply({ reply: String(withSupport.reply), dropped, droppedText, codeLines: nrLines, message: o.message, emptyQuery: emptyQ, count: 0,
+      anyFound: Array.isArray(withSupport.postings) && withSupport.postings.length > 0, routes, nextStep: emptyNextStep(emptyQ, verify) });
+    if (floored) (withSupport as any).reply = withNotRun(floored, nrLines);
+  }
   const nextStep = withSupport.reply && withSupport.stopped === "final" && !withSupport.show
     ? nextStepLine(String(withSupport.reply), (ctx.turn as any)?.emptySearch ?? null, Array.isArray(withSupport.postings) && withSupport.postings.length > 0,
       (q) => watchVerified(q, { hasProfile: hasProfileOn(o.stores), probe: routerWatchProbe(o.stores as Record<string, unknown>) })) : null;

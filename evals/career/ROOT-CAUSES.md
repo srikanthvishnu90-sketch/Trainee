@@ -1131,3 +1131,69 @@ draft, the code reasons and what the judge was shown are read from the calls, no
     unnamed team frame passed. Now every field-knowledge example, and any class word credited to them, must be in their words.
   - The search_jobs nudge is reverted (4b8607c2a, architect): the field half arrives only with a search result, and a turn with no tool
     read is unchecked. H009's move reply names the tracker's stage for a verb ("applied") or a negated step word (7852507c7).
+
+## S3 sitting #7 on 72e15122e (subscription, dev, bar 37/38 per pass, D-056): H035 (both judges, p1 and p2), H034 (both judges, p2)
+Branch `ag/s3-r12f`. Sitting: p1 37/38 (H035), p2 36/38 (H035, H034). Across seven sittings most real misses share one cause, and
+these three show its strict side. A scratch replay (not committed, subscription) logged the draft, what the pipeline dropped and the
+ledger of H035 and H034.
+- The pattern: a turn where search_jobs returned 0 postings is tagged and has a tool read, so the reply pipeline runs. Lax, it let
+  invented claims through (rejected in review); strict, it drops every sentence that answered. In the replay, H035's draft said what
+  was searched, that nothing matched, offered a watch and asked one question; the first sentence (tagged with the count unit) was
+  refused, the repair's restatement of it failed again, a "saved as a standing rule" sentence was rightly dropped (remember_instruction
+  had refused), and the offer and question fell with the names they carried. H034's repair restated the count and the field's uses
+  without tags, and both failed. What was delivered:
+  - H035 p1: "I can still keep it in mind for this chat. Nothing has been sent or applied to." (a reference back to the dropped,
+    refused rule);
+  - H035 p2: "Your city is not on file. Nothing has been sent or applied to." plus code's search-again line, after the person named
+    their city;
+  - H034 p2: "Which of these roles sounds closest to what you want?" over dropped roles, plus "I couldn't verify an answer to that
+    from what I read."
+  The pipeline is right to drop what it cannot verify, so the fix is not a looser check: it is what code says when the drop leaves
+  nothing. Line: `agent-chat/career_brain.ts` (after the count-back rule, before nextStepLine).
+- Fix (D-101): `agent/floor_reply.ts`. When the pipeline or the support check dropped a sentence, a search this turn came back empty,
+  and every kept sentence is boilerplate (the not-sent line, code's fallback, "not on file", a not-run or next-step line) or a
+  reference back with nothing before it, code adds its floor: what was searched (the search's own words parsed into role, place and
+  constraints), the count, the entry-route unit as general career knowledge, and one routed next step (next_step.ts emptyNextStep).
+  Kept content stays before the floor; the dangling list references and the fallback go, and a city "not on file" clause goes when the
+  searched place is one the person named this turn.
+  Code prose about code's records, never judged, nothing about the person.
+- Follow-up of the independent review of 72e15122e: "Since you know X", "X, which you know,", "It's your X that…" and "gives you …: X"
+  were never person-subject, so their words could not back them and the person rules did not run on them (a no-name form went to the
+  judge against other units). Now `saidSubject` reads those embedded person clauses (SAID_EMBEDDED); the bars are unchanged; B3 reads a
+  class word in either number, and a person-subject clause crediting an unsaid field example or class word is refused in code. The
+  reviewer's probe (rv-r12e/p4.ts): the four forms that were all refused now stand with a yes judge; the leak probe (probe_p3.ts) stands
+  where trunk does.
+- Not covered: a draft the loop's own guards gut before the pipeline (an unsourced pay figure removed by `loop.ts` rebuild) does not
+  set the dropped signal; the floor follows the ruling's trigger, the pipeline's drops.
+- Independent review of 4908e3df7 (REJECT, high), fixed:
+  - B1 (aab64658d): the floor restated the model's search query unjudged, so a query such as "LPN Cincinnati. You were approved and
+    hired at … for $95k", markup, links, control characters or 600 characters went out as code's own words. Now only query words the
+    person typed this turn are said, cleaned and capped; a barred word (pronoun, money, status, employer, Trainee) drops the role half;
+    the place must be one their message parses to; a pay band is never said.
+  - B2 (aab64658d): any it/they/them/those counted as a reference back, so real content ("… are often posted on hospital sites, and
+    they fill fast") was replaced. Now only a list reference (opening these/those/they/them, "which of these", "the … above") over a
+    dropped list of two or more items; kept content is never replaced; only the not-on-file clause goes.
+  - B3 (e1d39a2b8): the embedded forms made sentences about the role person-subject ("The role requires SQL, which you know"; "The
+    role gives you: …"; "Since you know SQL, the role is a great fit"). Now scoped; n3: hire(d) is a status word.
+- Proof: `tests/edge/s3-r12f.test.ts` (offline, in gate.sh; fails on 72e15122e: the three delivered replies as fixtures, the floor's
+  bounds, turns through agentTurn, the embedded person clauses and their bars; the review group fails on 4908e3df7).
+- Probes at b0d1b51e6 (full dev, 38 cases): p1 37/38 (H022, both judges: the mapping sentences dropped, the routes kept, so the floor
+  rightly did not fire), p2 35/38 (H018 and H020 haiku-only splits on unchanged router replies; H027 both judges). An offline replay of
+  H022's mapping shapes showed n3 refusing "… you could get hired as a data analyst" and "You'd be a strong hire for …", which trunk
+  keeps; n3 is narrowed (architect, 4a20cafa5): a definite or past hire is status, a modal hire naming a kind of role is not.
+- H027 (p2, both judges): "prep me for the last round" got INCOMPLETE_REPLY after 2 steps with no tool run. Nine replays did not
+  reproduce it; the record fits one path only: the first answer failed the completeness check (missingAnswerBody), the one text-only
+  repair ran with tool_choice none, and its answer carried a tool call, which loop.ts never runs on a repair, so the turn ended
+  unfinished. Two causes: the subscription bridge (evals/subscription/claude_cli.ts render) did not carry tool_choice none to the CLI
+  and still listed the tools (an eval parity gap: the API refuses a tool call under none). Fix (03054c8b3): under none the bridge says
+  text only and lists no tools. A loop.ts change that kept the text of such a repair (a5c7add05, then widened in 39f1f7d30) was
+  REVERTED on the architect's ruling after the review of 39f1f7d30: it broke tests/architect/brain-receipt-completeness.test.ts ("a
+  repair that ignores text-only mode cannot repeat the write"), and the widened claim patterns stripped true and generic sentences
+  ("Your tracker has 3 rows" after list_applications; "Job alerts include new postings …"). loop.ts equals trunk's; production never
+  reaches that path, since the API refuses a tool call under none. Not max_tokens: the bridge never reports it. Proof: the H027 group
+  in `tests/edge/s3-r12f.test.ts` (bridge parity fails on b0d1b51e6; loop parity with trunk).
+- Follow-up (not fixed here): a receipt gap on the normal path, on trunk too. A sentence stating a record's new state as done, with no
+  tool that wrote it ("Your tracker now shows <employer> at Final.", "Done: <employer> is recorded in your applications.", "<employer>
+  is on your tracker now.", "Your applications list now includes <employer>."), passes `loop.ts unbackedClaims`. Its fix needs claim
+  patterns that tell a state written this turn from a state read (list_applications) or a general statement about the feature, under
+  brain-receipt-completeness.

@@ -26,6 +26,11 @@ export function nextStepLine(reply: string, emptyQuery: string | null | undefine
   if (!emptyQuery || anyFound || !String(reply ?? "").trim() || asksOrOffers(reply)) return null;
   return verified(emptyQuery) ? emptySearchNextStep(emptyQuery) : SEARCH_AGAIN;
 }
+// The one next step after an empty search, whatever else the reply holds (S3 r12f: D-101's floor reply uses it as its step (d)): the
+// saved watch when code's watch really saves one for those words, else another search, wider.
+export function emptyNextStep(emptyQuery: string, verified: (query: string) => boolean = () => false): string {
+  return (verified(emptyQuery) ? emptySearchNextStep(emptyQuery) : null) ?? SEARCH_AGAIN;
+}
 // Ruling (S3 r12, after the review of cbea914e9): when the watch cannot be verified (no profile, a place in the words, a remapped
 // title), the next step is one that is always true and needs nothing on file: another search, wider. No command is quoted, so no
 // route has to match a phrase: whatever they reply is a new ask, and the brain searches it.

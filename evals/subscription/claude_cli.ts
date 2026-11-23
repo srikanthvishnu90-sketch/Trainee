@@ -73,10 +73,14 @@ export function render(body: any): { system: string; prompt: string; schema: unk
       "functions in your own tool list; never try to invoke them directly (that fails). Your only real function is the one",
       "that returns your structured answer: put each tool call as a tool_use item inside that answer.",
     ].join(" ");
-  const tools = own.length
+  const tools = own.length && body.tool_choice?.type !== "none"
     ? "\n\nTools you may call:\n" + own.map((t: any) => `- ${t.name}: ${t.description ?? ""}\n  input schema: ${JSON.stringify(t.input_schema)}`).join("\n")
     : "";
-  const choice = body.tool_choice?.type === "tool" ? `\nYou must call the tool ${body.tool_choice.name}.` : body.tool_choice?.type === "any" ? "\nYou must call a tool." : "";
+  // (S3 r12f, H027: tool_choice "none" was not carried to the CLI, so on a text-only repair step the model still saw the tools and
+  // called one, and the loop, which never runs a tool on a repair, ended the turn unfinished. The API refuses a tool call under
+  // "none"; the bridge now says the same, and lists no tools.)
+  const none = body.tool_choice?.type === "none";
+  const choice = none ? "\nDo not call any tool now: answer with text items only (no tool_use item)." : body.tool_choice?.type === "tool" ? `\nYou must call the tool ${body.tool_choice.name}.` : body.tool_choice?.type === "any" ? "\nYou must call a tool." : "";
   const convo = (body.messages ?? []).map((m: any) => `<${m.role}>\n${textOf(m.content)}\n</${m.role}>`).join("\n");
   return { system: `${sys}\n\n${protocol}${tools}${choice}`, prompt: `${convo}\n\nAnswer the last user turn now.`, schema: structured ?? SCHEMA };
 }

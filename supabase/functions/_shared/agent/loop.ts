@@ -421,9 +421,14 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       if (show) return { reply: show.text, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final", show };
       return { reply: saved() ? MODEL_ERROR_AFTER_SAVE_REPLY : MODEL_ERROR_REPLY, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "model_error" };
     }
-    const content = Array.isArray(res && res.content) ? res.content : [];
-    const uses = content.filter((b: any) => b && b.type === "tool_use");
+    const content0 = Array.isArray(res && res.content) ? res.content : [];
     // Enforce text-only recovery even if a provider ignores tool_choice. Never repeat effects or enqueue approvals.
+    // S3 r12f (dev H027, probe-r12f-full-2): a repair answer that carries the requested text beside a tool call it was told not to
+    // make is the text: the tool call is dropped unrun (never executed, never recorded as a call), and the text passes every filter
+    // below as any answer does, the proof guards included. Only a repair answer with no text is the unfinished turn.
+    const repairText = repairing && content0.some((b: any) => b && b.type === "tool_use") && content0.some((b: any) => b && b.type === "text" && /[\p{L}\p{N}]/u.test(String(b.text ?? "")));
+    const content = repairText ? content0.filter((b: any) => b && b.type === "text") : content0;
+    const uses = content.filter((b: any) => b && b.type === "tool_use");
     if (repairing && uses.length) return incomplete();
     // The provider explicitly says this generation was cut off; plausible text is not evidence it finished. Do not
     // execute a partial tool request or keep a partial draft as conversation evidence. An exact preview already

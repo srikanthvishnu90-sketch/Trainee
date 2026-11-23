@@ -348,13 +348,25 @@ const SAID_STATUS = /(?<![\p{L}])(?:appl(?:y|ied|ies|ying|ication|ications)|subm
 // them: the line rests on their words as their own sentence does; with a verb of its own the label is its subject and it does not)
 const TITLE_LABEL = /^\W*(?:\d+[.)]\s*)?[\p{L} /&-]{0,40}?\b(?:analyst|engineer|developer|scientist|designer|manager|specialist|coordinator|consultant|associate|assistant|technician|administrator|architect|intern|representative|clerk|tester)s?:\s*/iu;
 const FINITE = /(?<![\p{L}])(?:is|are|was|were|has|have|had|needs?|requires?|pays?|wants?|uses?|offers?|hires?|expects?|asks?|lists?|involves?|calls?\s+for|demands?)(?![\p{L}])/iu;
+// S3 r12f (follow-up of the independent review of 72e15122e): a clause about the person inside a sentence makes the sentence
+// person-subject too, so their words may back it and every rule on a clause about them applies to it (the bars below, the B3 example
+// and class-word rule, a field knowledge unit never alone): "Since you know SQL, …", "SQL and Excel, which you know, …", "It's your SQL
+// that …", "That gives you a strong base: SQL, …". The third-party, Trainee-action, money and status bars are unchanged and still
+// refuse the whole sentence.
+const SAID_EMBEDDED = [
+  /^\W*(?:since|because|as|given\s+that|now\s+that)\s+you(?:['’](?:ve|re|d))?(?![\p{L}])/iu,
+  /,\s*which\s+you(?:['’](?:ve|re))?\s+(?:(?:already|also|clearly)\s+)?(?:know|use|used|have|had|did|done|built|ran|run|do|bring|named|mentioned|said)(?![\p{L}])/iu,
+  /^\W*it(?:['’]s|\s+is|\s+was)\s+your(?![\p{L}])/iu,
+  /(?<![\p{L}])gives?\s+you(?![\p{L}])[^:.;!?]{0,80}:\s*\S/iu,
+];
 export function saidSubject(clause: string): boolean {
   const t = stripTags(String(clause ?? "")).replace(/\*+/g, "").trim();
   const labelled = TITLE_LABEL.exec(t);
   const rest = labelled ? t.slice(labelled[0].length) : t;
   const head = rest.replace(SAID_LEAD, "");
   const fragment = !!labelled && !FINITE.test(rest) && /(?<![\p{L}])your(?![\p{L}])/iu.test(rest);
-  return (SAID_SUBJECT.test(head) || fragment) && !SAID_THIRD.test(t) && !SAID_TRAINEE.test(t) && !SAID_MONEY.test(t) && !SAID_STATUS.test(t);
+  const embedded = SAID_EMBEDDED.some((re) => re.test(head) || re.test(rest));
+  return (SAID_SUBJECT.test(head) || fragment || embedded) && !SAID_THIRD.test(t) && !SAID_TRAINEE.test(t) && !SAID_MONEY.test(t) && !SAID_STATUS.test(t);
 }
 // D-100: a pay, status or outcome claim is never judged as a pair (what they are paid, what was sent, applied for or approved, an
 // interview, an offer or a rejection).
@@ -368,8 +380,15 @@ export function usesTermsUnsaid(clause: string, usesText: string, theirs: string
   const examples = [...String(usesText).matchAll(/\(such as ([^)]+)\)/gi)].flatMap((m) => m[1].split(/\s*,\s*|\s+or\s+/i)).map((x) => x.trim()).filter(Boolean);
   const words = String(usesText).replace(/^General career knowledge, not postings:[^:]*?involves\s*/i, "").replace(/\(such as [^)]+\)/gi, " ").toLowerCase().match(/[\p{L}][\p{L}-]{2,}/gu) ?? [];
   const classes = [...new Set(words.filter((w) => !USES_STOP.has(w)))];
-  const credited = (w: string) => new RegExp(`(?<![\\p{L}])(?:your\\s+(?:[\\p{L}-]+\\s+){0,4}?|you(?:'ve|’ve|\\s+have)?\\s+(?:already\\s+|also\\s+)?(?:know|use|used|have|had|did|done|built|ran|run|do)\\s+(?:[\\p{L}-]+\\s+){0,4}?)${w}(?![\\p{L}])`, "iu").test(clause);
-  return [...examples.filter((e) => lowerHas(clause, e) && !lowerHas(theirs, e)), ...classes.filter((w) => credited(w) && !lowerHas(theirs, w))];
+  const escW = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // (S3 r12f: the embedded shapes credit a word to them too: "dashboards, which you know", "gives you a strong base: dashboards")
+  // (S3 r12f: a class word is read with its plural too, "your dashboards", "spreadsheets, which you've used")
+  const credited = (w: string) => new RegExp(`(?<![\\p{L}])(?:your\\s+(?:[\\p{L}-]+\\s+){0,4}?|you(?:'ve|’ve|\\s+have)?\\s+(?:already\\s+|also\\s+)?(?:know|use|used|have|had|did|done|built|ran|run|do)\\s+(?:[\\p{L}-]+\\s+){0,4}?)${w}(?:s|es)?(?![\\p{L}])`, "iu").test(clause) ||
+    new RegExp(`(?<![\\p{L}])${escW(w)}(?:s|es)?(?:\\s+[\\p{L}-]+){0,3}\\s*,\\s*which\\s+you(?![\\p{L}])`, "iu").test(clause) ||
+    new RegExp(`(?<![\\p{L}])gives?\\s+you(?![\\p{L}])[^:.;!?]{0,80}:[^.;!?]*?(?<![\\p{L}])${escW(w)}(?:s|es)?(?![\\p{L}])`, "iu").test(clause);
+  // (and a class word said in their words counts in either number: "I built dashboards" holds "dashboard")
+  const saidIt = (w: string) => lowerHas(theirs, w) || lowerHas(theirs, `${w}s`) || lowerHas(theirs, `${w}es`);
+  return [...examples.filter((e) => lowerHas(clause, e) && !lowerHas(theirs, e)), ...classes.filter((w) => credited(w) && !saidIt(w))];
 }
 // The D-100 pair as one source: both passages marked, each with what it is.
 const pairSource = (theirs: EvidenceUnit, role: EvidenceUnit) => [
@@ -500,6 +519,7 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
   const aboutThem = (t: string) => /(?<![\p{L}'’])(?:you|your|you're|you’re|you've|you’ve|yours)(?![\p{L}])/iu.test(t);
   const notUsesFor = (t: string) => (u: EvidenceUnit) => !(u.uses && aboutThem(t));
   // (review of a339b806a, B3: a field knowledge example or class word credited to them must be in the words of theirs a clause rests on)
+  const theirWords = ledger.units.filter((u) => u.kind === "said" || u.kind === "record").map((u) => u.text).join("\n");
   const usesSaid = (t: string, u: EvidenceUnit) => ledger.units.filter((x) => x.uses).every((x) => !usesTermsUnsaid(t, x.text, u.text).length);
   lines.forEach((l, a) => l.forEach((x, b) => {
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
@@ -544,6 +564,10 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
         carried = null;
         continue;
       }
+      // (S3 r12f: a person-subject clause, an embedded one included, that credits them with a field knowledge example or class word
+      // their own words and record never name is refused in code, whatever unit it cites: "Dashboards, which you know, …")
+      const unsaidCredit = saidSubject(c) ? [...new Set(ledger.units.filter((u) => u.uses).flatMap((x) => usesTermsUnsaid(c, x.text, theirWords)))] : [];
+      if (unsaidCredit.length) return fail(a, b, text, `it credits the person with ${unsaidCredit.map((w) => `"${w}"`).join(", ")}, which their own words and record do not name`);
       const ownSubj = names[0] ?? unknownIn(c) ?? null;
       const subject = ownSubj ?? (owners.length || carried ? carried : null);
       carried = subject;

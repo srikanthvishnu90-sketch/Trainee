@@ -343,7 +343,7 @@ const SAID_SUBJECT = /^(?:you|your|you're|you’re|you've|you’ve|you'd|you’d
 const SAID_THIRD = /(?<![\p{L}])(?:their|theirs|its|his|her|they|them|team|teams|company|companies|firm|firms|employer|employers|department|org|organization|recruiters?|managers?|hiring|posting|postings|opening|openings|listing|listings)(?![\p{L}])/iu;
 const SAID_TRAINEE = /(?<![\p{L}'’])(?:I|I'm|I’m|I've|I’ve|I'll|I’ll|I'd|I’d|we|we've|we’ve|we'll|we’ll|Trainee)(?![\p{L}'’])/u;
 const SAID_MONEY = /[$€£¥]|(?<![\p{L}])(?:dollars?|usd|k|per\s+hour|an\s+hour|a\s+year|per\s+year|salary|salaries|pay|pays|paid|wage|wages|earn\w*|income|money|raise|raises|bonus\w*)(?![\p{L}])/iu;
-const SAID_STATUS = /(?<![\p{L}])(?:appl(?:y|ied|ies|ying|ication|ications)|submit\w*|sent|send|queued|approv\w*|under\s+review|interview\w*|offer\w*|reject\w*|shortlist\w*|screen(?:ing|ed)?|callback\w*|hir(?:e|ed|es|ing)|status|accepted|declined|withdrawn|promot\w*)(?![\p{L}])/iu;
+const SAID_STATUS = /(?<![\p{L}])(?:appl(?:y|ied|ies|ying|ication|ications)|submit\w*|sent|send|queued|approv\w*|under\s+review|interview\w*|offer\w*|reject\w*|shortlist\w*|screen(?:ing|ed)?|callback\w*|status|accepted|declined|withdrawn|promot\w*)(?![\p{L}])/iu;
 // (a list item's label that is a job title, "Reporting analyst: closest to your 2 years of reporting", heads a verbless line about
 // them: the line rests on their words as their own sentence does; with a verb of its own the label is its subject and it does not)
 const TITLE_LABEL = /^\W*(?:\d+[.)]\s*)?[\p{L} /&-]{0,40}?\b(?:analyst|engineer|developer|scientist|designer|manager|specialist|coordinator|consultant|associate|assistant|technician|administrator|architect|intern|representative|clerk|tester)s?:\s*/iu;
@@ -366,6 +366,13 @@ const saidEmbedded = (t: string) => {
   const w = SAID_EMBEDDED_WHICH.exec(t);
   return SAID_EMBEDDED_OPEN.test(t) || (!!w && !FINITE.test(t.slice(0, w.index))) || SAID_EMBEDDED_CLEFT.test(t) || SAID_EMBEDDED_GIVES.test(t);
 };
+// (review of 4908e3df7, n3, narrowed by the architect after the H022 replay: a definite or past hiring outcome is a status claim, "you
+// were/got/have been hired", "you will be hired", "hired within/by …", "you're hired"; a modal possibility naming a kind of role is
+// not, "you could/can/might get hired as/into <role>", "you'd be a strong hire for <role>")
+const HIRE = /(?<![\p{L}])hir(?:e|ed|es|ing)(?![\p{L}])/iu;
+const HIRE_MODAL = /(?<![\p{L}])(?:could|can|might|may|would)\s+(?:(?:likely|probably|realistically)\s+)?(?:get|be)\s+hired\s+(?:as|into|for)\s+(?!(?:at|by|within)\b)|(?<![\p{L}])you(?:['’]d|\s+would|\s+could)\s+be\s+(?:a|an)\s+(?:[\p{L}-]+\s+){0,2}?hire\s+for\s+/giu;
+const HIRE_DEFINITE = /(?<![\p{L}])hired\s+(?:within|by|in\s+\d|at|on)(?![\p{L}])/iu;
+const hireStatus = (t: string) => HIRE.test(t) && (HIRE_DEFINITE.test(t) || HIRE.test(t.replace(HIRE_MODAL, " ")));
 export function saidSubject(clause: string): boolean {
   const t = stripTags(String(clause ?? "")).replace(/\*+/g, "").trim();
   const labelled = TITLE_LABEL.exec(t);
@@ -373,7 +380,7 @@ export function saidSubject(clause: string): boolean {
   const head = rest.replace(SAID_LEAD, "");
   const fragment = !!labelled && !FINITE.test(rest) && /(?<![\p{L}])your(?![\p{L}])/iu.test(rest);
   const embedded = saidEmbedded(head) || saidEmbedded(rest);
-  return (SAID_SUBJECT.test(head) || fragment || embedded) && !SAID_THIRD.test(t) && !SAID_TRAINEE.test(t) && !SAID_MONEY.test(t) && !SAID_STATUS.test(t);
+  return (SAID_SUBJECT.test(head) || fragment || embedded) && !SAID_THIRD.test(t) && !SAID_TRAINEE.test(t) && !SAID_MONEY.test(t) && !SAID_STATUS.test(t) && !hireStatus(t);
 }
 // D-100: a pay, status or outcome claim is never judged as a pair (what they are paid, what was sent, applied for or approved, an
 // interview, an offer or a rejection).

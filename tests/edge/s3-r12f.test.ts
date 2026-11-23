@@ -201,3 +201,17 @@ Deno.test("review B3: an embedded person clause never makes a sentence about the
   // (n3: hire(d) is a status word)
   assert(!saidSubject("You will be hired within a month.") && !saidSubject("Since you know SQL, you will be hired soon."), "hired");
 });
+Deno.test("n3 narrowed (architect, H022 replay): a modal hire naming a kind of role is a clause about them; a definite or past hire is status", async () => {
+  for (const s of ["You could get hired as a data analyst.", "With SQL, Excel and Tableau and 2 years of reporting, you could get hired as a data analyst.", "You might get hired into reporting analyst roles.", "You'd be a strong hire for a reporting analyst role."])
+    assert(saidSubject(s), `a possibility: ${s}`);
+  for (const s of ["Since you know SQL, you will be hired within a month.", "You were hired at Acme.", "You got hired last year.", "You have been hired.", "You will be hired.", "You're hired.", "You could get hired within a month.", "You could get hired by Acme."])
+    assert(!saidSubject(s), `status: ${s}`);
+  const said = ["I know SQL, Excel and Tableau and did 2 years of reporting"];
+  const l = await fieldTurn(said[0]);
+  for (const id of ["", ...l.units.filter((u) => u.kind === "suggestion").map((u) => ` [${u.id}]`)]) {
+    const ok = await verifyTagged(`With SQL, Excel and Tableau and 2 years of reporting, you could get hired as a data analyst${id}.`, l, { judge: yes, said, ask: "which roles fit me?" });
+    assert(!ok.failures.length, `a modal hire stands on their words (${id}): ${JSON.stringify(ok.failures)}`);
+    const no = await verifyTagged(`Since you know SQL, you will be hired within a month${id}.`, l, { judge: yes, said, ask: "which roles fit me?" });
+    assert(no.failures.length > 0, `a definite hire is refused (${id})`);
+  }
+});

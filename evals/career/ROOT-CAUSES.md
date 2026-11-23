@@ -1177,3 +1177,16 @@ ledger of H035 and H034.
     role gives you: …"; "Since you know SQL, the role is a great fit"). Now scoped; n3: hire(d) is a status word.
 - Proof: `tests/edge/s3-r12f.test.ts` (offline, in gate.sh; fails on 72e15122e: the three delivered replies as fixtures, the floor's
   bounds, turns through agentTurn, the embedded person clauses and their bars; the review group fails on 4908e3df7).
+- Probes at b0d1b51e6 (full dev, 38 cases): p1 37/38 (H022, both judges: the mapping sentences dropped, the routes kept, so the floor
+  rightly did not fire), p2 35/38 (H018 and H020 haiku-only splits on unchanged router replies; H027 both judges). An offline replay of
+  H022's mapping shapes showed n3 refusing "… you could get hired as a data analyst" and "You'd be a strong hire for …", which trunk
+  keeps; n3 is narrowed (architect, 4a20cafa5): a definite or past hire is status, a modal hire naming a kind of role is not.
+- H027 (p2, both judges): "prep me for the last round" got INCOMPLETE_REPLY after 2 steps with no tool run. Nine replays did not
+  reproduce it; the record fits one path only: the first answer failed the completeness check (missingAnswerBody), the one text-only
+  repair ran with tool_choice none, and its answer carried a tool call, which loop.ts never runs on a repair, so the turn ended
+  unfinished. Two causes: the subscription bridge (evals/subscription/claude_cli.ts render) did not carry tool_choice none to the CLI
+  and still listed the tools (an eval parity gap: the API refuses a tool call under none), and the loop discarded the repair's text
+  with the stray call. Fix: the bridge says text only and lists no tools under none; a repair answer with text beside a stray call is
+  the text (the call dropped unrun, the text through every filter, the proof guards included); a repair that is only a tool call is
+  still the unfinished turn. Not max_tokens: the bridge never reports it. Proof: the H027 group in `tests/edge/s3-r12f.test.ts`
+  (fails on b0d1b51e6).

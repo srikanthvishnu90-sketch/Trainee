@@ -635,7 +635,10 @@ export async function agentTurn(o: {
     const dropped = !!piped && (piped.dropped.length > 0 || piped.fallback) || !!supportTrace?.refused.length;
     const verify = (q: string) => watchVerified(q, { hasProfile: hasProfileOn(o.stores), probe: routerWatchProbe(o.stores as Record<string, unknown>) });
     const routes = ledger?.units.find((u) => u.kind === "suggestion" && !u.uses)?.text ?? null;
-    const floored = floorReply({ reply: String(withSupport.reply), dropped, codeLines: nrLines, message: o.message, emptyQuery: emptyQ, count: 0,
+    const finalNow = String(withSupport.reply).replace(/\s+/g, " ");
+    const droppedText = [...(piped?.dropped ?? []).map((f) => f.sentence), ...(supportTrace?.refused ?? []).map((f) => f.sentence),
+      ...stripTags(draft0).split("\n").filter((l) => /\p{L}/u.test(l) && !finalNow.includes(l.replace(/^\s*(?:\d{1,2}[.)]|[-\u2022*])\s+/, "").replace(/\s+/g, " ").trim()))].join("\n");
+    const floored = floorReply({ reply: String(withSupport.reply), dropped, droppedText, codeLines: nrLines, message: o.message, emptyQuery: emptyQ, count: 0,
       anyFound: Array.isArray(withSupport.postings) && withSupport.postings.length > 0, routes, nextStep: emptyNextStep(emptyQ, verify) });
     if (floored) (withSupport as any).reply = withNotRun(floored, nrLines);
   }

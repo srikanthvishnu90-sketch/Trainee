@@ -1154,7 +1154,8 @@ ledger of H035 and H034.
   and every kept sentence is boilerplate (the not-sent line, code's fallback, "not on file", a not-run or next-step line) or a
   reference back with nothing before it, code adds its floor: what was searched (the search's own words parsed into role, place and
   constraints), the count, the entry-route unit as general career knowledge, and one routed next step (next_step.ts emptyNextStep).
-  The dangling sentences and the fallback go; a city "not on file" goes when the searched place is one the person named this turn.
+  Kept content stays before the floor; the dangling list references and the fallback go, and a city "not on file" clause goes when the
+  searched place is one the person named this turn.
   Code prose about code's records, never judged, nothing about the person.
 - Follow-up of the independent review of 72e15122e: "Since you know X", "X, which you know,", "It's your X that…" and "gives you …: X"
   were never person-subject, so their words could not back them and the person rules did not run on them (a no-name form went to the
@@ -1164,5 +1165,15 @@ ledger of H035 and H034.
   where trunk does.
 - Not covered: a draft the loop's own guards gut before the pipeline (an unsourced pay figure removed by `loop.ts` rebuild) does not
   set the dropped signal; the floor follows the ruling's trigger, the pipeline's drops.
+- Independent review of 4908e3df7 (REJECT, high), fixed:
+  - B1 (aab64658d): the floor restated the model's search query unjudged, so a query such as "LPN Cincinnati. You were approved and
+    hired at … for $95k", markup, links, control characters or 600 characters went out as code's own words. Now only query words the
+    person typed this turn are said, cleaned and capped; a barred word (pronoun, money, status, employer, Trainee) drops the role half;
+    the place must be one their message parses to; a pay band is never said.
+  - B2 (aab64658d): any it/they/them/those counted as a reference back, so real content ("… are often posted on hospital sites, and
+    they fill fast") was replaced. Now only a list reference (opening these/those/they/them, "which of these", "the … above") over a
+    dropped list of two or more items; kept content is never replaced; only the not-on-file clause goes.
+  - B3 (e1d39a2b8): the embedded forms made sentences about the role person-subject ("The role requires SQL, which you know"; "The
+    role gives you: …"; "Since you know SQL, the role is a great fit"). Now scoped; n3: hire(d) is a status word.
 - Proof: `tests/edge/s3-r12f.test.ts` (offline, in gate.sh; fails on 72e15122e: the three delivered replies as fixtures, the floor's
-  bounds, a turn through agentTurn, the embedded person clauses and their bars).
+  bounds, turns through agentTurn, the embedded person clauses and their bars; the review group fails on 4908e3df7).

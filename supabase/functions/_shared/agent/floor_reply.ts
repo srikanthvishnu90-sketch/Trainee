@@ -12,6 +12,7 @@
 // turn's message named.
 import { STATE_NAMES, US_CITIES } from "../posting_place.ts";
 import { splitSentences } from "./research/support.ts";
+import { SEARCH_AGAIN } from "./next_step.ts";
 
 const FALLBACK_HEAD = "I couldn't verify an answer to that from what I read.";
 // The not-sent boundary line, in the shapes the brain and code write it.
@@ -35,7 +36,9 @@ export interface FloorIn {
 }
 
 // What a sentence of the kept reply is: boilerplate (kept, not substance), a reference back (dropped), or substance.
-type Kind = "code" | "notSent" | "notOnFile" | "fallback" | "back" | "substance";
+type Kind = "code" | "step" | "notSent" | "notOnFile" | "fallback" | "back" | "substance";
+// Code's own next-step lines (next_step.ts): the floor gives its own, so one already there is not kept twice.
+const STEP = (s: string) => s === SEARCH_AGAIN || /^Say "watch for .+ roles" and I'll save a watch for them on your list\.$/.test(s);
 interface Piece { text: string; kind: Kind; para: number }
 function piecesOf(reply: string, codeLines: readonly string[]): Piece[] {
   const out: Piece[] = [];
@@ -43,12 +46,19 @@ function piecesOf(reply: string, codeLines: readonly string[]): Piece[] {
   String(reply ?? "").split(/\n{2,}/).forEach((para, p) => {
     inFallback = false;
     for (const line of para.split("\n")) {
-      if (line.trim().startsWith(FALLBACK_HEAD)) inFallback = true;
-      // (the fallback's own lines, each unit it lists and its link, are the fallback's until the paragraph ends)
-      if (inFallback) { out.push({ text: line, kind: "fallback", para: p }); continue; }
+      // (code's fallback line, and when it says "This chat's tool results do hold:", each unit it lists and its link after it, to the
+      // paragraph's end)
       let rest = line;
+      if (inFallback) { out.push({ text: line, kind: "fallback", para: p }); continue; }
+      const at = line.indexOf(FALLBACK_HEAD);
+      if (at >= 0) {
+        const after = line.slice(at + FALLBACK_HEAD.length).trim();
+        out.push({ text: FALLBACK_HEAD, kind: "fallback", para: p });
+        if (/^This chat's tool results do hold:$/.test(after)) { inFallback = true; rest = line.slice(0, at); }
+        else rest = `${line.slice(0, at)} ${after}`;
+      }
       for (const c of codeLines) if (c && rest.includes(c)) { out.push({ text: c, kind: "code", para: p }); rest = rest.split(c).join(" "); }
-      for (const s of splitSentences(rest).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x))) out.push({ text: s, kind: NOT_SENT.test(s) ? "notSent" : NOT_ON_FILE.test(s) ? "notOnFile" : "substance", para: p });
+      for (const s of splitSentences(rest).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x))) out.push({ text: s, kind: STEP(s) ? "step" : NOT_SENT.test(s) ? "notSent" : NOT_ON_FILE.test(s) ? "notOnFile" : "substance", para: p });
     }
   });
   // A reference back with nothing of substance before it points at what was dropped.

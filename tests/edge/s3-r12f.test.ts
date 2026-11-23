@@ -252,3 +252,20 @@ Deno.test("H027 (eval bridge parity): tool_choice none reaches the CLI as text o
   const auto = render({ system: "S", tools, messages: [{ role: "user", content: "hi" }] });
   assert(auto.system.includes("Tools you may call") && !/Do not call any tool now/.test(auto.system), "tools listed otherwise");
 });
+Deno.test("review of 51c798945, B1: a modal hire with a time or certainty marker is an outcome claim, refused tagged or not", async () => {
+  const said = ["I know SQL and Excel and did 2 years of reporting"];
+  const l = await fieldTurn(said[0]);
+  const refused = ["You could get hired as a reporting analyst within a week.", "You could get hired as a reporting analyst next month.", "You could be hired as an analyst in 2 weeks.",
+    "You could get hired for sure.", "You can get hired for sure as an analyst.", "You could get hired as an analyst, guaranteed."];
+  for (const s of refused) {
+    assert(!saidSubject(s), `status: ${s}`);
+    for (const tag of ["", ...l.units.map((u) => ` [${u.id}]`)]) {
+      const v = await verifyTagged(`${s.replace(/\.$/, "")}${tag}.`, l, { judge: yes, said, ask: "which roles fit me?" });
+      assert(v.failures.length > 0, `stood (${tag || "untagged"}): ${s}`);
+    }
+  }
+  for (const s of ["You could get hired as a reporting analyst.", "You might get hired into a reporting role."]) {
+    const v = await verifyTagged(s, l, { judge: yes, said, ask: "which roles fit me?" });
+    assert(!v.failures.length, `a modal possibility still stands: ${s}`);
+  }
+});

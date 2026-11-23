@@ -372,7 +372,10 @@ const saidEmbedded = (t: string) => {
 const HIRE = /(?<![\p{L}])hir(?:e|ed|es|ing)(?![\p{L}])/iu;
 const HIRE_MODAL = /(?<![\p{L}])(?:could|can|might|may|would)\s+(?:(?:likely|probably|realistically)\s+)?(?:get|be)\s+hired\s+(?:as|into|for)\s+(?!(?:at|by|within)\b)|(?<![\p{L}])you(?:['’]d|\s+would|\s+could)\s+be\s+(?:a|an)\s+(?:[\p{L}-]+\s+){0,2}?hire\s+for\s+/giu;
 const HIRE_DEFINITE = /(?<![\p{L}])hired\s+(?:within|by|in\s+\d|at|on)(?![\p{L}])/iu;
-const hireStatus = (t: string) => HIRE.test(t) && (HIRE_DEFINITE.test(t) || HIRE.test(t.replace(HIRE_MODAL, " ")));
+// (review of 51c798945, B1: a modal hire with a time or certainty marker anywhere in the sentence is an outcome claim, "… within a week",
+// "… next month", "… in 2 weeks", "… for sure", "…, guaranteed")
+const HIRE_WHEN = /(?<![\p{L}])(?:within|by|in\s+(?:\d+|a|an|one|two|three|four|five|six|a\s+few|few)\s+(?:days?|weeks?|months?|years?)|(?:next|this)\s+(?:week|month|year|quarter|spring|summer|fall|autumn|winter)|soon|right\s+away|immediately|today|tomorrow|for\s+sure|guaranteed|definitely|certainly|surely|will)(?![\p{L}])/iu;
+const hireStatus = (t: string) => HIRE.test(t) && (HIRE_DEFINITE.test(t) || HIRE.test(t.replace(HIRE_MODAL, " ")) || HIRE_WHEN.test(t));
 export function saidSubject(clause: string): boolean {
   const t = stripTags(String(clause ?? "")).replace(/\*+/g, "").trim();
   const labelled = TITLE_LABEL.exec(t);
@@ -539,6 +542,9 @@ export async function verifyTagged(reply: string, ledger0: Ledger, o: { judge?: 
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
     const { ids, text } = tagsOf(x);
     lines[a][b] = text;
+    // (review of 51c798945, B1: a hiring outcome said about the person, a definite one or a modal one with a time or certainty marker,
+    // rests on no unit and no words of theirs; it is refused in code, tagged or not, before the no-claim rule could let it pass unread)
+    if (/\p{L}/u.test(text) && !own.has(text) && aboutThem(text) && hireStatus(text) && !/\?\s*["'”’)]*\s*$/.test(text)) { fail(a, b, text, "it states a hiring outcome for the person, which nothing this turn holds"); return carryPast(text); }
     if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || personQuestion(text, allowed) || countedQuestion(text)) return carryPast(text);
     if (rec(text) === true) return carryPast(text);
     // The record's verdict comes before the plain-sentence rule: a sentence about the record that the record contradicts fails.

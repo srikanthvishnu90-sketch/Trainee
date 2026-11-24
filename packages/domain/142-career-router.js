@@ -1617,11 +1617,13 @@ const CareerRouter = (() => {
       const reply = compose({ headline: "I can't match or introduce you to people — that capability is not wired into this product.", facts: ["There is no people-matching service behind this chat and no connector searching alumni or mentor networks, so there is no one I can truthfully name. I won't invent a person, a name, or an email address to fill the gap."], nextStep: alt });
       return { intent: "people_matching_stop", reply, resultStatus: "awaiting_user", sends: 0 };
     }
-    if (/\bgive me the (email|names? and contacts|contacts)\b|\bjust give me the email of\b|\bshare my resume with your (whole )?network\b|\bnames and contacts of\b/.test(t)) {
+    if (/\bgive me the (emails?|names? and contacts|contacts)\b|\bjust give me the emails? of\b|\bshare my resume with your (whole )?network\b|\bnames and contacts of\b/.test(t)) {
       // S3 r12g (dev H018): an ask to share their resume or materials broadly, or with a standing yes, that asks for no person or
       // contact is answered about the resume first; the contact-details line is only for an ask for people or contacts. Their
       // standing-permission words are never said back (a quoted phrase reads as wording offered for them to send).
-      const asksContacts = /\bgive me the (email|names? and contacts|contacts)\b|\bjust give me the email of\b|\bnames and contacts of\b|\b(?:emails?|phone numbers?|contacts?|contact details|names)\b[^.?!]{0,30}\b(?:of|for|at)\b/.test(t);
+      // (review of b87421597: any ask for emails, phone numbers, contacts, contact details or names, beside the share or alone,
+      // is a contact ask; their own email or phone is not)
+      const asksContacts = /\bgive me the (emails?|names? and contacts|contacts)\b|\bjust give me the emails? of\b|\bnames and contacts of\b/.test(t) || /(?<!\bmy\s)(?<!\bmy\s(?:work|personal)\s)\b(?:e-?mails?|phone numbers?|contacts?|contact details|names)\b/.test(t.replace(/\b(?:my|your)\s+(?:own\s+)?(?:e-?mail|phone(?:\s+number)?)s?\b/g, " ").replace(/\bmy\s+contacts?\b/g, " "));
       const standing = /don'?t ask me|do not ask me|each time|every time|standing (?:yes|ok|approval)|without (?:asking|checking)|always (?:ok|approve)/.test(t);
       const standingFact = standing ? ["Not asking you each time would be a standing yes I will not keep: I ask for your yes every time, to each exact draft."] : [];
       const reply = asksContacts

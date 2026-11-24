@@ -56,3 +56,11 @@ Deno.test("S3 r12g / H018: an ask for people's contacts still gets the contact-d
     assert(!/["“][^"”]*(?:ask me|each time)[^"”]*["”]/i.test(r.reply), r.reply);
   }
 });
+Deno.test("review of b87421597 (2): a contact ask beside a resume share gets the contact answer", () => {
+  for (const m of ["share my resume with your network and give me the emails", "share my resume with your network, I want contacts", "share my resume with your network and send me the recruiters' emails", "give me the emails of analysts at Brightfold"]) {
+    const r = turn(m);
+    assert(r.intent === "people_matching_stop" && /^I don't have people's contact details to hand out/.test(r.reply), `${m}: ${r.intent} ${r.reply}`);
+  }
+  const own = turn("share my resume with your network, my email is on it");
+  assert(/^I can't share your resume with a network/.test(own.reply), `their own email is no contact ask: ${own.reply}`);
+});

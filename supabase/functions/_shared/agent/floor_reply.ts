@@ -111,6 +111,19 @@ const PAY = /\$\s?\d[\d,.]*\s?k?(?:\s?(?:-|–|to)\s?\$?\s?\d[\d,.]*\s?k?)?(?:\s
 const FILLER = /^(?:jobs?|roles?|positions?|openings?|postings?|work|near|in|around|at|for|only|with|the|a|an|and|or|any|area|city|of|to)$/i;
 // Words that never stand as role words: a pronoun, money, status, an employer frame or Trainee's own action.
 const BARRED = /^(?:i|me|my|mine|you|your|yours|we|us|our|he|she|him|her|his|they|them|their|it|its|pay|pays|paid|salary|salaries|wage|wages|money|dollars?|usd|hour|hourly|year|yearly|annual|bonus|equity|earn\w*|approved?|approval|hired?|hiring|applied|apply|application|applications|submit\w*|sent|send|offer\w*|interview\w*|reject\w*|accepted|status|queued|company|companies|employer|employers|inc|llc|corp|ltd|trainee|say|said|will|ignore|instructions?)$/i;
+// One deterministic stem for matching typed words to the search's words (never for what is said): nurse, nurses and nursing are one;
+// analyst and analysts; cashier and cashiers. A word of three letters or fewer is its own stem.
+export function stem(w: string): string {
+  let x = String(w ?? "").toLowerCase();
+  if (x.length <= 3) return x;
+  if (/(?:ss|us|is)$/.test(x)) return x;
+  if (/(?:ches|shes|xes|zes|sses)$/.test(x)) x = x.slice(0, -2);
+  else if (/ies$/.test(x) && x.length > 4) x = `${x.slice(0, -3)}y`;
+  else if (/s$/.test(x)) x = x.slice(0, -1);
+  if (/ing$/.test(x) && x.length > 5) x = x.slice(0, -3);
+  if (/er$/.test(x) && x.length > 5) x = x.slice(0, -2);
+  return x.replace(/e$/, "");
+}
 const clean = (t: string) => String(t ?? "").replace(/[^\p{L}\p{N}\s&+/-]/gu, " ").replace(/\s+/g, " ").trim();
 const titleCase = (t: string) => t.replace(/(^|[\s-])(\p{L})/gu, (_m, s: string, c: string) => s + c.toUpperCase());
 const capped = (ws: string[]) => { const out: string[] = []; for (const w of ws) { if (out.length >= 6 || [...out, w].join(" ").length > 60) break; out.push(w); } return out; };
@@ -141,8 +154,10 @@ export function searchedParams(query: string, message = ""): { role: string; pla
   const p = placeOf(words);
   if (p.place) words.splice(p.at, p.n);
   const m = clean(message);
-  const has = new Set(m.toLowerCase().split(/\s+/).filter(Boolean));
-  const role0 = capped(words.filter((w) => !FILLER.test(w) && has.has(w.toLowerCase())));
+  // (S3 r12g, dev H035: they typed "nurses", the search said "nurse": a typed word matches a query word through one small,
+  // deterministic stem, a plural -s/-es or an -ing/-er ending, and the query's own form is said)
+  const has = new Set(m.toLowerCase().split(/\s+/).filter(Boolean).map(stem));
+  const role0 = capped(words.filter((w) => !FILLER.test(w) && has.has(stem(w.toLowerCase()))));
   const role = role0.some((w) => BARRED.test(w)) ? "" : role0.join(" ");
   // (n5: the place counts as theirs when the place their message parses to is the searched one)
   const mw = m.split(/\s+/).filter(Boolean), theirs: string[] = [];

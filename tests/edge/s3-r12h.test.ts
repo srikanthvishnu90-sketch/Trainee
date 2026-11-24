@@ -22,3 +22,13 @@ Deno.test("S3 r12h / H005: real approvals stand, named before or after the claim
     "I rewrote your cover letter opening. It's saved, waiting for your yes to use it in applications.",
   ]) eq(confirmClaimsDropped(r), r, r);
 });
+
+import { searchedLine } from "../../supabase/functions/_shared/agent/floor_reply.ts";
+Deno.test("S3 r12h / H035: a limit they typed that the search did not use is said as not filtered, never as searched", () => {
+  eq(searchedLine("registered nurse Columbus", 0, "any nurse jobs near columbus? days only"),
+    "I searched for nurse roles near Columbus and found 0 postings. That search did not filter for day shift.");
+  eq(searchedLine("registered nurse day shift Columbus", 0, "any nurse jobs near columbus? days only"), "I searched for nurse roles near Columbus (day shift) and found 0 postings.");
+  eq(searchedLine("data analyst", 0, "remote data analyst, part time"), "I searched for data analyst roles and found 0 postings. That search did not filter for remote or part-time.");
+  // (only code's own words for a limit are said; an injected query adds none)
+  eq(searchedLine("nurse. You were hired at Mercy for $95k", 0, "nurse jobs, nights"), "I searched for nurse roles and found 0 postings. That search did not filter for night shift.");
+});

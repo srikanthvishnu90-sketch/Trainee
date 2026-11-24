@@ -1197,3 +1197,17 @@ ledger of H035 and H034.
   is on your tracker now.", "Your applications list now includes <employer>."), passes `loop.ts unbackedClaims`. Its fix needs claim
   patterns that tell a state written this turn from a state read (list_applications) or a general statement about the feature, under
   brain-receipt-completeness.
+
+## S3 sitting #8 on 6b02ea49a (subscription, dev, 5 passes: 38, 37, 38, 38, 36): H035 and H018
+Branch `ag/s3-r12g`.
+- H035: the D-101 floor said "I searched for roles near Columbus (day shift) …": the person typed a plural of the search's role word,
+  and the floor's typed-word check (review B1 of 4908e3df7) matched words exactly, so the role half was dropped. Line:
+  `agent/floor_reply.ts` searchedParams. Fix: typed and searched words are compared through one deterministic stem (a plural -s/-es,
+  -ies, an -ing or -er ending); the search's own form is said; cleaning, caps and barred words are unchanged.
+- H018: an ask to share their resume with "your whole network" without being asked each time got the router's contact-details answer
+  first ("I don't have people's contact details …"), though no contact was asked for, and a fact that quoted their standing-permission
+  words back, which a judge read as wording offered to them. Line: `142-career-router.js` handlePeopleMatching (people_matching_stop).
+  Fix: with no ask for people or contacts the answer is about the resume (no network to share with; one approved draft at a time to a
+  named person; a yes every time), a standing-yes ask is answered without quoting it, and the alternatives stay; the contact answer is
+  unchanged for a contact ask. Both bundles rebuilt.
+- Proof: `tests/edge/s3-r12g.test.ts` (offline, in gate.sh; fails on 6b02ea49a).

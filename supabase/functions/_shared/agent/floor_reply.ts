@@ -185,14 +185,51 @@ export function routesLine(unit: string | null | undefined): string | null {
 // The reply with code's floor appended, or null when the floor does not apply (nothing was dropped, the search found postings, no
 // empty search ran, or what is left still answers).
 export function floorReply(o: FloorIn): string | null {
-  if (!o.dropped || !o.emptyQuery || o.anyFound) return null;
+  if (!o.emptyQuery || o.anyFound) return null;
   const codeLines = o.codeLines ?? [];
   const ps = piecesOf(o.reply, codeLines, { droppedText: o.droppedText, ask: `${o.message} ${o.emptyQuery}` });
-  if (ps.some((x) => x.kind === "substance")) return null;
+  if (ps.some((x) => x.kind === "substance")) return searchedFirst(o, ps);
+  if (!o.dropped) return null;
   const placeNamed = !!searchedParams(o.emptyQuery, o.message).place;
   const kept = ps.filter((x) => x.kind === "notSent" || x.kind === "weak" || x.kind === "notOnFile")
     .map((x) => x.kind === "notOnFile" && placeNamed ? withoutPlaceClause(x.text) : x.text).filter((x) => x.trim()).join(" ");
   const floor = [searchedLine(o.emptyQuery, o.count, o.message), routesLine(o.routes)].filter(Boolean).join(" ");
   const code = ps.filter((x) => x.kind === "code").map((x) => x.text).join(" ");
   return [code, kept, floor, o.nextStep].filter((x) => x && x.trim()).join("\n\n");
+}
+// D-101 amendment (architect, 2026-11-23, S3 r12g, dev H035): on an empty-search turn whose kept text is only questions and offers (an offer
+// question, say) but never says what was searched, code puts (a)+(b), the searched line under every B1 rule, before the kept text;
+// the routes line only when the kept text has no question or offer of its own; never twice. Code's "couldn't verify" fallback never
+// follows a kept question: it goes when one stands. Null when nothing changes.
+const OFFER = /\b(?:want me to|would you like me to|shall i|should i|i can|i could|i'll|i will|you can (?:ask|say|text|tell|send|name|reply)|say ["“]|reply ["“]|text ["“]|tell me)\b/i;
+const OFFER_OR_QUESTION = /\?|\b(?:want me to|would you like me to|shall i|should i|i can|i could|i'll|i will|you can (?:ask|say|text|tell|send|name|reply)|say ["“]|reply ["“]|text ["“]|tell me)\b/i;
+function searchedFirst(o: FloorIn, ps: Piece[]): string | null {
+  const p = searchedParams(o.emptyQuery!, o.message);
+  const words = p.role.split(/\s+/).filter(Boolean).map(stem);
+  const city = p.place ? p.place.split(",")[0].toLowerCase() : null;
+  const said = ps.filter((x) => x.kind === "substance").map((x) => x.text);
+  const names = (t: string) => {
+    const ts = (t.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&+/-]*/gu) ?? []).map(stem);
+    return words.some((w) => ts.includes(w)) || (!!city && t.toLowerCase().includes(city)) || (!words.length && !city && /\bsearch(?:ed)?\b/i.test(t));
+  };
+  const keptText = said.join(" ");
+  const asks = OFFER_OR_QUESTION.test(keptText);
+  // (the shape it is for: what stands is only questions or offers, at least one an offer of what Trainee can do next; a kept statement
+  // or a plain question to the person stands as it is)
+  if (!said.length || !said.every((x) => OFFER_OR_QUESTION.test(x)) || !said.some((x) => OFFER.test(x))) return null;
+  let text = String(o.reply ?? "");
+  let changed = false;
+  // (the fallback paragraph, with any units it lists, goes when a kept question or offer stands)
+  const at = text.indexOf(FALLBACK_HEAD);
+  if (at >= 0 && asks) {
+    const end = text.indexOf("\n\n", at);
+    text = `${text.slice(0, at)}${end >= 0 ? text.slice(end + 2) : ""}`.replace(/\n{3,}/g, "\n\n").trim();
+    changed = true;
+  }
+  // (an offer naming the place, "… a wider area around <city>?", states nothing of what was searched: only a statement does)
+  if (!said.some((x) => !OFFER_OR_QUESTION.test(x) && names(x))) {
+    const line = [searchedLine(o.emptyQuery!, o.count, o.message), asks || /commonly start as/i.test(text) ? null : routesLine(o.routes)].filter(Boolean).join(" ");
+    if (!text.includes(line)) { text = [line, text].filter((x) => x.trim()).join("\n\n"); changed = true; }
+  }
+  return changed ? text : null;
 }

@@ -1211,3 +1211,8 @@ Branch `ag/s3-r12g`.
   named person; a yes every time), a standing-yes ask is answered without quoting it ("Not asking you each time would be a standing yes I will not keep: I ask for your yes every time …", which keeps tests/architect/dev-reply-quality.test.ts DEV-4), and the alternatives stay; the contact answer is
   unchanged for a contact ask. Both bundles rebuilt.
 - Proof: `tests/edge/s3-r12g.test.ts` (offline, in gate.sh; fails on 6b02ea49a).
+- H035 again (probe-r12g-full-1 at b87421597, haiku-only split): "Nothing has been sent or applied to. Do you want me to search a wider
+  area around Columbus?" and then code's "couldn't verify" fallback. The kept offer counted as substance, so the floor did not fire, and
+  the reply never said what was searched. D-101 amendment (architect): such a kept text, only questions and offers with no statement of
+  what was searched, gets the searched line first (B1 rules), no second step or routes line, and no fallback after a kept question.
+  Line: `agent/floor_reply.ts` searchedFirst. Proof: the amendment test in `tests/edge/s3-r12g.test.ts`.

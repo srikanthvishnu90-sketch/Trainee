@@ -635,6 +635,8 @@ const OTHER_OBJECT = /^\s+(?:on|for|of|about|regarding|to)\s+(?:the|your|a|an|my
 const DANGLING = /(?:[\s,;:—–(-]+(?:which|who|and|but|or|so|though|because|while|when|if|i['’]m|i\s+am|we['’]re|we\s+are|it['’]s|is|are|was|the|a|an))+[\s,;:—–(-]*$/i;
 const RECORD_TALK = /\b(?:record|recorded|goal|fact|facts|on file|saved|profile|noted|school|major|degree|location|city|preference)\b/i;
 const APPROVAL_TALK = /\b(?:applications?|apply|applying|submit\w*|drafts?|messages?|emails?|outreach|card|batch|queue\w*|send|sending|sent|cover letters?|resume|packet)\b/i;
+// What their own fact would be used for, said right after the claim: "to use it in applications", "before I put it on drafts".
+const FACT_USE = /^\s*(?:to|before\s+(?:i|we)(?:['’]ll)?|so\s+(?:i|we)\s+can)\s+(?:use|using|put|putting|apply|applying)\s+(?:it|this|that|them)\s+(?:in|on|to|for|across)\s+(?:your\s+|the\s+|any\s+)?(?:applications?|drafts?|cover letters?|resume|messages?|outreach|searches)\s*[.!?]?["')\]]*\s*$/i;
 export function confirmClaimsDropped(reply: string): string {
   // The sentence before, across lines too ("Your goal is saved.\nIt still needs your confirmation.").
   let prev = "";
@@ -644,7 +646,13 @@ export function confirmClaimsDropped(reply: string): string {
     if (x.trim()) prev = x;
     const about = RECORD_TALK.test(x) || (/^\W*(?:it|that|this)\b/i.test(x) && RECORD_TALK.test(before));
     const head = CONFIRM_HEAD.exec(x);
-    if (!head || !about || APPROVAL_TALK.test(x) || OTHER_OBJECT.test(x.slice(head.index + head[0].length))) return x;
+    if (!head || !about || OTHER_OBJECT.test(x.slice(head.index + head[0].length))) return x;
+    // S3 r12h (dev H005 on 8b1e34f78: "That's on your record as your goal, waiting for your yes to use it in applications."): an
+    // application, draft or card named before the claim is a real approval and the sentence stands. Named only after it, as what
+    // their fact would be used for ("to use it in applications"), the claim is still about the fact; any other approval word after
+    // it ("waiting for your yes to send the batch") keeps the sentence whole.
+    const tail = x.slice(head.index + head[0].length);
+    if (APPROVAL_TALK.test(x.slice(0, head.index)) || (APPROVAL_TALK.test(tail) && !FACT_USE.test(tail))) return x;
     // The claim alone in brackets goes with its brackets, and what follows them stands ("recorded (still waiting for your yes)
     // and used in search" keeps "and used in search").
     const unbracketed = x.replace(/\s*\(([^()]*)\)/g, (m, inner) => CONFIRM_HEAD.test(inner) && !OTHER_OBJECT.test(inner.slice((CONFIRM_HEAD.exec(inner)?.index ?? 0) + (CONFIRM_HEAD.exec(inner)?.[0].length ?? 0))) ? "" : m);

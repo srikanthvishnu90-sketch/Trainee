@@ -127,8 +127,8 @@ export function parseJudge(text: string): { pass: boolean; failed: string[]; sco
 }
 
 // The two Claude judges as one Judge (judges.ts). `call` sends one request with a config (run.ts and rejudge.ts each pass their
-// own metered, budget-gated callModel). A call that fails is retried once (a transient provider error is not a verdict); a
-// second failure is a judge error, which fails the item and makes the pass NOT A SCORE. Judge A grades with JUDGE_PROMPT,
+// own metered, budget-gated callModel). A call that fails is retried twice (a transient provider error is not a verdict; S3
+// sitting #9 p2 H036 lost a pass to one CLI HTTP 500); a third failure is a judge error, which fails the item and makes the pass NOT A SCORE. Judge A grades with JUDGE_PROMPT,
 // judge B with the checklist prompt and must quote evidence the code finds in the reply or the state.
 export type JudgeCall = (cfg: any, payload: any) => Promise<any>;
 const textOf = (res: any) => (res.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
@@ -139,7 +139,7 @@ export function makeJudge(o: { cfgA: any; cfgB: any; call: JudgeCall }): Judge {
     parseJudgeB(textOf(await o.call(o.cfgB, { system: JUDGE_B_SYSTEM, messages: [{ role: "user", content: judgeBPrompt(item, reply, state, outcomeOf) }], max_tokens: JUDGE_B_MAX_TOKENS })), item, reply, state);
   const settle = async (ask: typeof askA, item: EvalItem, reply: string, state: unknown) => {
     let last: unknown = null;
-    for (let k = 0; k < 2; k++) { try { return await ask(item, reply, state); } catch (e) { last = e; } }
+    for (let k = 0; k < 3; k++) { try { return await ask(item, reply, state); } catch (e) { last = e; } }
     return { pass: false, failed: item.must, score: 1, note: `judge error: ${last instanceof Error ? last.message : String(last)}` };
   };
   return async (item, reply, state) => {

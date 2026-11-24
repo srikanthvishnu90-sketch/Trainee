@@ -148,10 +148,11 @@ function placeOf(words: string[]): { place: string | null; at: number; n: number
   }
   return { place: null, at: -1, n: 0 };
 }
+const NOT_A_LIMIT = /(?<![\p{L}])(?:(?:not|no|never|without|nothing)\s+(?:a\s+|an\s+|any\s+)?(?:\p{L}+\s+)?(?:days|nights|weekends|evenings|remote|hybrid|on-?site|in-?person|part[- ]?time|full[- ]?time|contract|(?:day|night|evening|weekend)s?[- ]?shifts?)|(?:few|couple(?:\s+of)?|last|past|next|\d+|several|many)\s+(?:days|nights|weekends|evenings)|(?:on-?site|in-?person)\s+(?:round|interview|visit|meeting|day)s?|(?:i(?:['’]|\s)?m|i\s+am|as)\s+an?\s+(?:senior|junior)(?:\s+(?:in|at)\b)?|(?:my|the|this|a)\s+contract\s+(?:ends?|ended|is|was|expires?|runs?))(?![\p{L}])/giu;
 const constraintsOf = (t: string) => { const out: string[] = []; for (const [re, say] of CONSTRAINT) for (const m of String(t ?? "").matchAll(re)) { const c = say(m); if (!out.includes(c)) out.push(c); } return out; };
 const sameCity = (a: string | null, b: string | null) => !!a && !!b && a.split(",")[0].toLowerCase() === b.split(",")[0].toLowerCase();
 // The search's own words, parsed, cleaned and capped, and only what the person's message this turn also has.
-export function searchedParams(query: string, message = ""): { role: string; place: string | null; constraints: string[] } {
+export function searchedParams(query: string, message = ""): { role: string; place: string | null; constraints: string[]; unfiltered: string[] } {
   let q = clean(String(query ?? "").replace(PAY, " ")).slice(0, 300);
   const constraints0 = constraintsOf(q);
   for (const [re] of CONSTRAINT) q = q.replace(re, " ");
@@ -170,12 +171,17 @@ export function searchedParams(query: string, message = ""): { role: string; pla
   const place = p.place && theirs.some((x) => sameCity(p.place, x)) ? p.place : null;
   const mCons = constraintsOf(m);
   const constraints = constraints0.filter((c) => mCons.includes(c));
-  return { role, place, constraints };
+  // (S3 r12h, dev H035: they typed "days only" and the search ran without it: what they asked for and the search did not filter
+  // by is said in code's own words for it, never as part of the search, so the line shows it was understood and does not claim it ran)
+  // (review of f28bd02b8: a word that only looks like a limit is not one: "posted in the last few days", "the onsite round", "I'm a
+  // senior in college", "my contract ends", or one they ruled out, "not remote", "no nights"; at most two are said)
+  const unfiltered = constraintsOf(m.replace(NOT_A_LIMIT, " ")).filter((c) => !constraints0.includes(c)).slice(0, 2);
+  return { role, place, constraints, unfiltered };
 }
 const countSaid = (n: number) => n === 1 ? "found 1 posting" : `found ${n} postings`;
 export function searchedLine(query: string, count: number, message = ""): string {
   const p = searchedParams(query, message);
-  return `I searched for ${p.role ? `${p.role} roles` : "roles"}${p.place ? ` near ${p.place}` : ""}${p.constraints.length ? ` (${p.constraints.join(", ")})` : ""} and ${countSaid(count)}.`;
+  return `I searched for ${p.role ? `${p.role} roles` : "roles"}${p.place ? ` near ${p.place}` : ""}${p.constraints.length ? ` (${p.constraints.join(", ")})` : ""} and ${countSaid(count)}.${p.unfiltered.length ? ` That search did not filter for ${p.unfiltered.join(" or ")}.` : ""}`;
 }
 // (c) the entry-route unit as general career knowledge: the ledger's own words, with its label said plainly.
 export function routesLine(unit: string | null | undefined): string | null {

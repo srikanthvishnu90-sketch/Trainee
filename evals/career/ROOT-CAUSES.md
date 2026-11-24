@@ -1216,3 +1216,8 @@ Branch `ag/s3-r12g`.
   the reply never said what was searched. D-101 amendment (architect): such a kept text, only questions and offers with no statement of
   what was searched, gets the searched line first (B1 rules), no second step or routes line, and no fallback after a kept question.
   Line: `agent/floor_reply.ts` searchedFirst. Proof: the amendment test in `tests/edge/s3-r12g.test.ts`.
+- H034 (probe-r12g-full-2 at b87421597, both judges): "Nothing has been sent or applied for. Saved: you're a cashier … Which of those
+  roles sounds closest to what you want?" after the pipeline dropped the roles. The model's "Saved: …" receipt counted as substance, so
+  the floor did not fire, and the reference back stayed. Fix (D-101 amended): a "Saved: …" receipt is boilerplate (kept, unchanged,
+  no answer); the reference back to the dropped list goes and the floor adds the searched line, the routes and one step. Line:
+  `agent/floor_reply.ts` piecesOf. Proof: the H034 amendment test in `tests/edge/s3-r12g.test.ts`.

@@ -46,7 +46,9 @@ export interface FloorIn {
 
 // What a sentence of the kept reply is. Only "substance" answers. "weak" (a pronoun sentence naming nothing of the ask or the search)
 // and the boilerplate are kept but answer nothing; "back", "fallback" and "step" are taken out when the floor is added.
-type Kind = "code" | "step" | "notSent" | "notOnFile" | "fallback" | "back" | "weak" | "substance";
+type Kind = "code" | "step" | "notSent" | "saved" | "notOnFile" | "fallback" | "back" | "weak" | "substance";
+// (D-101 amendment, S3 r12g, dev H034: a "Saved: …" receipt of what was recorded is kept as written, and answers nothing)
+const SAVED_RECEIPT = /^\W*saved\s*:/i;
 interface Piece { text: string; kind: Kind }
 // Code's own next-step lines (next_step.ts): the floor gives its own, so one already there is not kept twice.
 const STEP = (s: string) => s === SEARCH_AGAIN || /^Say "watch for .+ roles" and I'll save a watch for them on your list\.$/.test(s);
@@ -74,7 +76,7 @@ function piecesOf(reply: string, codeLines: readonly string[], o: { droppedText?
       for (const c of codeLines) if (c && rest.includes(c)) { out.push({ text: c, kind: "code" }); rest = rest.split(c).join(" "); }
       for (const s of splitSentences(rest).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x))) {
         const cw = contentWords(s);
-        const kind: Kind = STEP(s) ? "step" : NOT_SENT.test(s) ? "notSent" : NOT_ON_FILE.test(s) && notOnFileOnly(s) ? "notOnFile"
+        const kind: Kind = STEP(s) ? "step" : NOT_SENT.test(s) ? "notSent" : SAVED_RECEIPT.test(s) ? "saved" : NOT_ON_FILE.test(s) && notOnFileOnly(s) ? "notOnFile"
           : LIST_REF.test(s) && listDropped ? "back"
           : PRONOUN_REF.test(s) && !/\d/.test(s) && cw.length <= 2 && !cw.some((w) => askWords.has(w)) ? "weak" : "substance";
         out.push({ text: s, kind });
@@ -191,7 +193,7 @@ export function floorReply(o: FloorIn): string | null {
   if (ps.some((x) => x.kind === "substance")) return searchedFirst(o, ps);
   if (!o.dropped) return null;
   const placeNamed = !!searchedParams(o.emptyQuery, o.message).place;
-  const kept = ps.filter((x) => x.kind === "notSent" || x.kind === "weak" || x.kind === "notOnFile")
+  const kept = ps.filter((x) => x.kind === "notSent" || x.kind === "saved" || x.kind === "weak" || x.kind === "notOnFile")
     .map((x) => x.kind === "notOnFile" && placeNamed ? withoutPlaceClause(x.text) : x.text).filter((x) => x.trim()).join(" ");
   const floor = [searchedLine(o.emptyQuery, o.count, o.message), routesLine(o.routes)].filter(Boolean).join(" ");
   const code = ps.filter((x) => x.kind === "code").map((x) => x.text).join(" ");

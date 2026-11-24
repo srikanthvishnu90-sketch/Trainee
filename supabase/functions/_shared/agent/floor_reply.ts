@@ -46,7 +46,9 @@ export interface FloorIn {
 
 // What a sentence of the kept reply is. Only "substance" answers. "weak" (a pronoun sentence naming nothing of the ask or the search)
 // and the boilerplate are kept but answer nothing; "back", "fallback" and "step" are taken out when the floor is added.
-type Kind = "code" | "step" | "notSent" | "notOnFile" | "fallback" | "back" | "weak" | "substance";
+type Kind = "code" | "step" | "notSent" | "saved" | "notOnFile" | "fallback" | "back" | "weak" | "substance";
+// (D-101 amendment, S3 r12g, dev H034: a "Saved: …" receipt of what was recorded is kept as written, and answers nothing)
+const SAVED_RECEIPT = /^\W*saved\s*:/i;
 interface Piece { text: string; kind: Kind }
 // Code's own next-step lines (next_step.ts): the floor gives its own, so one already there is not kept twice.
 const STEP = (s: string) => s === SEARCH_AGAIN || /^Say "watch for .+ roles" and I'll save a watch for them on your list\.$/.test(s);
@@ -74,7 +76,7 @@ function piecesOf(reply: string, codeLines: readonly string[], o: { droppedText?
       for (const c of codeLines) if (c && rest.includes(c)) { out.push({ text: c, kind: "code" }); rest = rest.split(c).join(" "); }
       for (const s of splitSentences(rest).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x))) {
         const cw = contentWords(s);
-        const kind: Kind = STEP(s) ? "step" : NOT_SENT.test(s) ? "notSent" : NOT_ON_FILE.test(s) && notOnFileOnly(s) ? "notOnFile"
+        const kind: Kind = STEP(s) ? "step" : NOT_SENT.test(s) ? "notSent" : SAVED_RECEIPT.test(s) ? "saved" : NOT_ON_FILE.test(s) && notOnFileOnly(s) ? "notOnFile"
           : LIST_REF.test(s) && listDropped ? "back"
           : PRONOUN_REF.test(s) && !/\d/.test(s) && cw.length <= 2 && !cw.some((w) => askWords.has(w)) ? "weak" : "substance";
         out.push({ text: s, kind });
@@ -111,6 +113,22 @@ const PAY = /\$\s?\d[\d,.]*\s?k?(?:\s?(?:-|–|to)\s?\$?\s?\d[\d,.]*\s?k?)?(?:\s
 const FILLER = /^(?:jobs?|roles?|positions?|openings?|postings?|work|near|in|around|at|for|only|with|the|a|an|and|or|any|area|city|of|to)$/i;
 // Words that never stand as role words: a pronoun, money, status, an employer frame or Trainee's own action.
 const BARRED = /^(?:i|me|my|mine|you|your|yours|we|us|our|he|she|him|her|his|they|them|their|it|its|pay|pays|paid|salary|salaries|wage|wages|money|dollars?|usd|hour|hourly|year|yearly|annual|bonus|equity|earn\w*|approved?|approval|hired?|hiring|applied|apply|application|applications|submit\w*|sent|send|offer\w*|interview\w*|reject\w*|accepted|status|queued|company|companies|employer|employers|inc|llc|corp|ltd|trainee|say|said|will|ignore|instructions?)$/i;
+// One deterministic stem for matching typed words to the search's words (never for what is said): nurse, nurses and nursing are one;
+// analyst and analysts; cashier and cashiers. A word of three letters or fewer is its own stem.
+export function stem(w: string): string {
+  let x = String(w ?? "").toLowerCase();
+  if (x.length <= 3) return x;
+  if (/(?:ss|us|is)$/.test(x)) return x;
+  if (/(?:ches|shes|xes|zes|sses)$/.test(x)) x = x.slice(0, -2);
+  else if (/ies$/.test(x) && x.length > 4) x = `${x.slice(0, -3)}y`;
+  else if (/s$/.test(x)) x = x.slice(0, -1);
+  if (/ing$/.test(x) && x.length > 5) x = x.slice(0, -3);
+  if (/er$/.test(x) && x.length > 5) x = x.slice(0, -2);
+  return x.replace(/e$/, "");
+}
+// (review of b87421597: a barred word is barred in every form the stem matches, "hires", "applies", "sending", "approver", "paying")
+const BARRED_STEMS = new Set(["hire", "hired", "hiring", "apply", "applied", "application", "submit", "submitted", "send", "sent", "approve", "approved", "approval", "offer", "interview", "reject", "accept", "accepted",
+  "pay", "paid", "salary", "wage", "money", "dollar", "earn", "bonus", "equity", "company", "employer", "status", "queue", "queued", "trainee"].map((w) => stem(w)));
 const clean = (t: string) => String(t ?? "").replace(/[^\p{L}\p{N}\s&+/-]/gu, " ").replace(/\s+/g, " ").trim();
 const titleCase = (t: string) => t.replace(/(^|[\s-])(\p{L})/gu, (_m, s: string, c: string) => s + c.toUpperCase());
 const capped = (ws: string[]) => { const out: string[] = []; for (const w of ws) { if (out.length >= 6 || [...out, w].join(" ").length > 60) break; out.push(w); } return out; };
@@ -141,9 +159,11 @@ export function searchedParams(query: string, message = ""): { role: string; pla
   const p = placeOf(words);
   if (p.place) words.splice(p.at, p.n);
   const m = clean(message);
-  const has = new Set(m.toLowerCase().split(/\s+/).filter(Boolean));
-  const role0 = capped(words.filter((w) => !FILLER.test(w) && has.has(w.toLowerCase())));
-  const role = role0.some((w) => BARRED.test(w)) ? "" : role0.join(" ");
+  // (S3 r12g, dev H035: they typed "nurses", the search said "nurse": a typed word matches a query word through one small,
+  // deterministic stem, a plural -s/-es or an -ing/-er ending, and the query's own form is said)
+  const has = new Set(m.toLowerCase().split(/\s+/).filter(Boolean).map(stem));
+  const role0 = capped(words.filter((w) => !FILLER.test(w) && has.has(stem(w.toLowerCase()))));
+  const role = role0.some((w) => BARRED.test(w) || BARRED_STEMS.has(stem(w))) ? "" : role0.join(" ");
   // (n5: the place counts as theirs when the place their message parses to is the searched one)
   const mw = m.split(/\s+/).filter(Boolean), theirs: string[] = [];
   for (let k = 0; k < 5; k++) { const x = placeOf(mw); if (!x.place) break; theirs.push(x.place); mw.splice(x.at, x.n); }
@@ -167,14 +187,51 @@ export function routesLine(unit: string | null | undefined): string | null {
 // The reply with code's floor appended, or null when the floor does not apply (nothing was dropped, the search found postings, no
 // empty search ran, or what is left still answers).
 export function floorReply(o: FloorIn): string | null {
-  if (!o.dropped || !o.emptyQuery || o.anyFound) return null;
+  if (!o.emptyQuery || o.anyFound) return null;
   const codeLines = o.codeLines ?? [];
   const ps = piecesOf(o.reply, codeLines, { droppedText: o.droppedText, ask: `${o.message} ${o.emptyQuery}` });
-  if (ps.some((x) => x.kind === "substance")) return null;
+  if (ps.some((x) => x.kind === "substance")) return searchedFirst(o, ps);
+  if (!o.dropped) return null;
   const placeNamed = !!searchedParams(o.emptyQuery, o.message).place;
-  const kept = ps.filter((x) => x.kind === "notSent" || x.kind === "weak" || x.kind === "notOnFile")
+  const kept = ps.filter((x) => x.kind === "notSent" || x.kind === "saved" || x.kind === "weak" || x.kind === "notOnFile")
     .map((x) => x.kind === "notOnFile" && placeNamed ? withoutPlaceClause(x.text) : x.text).filter((x) => x.trim()).join(" ");
   const floor = [searchedLine(o.emptyQuery, o.count, o.message), routesLine(o.routes)].filter(Boolean).join(" ");
   const code = ps.filter((x) => x.kind === "code").map((x) => x.text).join(" ");
   return [code, kept, floor, o.nextStep].filter((x) => x && x.trim()).join("\n\n");
+}
+// D-101 amendment (architect, 2026-11-23, S3 r12g, dev H035): on an empty-search turn whose kept text is only questions and offers (an offer
+// question, say) but never says what was searched, code puts (a)+(b), the searched line under every B1 rule, before the kept text;
+// the routes line only when the kept text has no question or offer of its own; never twice. Code's "couldn't verify" fallback never
+// follows a kept question: it goes when one stands. Null when nothing changes.
+const OFFER = /\b(?:want me to|would you like me to|shall i|should i|i can|i could|i'll|i will|you can (?:ask|say|text|tell|send|name|reply)|say ["“]|reply ["“]|text ["“]|tell me)\b/i;
+const OFFER_OR_QUESTION = /\?|\b(?:want me to|would you like me to|shall i|should i|i can|i could|i'll|i will|you can (?:ask|say|text|tell|send|name|reply)|say ["“]|reply ["“]|text ["“]|tell me)\b/i;
+function searchedFirst(o: FloorIn, ps: Piece[]): string | null {
+  const p = searchedParams(o.emptyQuery!, o.message);
+  const words = p.role.split(/\s+/).filter(Boolean).map(stem);
+  const city = p.place ? p.place.split(",")[0].toLowerCase() : null;
+  const said = ps.filter((x) => x.kind === "substance").map((x) => x.text);
+  const names = (t: string) => {
+    const ts = (t.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&+/-]*/gu) ?? []).map(stem);
+    return words.some((w) => ts.includes(w)) || (!!city && t.toLowerCase().includes(city)) || (!words.length && !city && /\bsearch(?:ed)?\b/i.test(t));
+  };
+  const keptText = said.join(" ");
+  const asks = OFFER_OR_QUESTION.test(keptText);
+  // (the shape it is for: what stands is only questions or offers, at least one an offer of what Trainee can do next; a kept statement
+  // or a plain question to the person stands as it is)
+  if (!said.length || !said.every((x) => OFFER_OR_QUESTION.test(x)) || !said.some((x) => OFFER.test(x))) return null;
+  let text = String(o.reply ?? "");
+  let changed = false;
+  // (the fallback paragraph, with any units it lists, goes when a kept question or offer stands)
+  const at = text.indexOf(FALLBACK_HEAD);
+  if (at >= 0 && asks) {
+    const end = text.indexOf("\n\n", at);
+    text = `${text.slice(0, at)}${end >= 0 ? text.slice(end + 2) : ""}`.replace(/\n{3,}/g, "\n\n").trim();
+    changed = true;
+  }
+  // (an offer naming the place, "… a wider area around <city>?", states nothing of what was searched: only a statement does)
+  if (!said.some((x) => !OFFER_OR_QUESTION.test(x) && names(x))) {
+    const line = [searchedLine(o.emptyQuery!, o.count, o.message), asks || /commonly start as/i.test(text) ? null : routesLine(o.routes)].filter(Boolean).join(" ");
+    if (!text.includes(line)) { text = [line, text].filter((x) => x.trim()).join("\n\n"); changed = true; }
+  }
+  return changed ? text : null;
 }

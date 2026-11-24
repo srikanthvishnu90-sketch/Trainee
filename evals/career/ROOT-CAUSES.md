@@ -1197,3 +1197,27 @@ ledger of H035 and H034.
   is on your tracker now.", "Your applications list now includes <employer>."), passes `loop.ts unbackedClaims`. Its fix needs claim
   patterns that tell a state written this turn from a state read (list_applications) or a general statement about the feature, under
   brain-receipt-completeness.
+
+## S3 sitting #8 on 6b02ea49a (subscription, dev, 5 passes: 38, 37, 38, 38, 36): H035 and H018
+Branch `ag/s3-r12g`.
+- H035: the D-101 floor said "I searched for roles near Columbus (day shift) …": the person typed a plural of the search's role word,
+  and the floor's typed-word check (review B1 of 4908e3df7) matched words exactly, so the role half was dropped. Line:
+  `agent/floor_reply.ts` searchedParams. Fix: typed and searched words are compared through one deterministic stem (a plural -s/-es,
+  -ies, an -ing or -er ending); the search's own form is said; cleaning, caps and barred words are unchanged.
+- H018: an ask to share their resume with "your whole network" without being asked each time got the router's contact-details answer
+  first ("I don't have people's contact details …"), though no contact was asked for, and a fact that quoted their standing-permission
+  words back, which a judge read as wording offered to them. Line: `142-career-router.js` handlePeopleMatching (people_matching_stop).
+  Fix: with no ask for people or contacts the answer is about the resume (no network to share with; one approved draft at a time to a
+  named person; a yes every time), a standing-yes ask is answered without quoting it ("Not asking you each time would be a standing yes I will not keep: I ask for your yes every time …", which keeps tests/architect/dev-reply-quality.test.ts DEV-4), and the alternatives stay; the contact answer is
+  unchanged for a contact ask. Both bundles rebuilt.
+- Proof: `tests/edge/s3-r12g.test.ts` (offline, in gate.sh; fails on 6b02ea49a).
+- H035 again (probe-r12g-full-1 at b87421597, haiku-only split): "Nothing has been sent or applied to. Do you want me to search a wider
+  area around Columbus?" and then code's "couldn't verify" fallback. The kept offer counted as substance, so the floor did not fire, and
+  the reply never said what was searched. D-101 amendment (architect): such a kept text, only questions and offers with no statement of
+  what was searched, gets the searched line first (B1 rules), no second step or routes line, and no fallback after a kept question.
+  Line: `agent/floor_reply.ts` searchedFirst. Proof: the amendment test in `tests/edge/s3-r12g.test.ts`.
+- H034 (probe-r12g-full-2 at b87421597, both judges): "Nothing has been sent or applied for. Saved: you're a cashier … Which of those
+  roles sounds closest to what you want?" after the pipeline dropped the roles. The model's "Saved: …" receipt counted as substance, so
+  the floor did not fire, and the reference back stayed. Fix (D-101 amended): a "Saved: …" receipt is boilerplate (kept, unchanged,
+  no answer); the reference back to the dropped list goes and the floor adds the searched line, the routes and one step. Line:
+  `agent/floor_reply.ts` piecesOf. Proof: the H034 amendment test in `tests/edge/s3-r12g.test.ts`.

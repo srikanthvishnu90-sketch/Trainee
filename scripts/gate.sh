@@ -124,6 +124,7 @@ edge_tests=(
   tests/edge/s3-r12c-review-871.test.ts
   tests/edge/s3-r12e.test.ts
   tests/edge/s3-r12f.test.ts
+  tests/edge/s3-r12g.test.ts
   tests/edge/eval-support-judge.test.ts
   tests/edge/conversation-hardening.test.ts
   tests/edge/career-ingest.test.ts

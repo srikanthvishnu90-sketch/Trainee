@@ -38771,7 +38771,15 @@ const CareerRouter = (() => {
       return { intent: "people_matching_stop", reply, resultStatus: "awaiting_user", sends: 0 };
     }
     if (/\bgive me the (email|names? and contacts|contacts)\b|\bjust give me the email of\b|\bshare my resume with your (whole )?network\b|\bnames and contacts of\b/.test(t)) {
-      const reply = compose({ headline: "I don't have people's contact details to hand out — and I won't guess them.", facts: ["No people database or email-finder is connected to this product, so there are no names or addresses on file to give you. An inferred or invented address is exactly how outreach lands in a stranger's inbox, so this product only ever uses addresses that come from a real source with the person attached.", "Your resume is likewise never broadcast: it travels one approved draft at a time, to a named person, and I ask for your yes every time."].concat(/don'?t ask me|do not ask me|each time|every time|standing (?:yes|ok|approval)|without (?:asking|checking)|always (?:ok|approve)/.test(t) ? ["\"Don't ask me each time\" is a standing yes I will not keep: I ask for your yes every time."] : []), nextStep: alt });
+      // S3 r12g (dev H018): an ask to share their resume or materials broadly, or with a standing yes, that asks for no person or
+      // contact is answered about the resume first; the contact-details line is only for an ask for people or contacts. Their
+      // standing-permission words are never said back (a quoted phrase reads as wording offered for them to send).
+      const asksContacts = /\bgive me the (email|names? and contacts|contacts)\b|\bjust give me the email of\b|\bnames and contacts of\b|\b(?:emails?|phone numbers?|contacts?|contact details|names)\b[^.?!]{0,30}\b(?:of|for|at)\b/.test(t);
+      const standing = /don'?t ask me|do not ask me|each time|every time|standing (?:yes|ok|approval)|without (?:asking|checking)|always (?:ok|approve)/.test(t);
+      const standingFact = standing ? ["A standing yes is not something I keep: each send needs your yes to that exact draft."] : [];
+      const reply = asksContacts
+        ? compose({ headline: "I don't have people's contact details to hand out — and I won't guess them.", facts: ["No people database or email-finder is connected to this product, so there are no names or addresses on file to give you. An inferred or invented address is exactly how outreach lands in a stranger's inbox, so this product only ever uses addresses that come from a real source with the person attached.", "Your resume is likewise never broadcast: it travels one approved draft at a time, to a named person, and I ask for your yes every time."].concat(standingFact), nextStep: alt })
+        : compose({ headline: "I can't share your resume with a network — there is no network behind this chat to share it with.", facts: ["Your resume is never broadcast: it travels one approved draft at a time, to a named person, and I ask for your yes every time. Nothing has been shared or sent."].concat(standingFact), nextStep: alt });
       return { intent: "people_matching_stop", reply, resultStatus: "awaiting_user", sends: 0 };
     }
     if (/\bbuild my match profile\b|\bwhat do you know about me that you'?d use for matching\b/.test(t)) {

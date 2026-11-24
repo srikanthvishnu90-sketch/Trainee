@@ -1208,6 +1208,6 @@ Branch `ag/s3-r12g`.
   first ("I don't have people's contact details …"), though no contact was asked for, and a fact that quoted their standing-permission
   words back, which a judge read as wording offered to them. Line: `142-career-router.js` handlePeopleMatching (people_matching_stop).
   Fix: with no ask for people or contacts the answer is about the resume (no network to share with; one approved draft at a time to a
-  named person; a yes every time), a standing-yes ask is answered without quoting it, and the alternatives stay; the contact answer is
+  named person; a yes every time), a standing-yes ask is answered without quoting it ("Not asking you each time would be a standing yes I will not keep: I ask for your yes every time …", which keeps tests/architect/dev-reply-quality.test.ts DEV-4), and the alternatives stay; the contact answer is
   unchanged for a contact ask. Both bundles rebuilt.
 - Proof: `tests/edge/s3-r12g.test.ts` (offline, in gate.sh; fails on 6b02ea49a).

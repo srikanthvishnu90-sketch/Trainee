@@ -1021,7 +1021,7 @@ export function careerTools(deps: {
     },
     {
       name: "interview_brief", effect: "read",
-      description: "A pre-interview brief for a company and role: what the company's record on file says (with source labels, or that there is no record), the role's top question types, the posting's skill words, and a 10-point prep plan. Relay its text; never add company facts it does not have. Its question types are the role's in general, not what this company asks: say them as typical for the role (\"analyst interviews usually cover ...\"), never as something the brief or the company says about this firm.",
+      description: "A pre-interview brief for a company and role: what the company's record on file says (with source labels, or that there is no record), the role's top question types, the posting's skill words, and a 10-point prep plan. Relay its text; never add company facts it does not have. Question types are typical for the role, never what this firm asks.",
       input_schema: obj({ company: str("Employer name as the person said it"), role: str("The role, e.g. 'data analyst'") }, ["company"]),
       run: async (i) => {
         const company = String(i.company ?? "").trim(), role = String(i.role ?? "").trim();

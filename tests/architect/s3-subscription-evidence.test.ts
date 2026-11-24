@@ -152,7 +152,7 @@ Deno.test("D-091 refusal: a run that is not apiKeySource none, or not a subscrip
 Deno.test("D-091 refusal: four passes, a judge error (NOT A SCORE), another brain, another scorer", async () => {
   const four = evidence(); four.passes.pop();
   await refused(world(four), /4 passes, not 5/);
-  const err = evidence(); err.passes[0].items[0].judge_raw = [{ judge: "a", error: "HTTP 500" }, { judge: "a", error: "HTTP 500" }, err.passes[0].items[0].judge_raw[1]];
+  const err = evidence(); err.passes[0].items[0].judge_raw = [{ judge: "a", error: "HTTP 500" }, { judge: "a", error: "HTTP 500" }, { judge: "a", error: "HTTP 500" }, err.passes[0].items[0].judge_raw[1]]; // S3 r12h: three failed attempts
   await refused(world(err), /judge errored.*NOT A SCORE/);
   const brain = evidence(); brain.brain = "router";
   await refused(world(brain), /brain router, but the candidate serves staged/);
@@ -180,10 +180,15 @@ Deno.test("D-091 refusal: raw judge answers the runner cannot have written; the 
   await refused(world(twice), /pass 1 .*not what the runner records/);
   const one = evidence(); one.passes[0].items[1].judge_raw = [{ judge: "a", error: "HTTP 500" }, one.passes[0].items[1].judge_raw[1]]; // one failed attempt and no retry
   await refused(world(one), /pass 1 .*not what the runner records/);
+  const two = evidence(); two.passes[0].items[1].judge_raw = [{ judge: "a", error: "HTTP 500" }, { judge: "a", error: "HTTP 500" }, two.passes[0].items[1].judge_raw[1]]; // S3 r12h: two failed attempts and no third
+  await refused(world(two), /pass 1 .*not what the runner records/);
   const junk = evidence(); junk.passes[0].items[0].judge_raw.push({ judge: "c", text: "anything" }); // PROBE7
   await refused(world(junk), /pass 1 .*a judge other than a and b/);
   const retry = evidence(); retry.passes[0].items[2].judge_raw = [{ judge: "a", text: "not json" }, { judge: "a", text: rawA(SET[2], true) }, retry.passes[0].items[2].judge_raw[1]];
   await accepted(world(retry));
+  // S3 r12h (sitting #9 p2 H036): two transient failures, then a verdict on the third attempt.
+  const third = evidence(); third.passes[0].items[2].judge_raw = [{ judge: "a", error: "HTTP 500" }, { judge: "a", error: "HTTP 500" }, { judge: "a", text: rawA(SET[2], true) }, third.passes[0].items[2].judge_raw[1]];
+  await accepted(world(third));
 });
 Deno.test("D-091: the code-counted outcome decides beside the judges (a real expected state)", async () => {
   // A dev case whose end state sent a draft: both judges pass it, but checkExpect's default sent: 0 fails it.
@@ -358,9 +363,9 @@ Deno.test("D-091 refusal (mutation review): an old evidence version, judge B's m
   await refused(ws, /the set has 38 cases \(37 distinct\)/);
   const rfc = evidence(); rfc.passes[2].run_at = "Mon, 16 Nov 2026 13:30:00 GMT"; // Date.parse reads it; run.ts never writes it
   await refused(world(rfc), /not an ISO time/);
-  const three = evidence(); const i0 = three.passes[0].items[0];
-  i0.judge_raw = [{ judge: "a", text: "x" }, { judge: "a", text: "y" }, { judge: "a", text: rawA(SET[0], true) }, i0.judge_raw[1]];
-  await refused(world(three), /pass 1 .*not what the runner records/);
+  const four = evidence(); const i0 = four.passes[0].items[0]; // S3 r12h: makeJudge makes at most three attempts
+  i0.judge_raw = [{ judge: "a", text: "x" }, { judge: "a", text: "y" }, { judge: "a", text: "z" }, { judge: "a", text: rawA(SET[0], true) }, i0.judge_raw[1]];
+  await refused(world(four), /pass 1 .*not what the runner records/);
   // A measured SHA without reply code (and a candidate without it) is never a measurement, whatever the evidence says.
   const w = world(); w.trees = {}; const ev = { ...evidence(), reply_tree: null };
   ok(/reply-code tree .* is not the reply code of the measured cccccccccc/.test((await verifySubscriptionEvidence(JSON.stringify(ev), { path: rec(ev).path, candidate: C, lineage: [C], tree: treeOf(w), setText: SET_TEXT, brain: "staged" })).why));

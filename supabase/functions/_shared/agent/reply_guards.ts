@@ -650,9 +650,10 @@ export function confirmClaimsDropped(reply: string): string {
     // S3 r12h (dev H005 on 8b1e34f78: "That's on your record as your goal, waiting for your yes to use it in applications."): an
     // application, draft or card named before the claim is a real approval and the sentence stands. Named only after it, as what
     // their fact would be used for ("to use it in applications"), the claim is still about the fact; any other approval word after
-    // it ("waiting for your yes to send the batch") keeps the sentence whole.
+    // it ("waiting for your yes to send the batch") keeps the sentence whole, and so does an approval word in the sentence before
+    // (review of #876: "I rewrote your cover letter opening. It's saved, waiting for your yes to use it in applications.").
     const tail = x.slice(head.index + head[0].length);
-    if (APPROVAL_TALK.test(x.slice(0, head.index)) || (APPROVAL_TALK.test(tail) && !FACT_USE.test(tail))) return x;
+    if (APPROVAL_TALK.test(x.slice(0, head.index)) || (APPROVAL_TALK.test(tail) && (!FACT_USE.test(tail) || APPROVAL_TALK.test(before)))) return x;
     // The claim alone in brackets goes with its brackets, and what follows them stands ("recorded (still waiting for your yes)
     // and used in search" keeps "and used in search").
     const unbracketed = x.replace(/\s*\(([^()]*)\)/g, (m, inner) => CONFIRM_HEAD.test(inner) && !OTHER_OBJECT.test(inner.slice((CONFIRM_HEAD.exec(inner)?.index ?? 0) + (CONFIRM_HEAD.exec(inner)?.[0].length ?? 0))) ? "" : m);

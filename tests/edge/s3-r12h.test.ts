@@ -19,5 +19,6 @@ Deno.test("S3 r12h / H005: real approvals stand, named before or after the claim
     "It's saved as your goal, waiting for your yes to send the 3 applications.",
     "Your resume is saved and waiting for your yes to use it in applications.",
     "Recorded as your goal, waiting for your yes to use it in applications and send the batch.",
+    "I rewrote your cover letter opening. It's saved, waiting for your yes to use it in applications.",
   ]) eq(confirmClaimsDropped(r), r, r);
 });

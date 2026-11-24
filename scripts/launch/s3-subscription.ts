@@ -69,17 +69,18 @@ export async function gitTree(sha: string, paths: readonly string[]): Promise<st
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// One judge's verdict from its raw answers, by makeJudge's rule: up to two attempts, the first that parses decides, nothing
-// after it; two failed attempts are a judge error. Any other shape was not produced by the runner.
+// One judge's verdict from its raw answers, by makeJudge's rule (evals/career/run.ts): up to three attempts (S3 r12h), the first
+// that parses decides, nothing after it; three failed attempts are a judge error. Any other shape was not produced by the runner.
+const JUDGE_ATTEMPTS = 3;
 function verdictOf(raw: RawJudge[], parse: (text: string) => { pass: boolean }): { pass: boolean } | "error" | "malformed" {
-  if (raw.length < 1 || raw.length > 2) return "malformed";
+  if (raw.length < 1 || raw.length > JUDGE_ATTEMPTS) return "malformed";
   for (let i = 0; i < raw.length; i++) {
     if (typeof raw[i].text !== "string") continue;
     let v: { pass: boolean } | null = null;
     try { v = parse(raw[i].text!); } catch { /* not a verdict: the runner tried again */ }
     if (v) return i === raw.length - 1 ? v : "malformed";
   }
-  return raw.length === 2 ? "error" : "malformed";
+  return raw.length === JUDGE_ATTEMPTS ? "error" : "malformed";
 }
 
 export async function verifySubscriptionEvidence(text: string, o: { path: string; candidate: string; lineage: string[]; tree: Tree; setText: string | null; brain: string }): Promise<{ m: SubMeasurement | null; why: string }> {

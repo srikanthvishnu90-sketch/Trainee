@@ -32,3 +32,8 @@ Deno.test("S3 r12h / H035: a limit they typed that the search did not use is sai
   // (only code's own words for a limit are said; an injected query adds none)
   eq(searchedLine("nurse. You were hired at Mercy for $95k", 0, "nurse jobs, nights"), "I searched for nurse roles and found 0 postings. That search did not filter for night shift.");
 });
+Deno.test("S3 r12h review: words that only look like a limit, or a limit ruled out, are never said as unfiltered; at most two are", () => {
+  for (const m of ["any nurse jobs posted in the last few days?", "I moved to the onsite round for the nurse role", "I'm a senior in college, nurse jobs?", "my contract ends soon, nurse jobs?", "nurse jobs, not remote and no nights", "nurse jobs near columbus, nothing remote"])
+    eq(searchedLine("nurse", 0, m), "I searched for nurse roles and found 0 postings.", m);
+  eq(searchedLine("nurse", 0, "nurse jobs, remote, part time, nights, contract"), "I searched for nurse roles and found 0 postings. That search did not filter for night shift or remote.");
+});

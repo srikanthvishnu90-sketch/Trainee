@@ -23,6 +23,13 @@ Deno.test("S3 r12g / H035: the review-B1 rules still hold through the stem (inje
   assert(searchedLine(long, 0, long).split(" ").length <= 14, searchedLine(long, 0, long));
 });
 
+Deno.test("review of b87421597 (1): a barred word is barred in every form the stem matches", () => {
+  for (const [q, m] of [["LPN hires", "LPN jobs, who will hire me"], ["LPN applies", "LPN jobs, I apply everywhere"], ["LPN sending", "LPN jobs, I send resumes"],
+    ["LPN approver", "LPN jobs, they approve fast"], ["LPN paying", "LPN that pay well"]])
+    assert(searchedLine(q, 0, m) === "I searched for roles and found 0 postings.", `${q}: ${searchedLine(q, 0, m)}`);
+  assert(searchedLine("LPN nurse", 0, "LPN nurses") === "I searched for LPN nurse roles and found 0 postings.", "a role word still stands");
+});
+
 // ---------------------------------------------------------------------------------------------------------------- H018
 import * as core from "../../supabase/functions/_shared/router_core.career.js";
 import { CareerHost } from "../../supabase/functions/_shared/career_host.js";

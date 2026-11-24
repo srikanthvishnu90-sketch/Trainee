@@ -124,6 +124,9 @@ export function stem(w: string): string {
   if (/er$/.test(x) && x.length > 5) x = x.slice(0, -2);
   return x.replace(/e$/, "");
 }
+// (review of b87421597: a barred word is barred in every form the stem matches, "hires", "applies", "sending", "approver", "paying")
+const BARRED_STEMS = new Set(["hire", "hired", "hiring", "apply", "applied", "application", "submit", "submitted", "send", "sent", "approve", "approved", "approval", "offer", "interview", "reject", "accept", "accepted",
+  "pay", "paid", "salary", "wage", "money", "dollar", "earn", "bonus", "equity", "company", "employer", "status", "queue", "queued", "trainee"].map((w) => stem(w)));
 const clean = (t: string) => String(t ?? "").replace(/[^\p{L}\p{N}\s&+/-]/gu, " ").replace(/\s+/g, " ").trim();
 const titleCase = (t: string) => t.replace(/(^|[\s-])(\p{L})/gu, (_m, s: string, c: string) => s + c.toUpperCase());
 const capped = (ws: string[]) => { const out: string[] = []; for (const w of ws) { if (out.length >= 6 || [...out, w].join(" ").length > 60) break; out.push(w); } return out; };
@@ -158,7 +161,7 @@ export function searchedParams(query: string, message = ""): { role: string; pla
   // deterministic stem, a plural -s/-es or an -ing/-er ending, and the query's own form is said)
   const has = new Set(m.toLowerCase().split(/\s+/).filter(Boolean).map(stem));
   const role0 = capped(words.filter((w) => !FILLER.test(w) && has.has(stem(w.toLowerCase()))));
-  const role = role0.some((w) => BARRED.test(w)) ? "" : role0.join(" ");
+  const role = role0.some((w) => BARRED.test(w) || BARRED_STEMS.has(stem(w))) ? "" : role0.join(" ");
   // (n5: the place counts as theirs when the place their message parses to is the searched one)
   const mw = m.split(/\s+/).filter(Boolean), theirs: string[] = [];
   for (let k = 0; k < 5; k++) { const x = placeOf(mw); if (!x.place) break; theirs.push(x.place); mw.splice(x.at, x.n); }

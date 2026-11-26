@@ -1,0 +1,66 @@
+# REAL SETS, live mode (D-068, owner 2026-11-12: "Show real proof ... before deploying"; $20 over D-060's $10, then within the $80 total; the one total is now $93, D-085).
+# Runs one real set's --live mode (evals/real-sets/README.md): `research` (item 10: 20 real companies, Claude's web search plus the
+# free sources, the real model drafting, at most $5) or `people` (item 5: 20 real school x employer asks through the real
+# find_people tool and its guard, at most $3). It runs only on a push to ci/real-sets-live that changes evals/real-sets/**, so nothing
+# on trunk or a PR ever spends. The request is evals/real-sets/run-request.json: {set, approval (a DECISIONS.md line), budget_usd}.
+# The runner itself reserves the cap at the shared $93 ledger BEFORE its first model call (refused if it does not fit what
+# remains, or if the ledger is unreachable) and settles it to the metered cost after (eval_budget.ts openLiveRunLedger), so the
+# run step gets the ledger secrets. Inside the run the cap is also a hard in-process budget gate (memoryBudgetGate). Public GETs only and the model API; nothing is sent to anyone, no real name is
+# stored (people: sha256 prefixes).
+name: real-sets-live
+on:
+  push:
+    branches: [ci/real-sets-live]
+    paths: [evals/real-sets/**, .github/workflows/real-sets-live.yml]
+permissions:
+  contents: read
+concurrency: { group: real-sets-live, cancel-in-progress: false }
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: The request
+        id: req
+        run: |
+          deno eval '
+            const f = JSON.parse(Deno.readTextFileSync("evals/real-sets/run-request.json"));
+            const max = { research: 5, people: 3 }[f.set];
+            const ok = !!max && /^D-\d{3}[a-z]?$/.test(f.approval ?? "") && Number(f.budget_usd) > 0 && Number(f.budget_usd) <= max;
+            if (!ok) { console.log("NOT RUN: bad request (set research|people, approval D-xxx, 0 < budget_usd <= 5 research / 3 people)", JSON.stringify(f)); Deno.exit(2); }
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `set=${f.set}\napproval=${f.approval}\nbudget=${f.budget_usd}\n`, { append: true });
+            console.log(`request: real set ${f.set}, live, cap $${f.budget_usd} under ${f.approval}`);
+          '
+      - name: The real set, live
+        id: run
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          WEB_RESEARCH_SPEND_APPROVED: ${{ steps.req.outputs.approval }}
+          PEOPLE_SEARCH_SPEND_APPROVED: ${{ steps.req.outputs.approval }}
+          # The runner reserves the cap at the shared ledger itself before its first model call and settles it to the metered cost
+          # (eval_budget.ts openLiveRunLedger); its model calls carry their own in-process gate, so nothing is counted twice.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MODEL_BUDGET_TARGET_USD: "93"
+          MODEL_BUDGET_HARD_USD: "93"
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then echo "NOT RUN: a secret is missing (ANTHROPIC_API_KEY or the shared ledger); no model call was made"; exit 2; fi
+          mkdir -p "$RUNNER_TEMP/out"
+          export REAL_SET_OUT="$RUNNER_TEMP/out"
+          set +e
+          deno run -A --no-check "evals/real-sets/${{ steps.req.outputs.set }}/run.ts" --live --budget-usd "${{ steps.req.outputs.budget }}" | tee "$RUNNER_TEMP/out/summary.txt"
+          code=${PIPESTATUS[0]}
+          set -e
+          # Public companies and public pages (research), and per-ask counts with names hashed (people): the record is printed.
+          cat "$RUNNER_TEMP/out/results.json" || true
+          spent=$(grep -o 'spent_usd=[0-9.]*' "$RUNNER_TEMP/out/summary.txt" | tail -1 | cut -d= -f2)
+          echo "spent=${spent:-}" >> "$GITHUB_OUTPUT"
+          exit $code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-sets-live-${{ steps.req.outputs.set }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/out/

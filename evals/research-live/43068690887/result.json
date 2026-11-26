@@ -1,0 +1,177 @@
+{
+  "kind": "research-live",
+  "approval": "D-060",
+  "mode": "live",
+  "model": "claude-sonnet-5-5",
+  "tool": "web_search_20260209",
+  "run_id": "43068690887",
+  "sha": "47c4b99d4e8a7c22b2e940ca806eefcc0288b503",
+  "at": "2026-11-11T17:30:30.791Z",
+  "budget_usd": 0.5,
+  "searches": 2,
+  "spent_usd": 0.212804,
+  "verdict": "not_proven",
+  "problems": [
+    "\"Citadel new grad software engineer interview process (official Citadel careers page)\": no cited passage came back",
+    "\"Chicago software engineer intern hourly pay 2026\": no cited passage came back"
+  ],
+  "calls": [
+    {
+      "query": "Citadel new grad software engineer interview process (official Citadel careers page)",
+      "ms": 18432,
+      "searches": 1,
+      "cost_usd": 0.118124,
+      "cost_check_usd": 0.118124,
+      "stop_reason": "end_turn",
+      "errors": [],
+      "usage": {
+        "input_tokens": 48797,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 1053,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "service_tier": "standard",
+        "inference_geo": "global",
+        "speed": "standard",
+        "server_tool_use": {
+          "web_search_requests": 1,
+          "web_fetch_requests": 0
+        }
+      },
+      "results": [
+        {
+          "url": "https://www.jointaro.com/interviews/companies/citadel/experiences/software-engineer-new-grad-united-states-august-28-2020-no-offer-positive-fcae20d1/",
+          "title": "Citadel Software Engineer New Grad Interview Experience - United States",
+          "page_age": "2266 days ago"
+        },
+        {
+          "url": "https://www.glassdoor.com/Interview/Citadel-Software-Engineer-New-Grad-Interview-Questions-EI_IE14937.0,7_KO8,34.htm",
+          "title": "Citadel Software Engineer New Grad Interview Experience & Questions",
+          "page_age": "379 days ago"
+        },
+        {
+          "url": "https://www.citadelsecurities.com/careers/career-perspectives/internship-and-new-graduates-engineering-interview-process/",
+          "title": "Internship and New Graduates: Engineering Interview Process - Citadel Securities",
+          "page_age": "107 days ago"
+        },
+        {
+          "url": "https://www.interviewquery.com/guides/citadel-software-engineer",
+          "title": "Citadel Software Engineer Interview Guide (2026): Process & Prep Tips",
+          "page_age": null
+        },
+        {
+          "url": "https://www.glassdoor.com/Interview/Citadel-Software-Engineer-Interview-Questions-EI_IE14937.0,7_KO8,25.htm",
+          "title": "Citadel Software Engineer Interview Experience & Questions",
+          "page_age": "68 days ago"
+        },
+        {
+          "url": "https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/",
+          "title": "Our Campus Engineering Interview Process - Citadel",
+          "page_age": "71 days ago"
+        },
+        {
+          "url": "https://spacecomplexity.ai/blog/citadel-software-engineer-interview",
+          "title": "Citadel Software Engineer Interview: The Full Process, Decoded \u00b7 SpaceComplexity",
+          "page_age": "169 days ago"
+        },
+        {
+          "url": "https://techscreen.app/articles/citadel-technical-interview-process-2026",
+          "title": "The Citadel Technical Interview Process in 2026: A Complete Insider Guide",
+          "page_age": "156 days ago"
+        },
+        {
+          "url": "https://ophyai.com/blog/company-guides/citadel-interview-guide",
+          "title": "Citadel Interview Process 2026: Rounds, HackerRank & Datathon",
+          "page_age": "16 days ago"
+        }
+      ],
+      "citations": [],
+      "answer": "I'll search for this.Let me read the official Citadel page more fully.**Official (Citadel careers page):** Citadel says the campus engineering process has four steps and typically takes about eight weeks from start to finish. The first round is a 45-minute video interview covering both technical and behavioral skills, with a focus on coding, data structures and algorithms, and problem-solving. The interviewer will also ask about your technical interests, internship experience, school projects and why you're exploring Citadel. Team fit is not assessed in the first and second rounds. The snippet I retrieved doesn't spell out the later steps, so check the page itself for those. **Third-party descriptions (not official):** One prep guide describes a HackerRank online assessment, three live Round 1 interviews, then a team-specific round with a senior engineer. Anonymous candidate reviews on Glassdoor and similar sites are anecdotes. They mention a HackerRank assessment, a recruiter screen, two phone interviews and an onsite, which differs from the official eight-week, four-step description. Source: https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/"
+    },
+    {
+      "query": "Chicago software engineer intern hourly pay 2026",
+      "ms": 17097,
+      "searches": 1,
+      "cost_usd": 0.09468,
+      "cost_check_usd": 0.09468,
+      "stop_reason": "end_turn",
+      "errors": [],
+      "usage": {
+        "input_tokens": 37545,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 959,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "service_tier": "standard",
+        "inference_geo": "global",
+        "speed": "standard",
+        "server_tool_use": {
+          "web_search_requests": 1,
+          "web_fetch_requests": 0
+        }
+      },
+      "results": [
+        {
+          "url": "https://www.ziprecruiter.com/Jobs/Software-Engineer-Intern/-in-Chicago,IL",
+          "title": "$21-$120/hr Software Engineer Intern Jobs in Chicago, IL",
+          "page_age": null
+        },
+        {
+          "url": "https://www.ziprecruiter.com/Salaries/Software-Engineer-Internship-Salary-in-Chicago,IL",
+          "title": "Software Engineer Internship Salary in Chicago, IL (Hourly)",
+          "page_age": null
+        },
+        {
+          "url": "https://www.ziprecruiter.com/Salaries/Software-Engineer-Intern-Salary-in-Chicago,IL",
+          "title": "Software Engineer Intern Salary in Chicago, IL (Hourly)",
+          "page_age": null
+        },
+        {
+          "url": "https://www.levels.fyi/internships/CME-Group/Software-Engineer-Intern/",
+          "title": "CME Group Software Engineer Intern Salaries",
+          "page_age": null
+        },
+        {
+          "url": "https://www.levels.fyi/internships/Chicago-Trading-Company/Software-Engineer-Intern/",
+          "title": "Chicago Trading Company Software Engineer Intern Salaries",
+          "page_age": null
+        },
+        {
+          "url": "https://www.levels.fyi/internships/IMC-Trading/Software-Engineer-Intern/",
+          "title": "IMC Trading Software Engineer Intern Salaries",
+          "page_age": null
+        },
+        {
+          "url": "https://www.indeed.com/career/software-development-intern/salaries/Chicago--IL",
+          "title": "Software development intern salary in Chicago, IL",
+          "page_age": null
+        },
+        {
+          "url": "https://www.ziprecruiter.com/Jobs/Software-Developer-Intern/-in-Chicago,IL",
+          "title": "$19-$67/hr Software Developer Intern Jobs in Chicago, IL",
+          "page_age": null
+        },
+        {
+          "url": "https://www.indeed.com/career/software-engineer-intern/salaries/Chicago--IL",
+          "title": "Software engineer intern salary in Chicago, IL",
+          "page_age": "696 days ago"
+        }
+      ],
+      "citations": [],
+      "answer": "I'll search for this now.Let me get the exact wording for the key entries.Chicago software engineer intern pay in 2026 spans roughly $20s to over $100 an hour, depending on the employer. These are aggregator figures, not official government data, and I found no government wage data for this role. - **Typical average:** As of May 19, 2026, ZipRecruiter puts the average hourly pay for a software engineer intern in Chicago at $26.20, with current listings ranging from $21 to $45 an hour. Indeed shows a lower figure: $22.64 per hour, based on only 2 salaries from job postings, so treat that one as thin. - **Larger firms:** Levels.fyi lists CME Group software engineer interns at $34.00 per hour for Summer 2026. - **Trading firms pay the most:** Chicago Trading Company interns make $90.00 per hour, and IMC Trading interns make $121.15 per hour. A ZipRecruiter posting for another trading firm lists $45 - $50 per hour. - **Caveat:** Levels.fyi figures are self-reported by users, so treat them as anecdotal rather than as official employer postings."
+    }
+  ],
+  "recorded_from": "the run log of GitHub Actions run 43068690887 (the artifact store is not reachable from this session); the run printed result.json verbatim"
+}

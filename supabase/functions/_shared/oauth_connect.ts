@@ -17,6 +17,7 @@
 // migration can be deployed in either order.
 // deno-lint-ignore-file no-explicit-any
 import { revokeAtGoogle, type RevokeOutcome } from "./google_disconnect.ts";
+import { commitAddedAccount } from "./career_google_accounts.ts"; // D-062
 import { GMAIL_READONLY, GMAIL_SEND } from "./google_scopes.ts";
 import { hasScope } from "./outlook_graph.ts";
 
@@ -73,8 +74,8 @@ export interface GoogleCallbackDeps {
   sleep?: (ms: number) => Promise<void>;
 }
 export type GoogleCallbackOut =
-  | { ok: true; email: string | null; scopes: string }
-  | { ok: false; why: "replayed" | "exchange" | "gone" | "taken" | "store" | SendRefusal; email?: string | null; revoke?: RevokeOutcome };
+  | { ok: true; email: string | null; scopes: string; added?: true } // added: another account beside the first (D-062)
+  | { ok: false; why: "replayed" | "exchange" | "gone" | "taken" | "store" | "limit" | SendRefusal; email?: string | null; revoke?: RevokeOutcome };
 // D-037 (review of #407): why a send consent (a state bound to the connected account) was refused. Nothing is stored and
 // the grant Google just made is revoked; the connection the person had is untouched.
 export type SendRefusal = "send_no_connection" | "send_other_account" | "send_scopes";
@@ -141,6 +142,16 @@ export async function googleCallback(d: GoogleCallbackDeps, o: { code: string; s
     // new grant is revoked only when no Trainee connection uses that Google account at all (sendRevokeAllowed); otherwise
     // nothing is stored and nothing revoked, and the account's existing grant (this person's or another's) keeps working.
     if (why) return { ok: false, why, email, ...(await sendRevokeAllowed(d.admin, email) ? { revoke: await revokeAtGoogle({ fetch: d.fetch, sleep: d.sleep }, secret) } : {}) };
+  }
+  // D-062: a career Google grant for another address than the first one is ADDED (career_google_accounts), never swapped in.
+  if (o.provider === "google_career" && !o.bind) {
+    let added: Awaited<ReturnType<typeof commitAddedAccount>>;
+    try { added = await commitAddedAccount(d.admin, { userId: o.userId, secret, email, scopes, now: d.now() }); } catch { return { ok: false, why: "store", email }; }
+    if (added === "added") return { ok: true, email, scopes, added: true };
+    if (added === "taken") return { ok: false, why: "taken", email };
+    if (added === "limit") return { ok: false, why: "limit", email };
+    if (added === "gone") return { ok: false, why: "gone", email, revoke: await revokeAtGoogle({ fetch: d.fetch, sleep: d.sleep }, secret) };
+    if (added === "invalid") return { ok: false, why: "store", email };
   }
   let c: CommitOutcome;
   try { c = await commitGrant(d.admin, { userId: o.userId, provider: o.provider, secret, email, scopes, now: d.now() }); } catch { return { ok: false, why: "store", email }; }

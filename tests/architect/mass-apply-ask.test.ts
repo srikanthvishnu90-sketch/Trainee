@@ -1,13 +1,13 @@
 // MASS APPLY (owner, 2026-11-01): "apply to the top 10 frontend internships in Chicago" in ONE message: the postings on
 // file that match the role (every role word in the title) and the place (in the location, or remote) are searched for,
 // screened, and the first N that pass are queued, with no list shown first. Review of #366: the place and remote go into
-// the search itself (never cut by a nationwide newest-first limit); at most 50 per message, said plainly; ranked by fit from
+// the search itself (never cut by a nationwide newest-first limit); at most 50 per message, said plainly (architect amendment, D-092: no per-message cap now); ranked by fit from
 // confirmed facts when it can be computed, else said to be newest first; screens before the cut to N; hedged, negated,
 // conditional and second-person phrasings queue nothing. Without role words, "the top N" stays the thread's last list.
 // The search is the in-memory store with the production search's semantics (career_ingest.ts memoryPostingsDb: every word
 // in the title, company, place or description; title matches first, newest first; the limit honored). No network, no database.
 import assertNode from "node:assert/strict";
-import { applyManyAsk, applyTurn, MANY_MAX, manyWhatOf } from "../../supabase/functions/_shared/career_apply_chat.ts";
+import { applyManyAsk, applyTurn, manyWhatOf } from "../../supabase/functions/_shared/career_apply_chat.ts";
 import { memoryWantStore } from "../../supabase/functions/_shared/career_apply_want.ts";
 import { memoryPostingsDb } from "../../supabase/functions/_shared/career_ingest.ts";
 
@@ -88,13 +88,15 @@ Deno.test("screens first, then N: the 3 newest already applied to, 'top 10' stil
   assert(w.limits.every((l) => l >= 60), `the search is asked for every match, not N: ${w.limits}`);
 });
 
-Deno.test(`at most ${MANY_MAX} from one message, said plainly`, async () => {
+// architect amendment (D-092, owner 2026-11-16, "No cap"): there is no per-message cap; the 50 of the review of #366 (MANY_MAX)
+// is removed. Only the cap and what derives from it changed: every one of the 70 is queued, and the fewer-than-asked count is said.
+Deno.test(`every match from one message, the count said plainly (D-092: no per-message cap)`, async () => {
   const rows = Array.from({ length: 70 }, (_, i) => posting("Frontend Engineering Intern", "Chicago, IL", i));
   const w = await world(rows);
   const r = await w.turn("apply to the top 999 frontend internships in Chicago");
   eq(r?.status, "queued", r?.reply);
-  eq((await w.keys()).length, MANY_MAX);
-  assert(r!.reply.includes(`One message queues at most ${MANY_MAX}, so I took ${MANY_MAX} of the 999 you asked for`), r!.reply);
+  eq((await w.keys()).length, 70);
+  assert(r!.reply.includes(`I found 70 open, not 999`), r!.reply);
 });
 
 Deno.test("ranking said honestly: with no confirmed facts to score fit, 'newest first' (never 'top' by fit)", async () => {

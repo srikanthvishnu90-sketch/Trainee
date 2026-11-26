@@ -138,7 +138,9 @@ Deno.test({ name: "f05 (l): the live board's matches, ranked by fit to confirmed
   for (const ask of ["find me data analyst jobs in Chicago", "show me data analyst roles in Chicago", "find data analyst openings in Chicago"]) {
     const t = await chat.say(ask);
     ok(t);
-    assert(/^From 3 live postings for data analyst in Chicago, first seen in the last 7 days\./m.test(t.reply), `${ask}: ${t.reply}`);
+    // Architect amendment (D-058, 2026-11-11, owner's "same length as Instinct"): the freshness clause is the turn's proof, not the chat line.
+    assert(/^From 3 live postings for data analyst in Chicago\./m.test(t.reply), `${ask}: ${t.reply}`);
+    eq(t.body?.meta?.search_proof?.freshness, "first seen in the last 7 days");
     assert(/Ranked by how well each matches what you've confirmed\./.test(t.reply) && !/\d+\/100|model judge/.test(t.reply), t.reply); // OWNER LIST #6 (2026-10-28): fit in words, no internal words
     const rows = listed(t.reply);
     eq(rows.length, 3, t.reply);

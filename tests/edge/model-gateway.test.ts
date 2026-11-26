@@ -155,7 +155,7 @@ Deno.test("cost per call: tokens times the model's price (D-038), in micro-dolla
   eq([m.calls, m.unpriced, m.usd_micros], [1, 1, 0]);
 });
 
-Deno.test("web search is a dark door: it answers not available, reserves nothing and sends nothing", async () => {
+Deno.test("web search without a model config or key answers not available, reserves nothing and sends nothing (D-060: the door is live only with a config)", async () => {
   const r = await webSearch("Stripe recruiter");
   eq([r.available, r.reason, r.results], [false, "not_available", []]);
 });

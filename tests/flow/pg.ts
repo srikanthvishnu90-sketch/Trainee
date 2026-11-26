@@ -73,7 +73,11 @@ function template(bin: string, includeBridge: boolean): Promise<string> {
       const [cmd, pre] = asPostgres(bin, "pg_ctl");
       const st = await run(cmd, [...pre, "-D", `${dir}/data`, "-m", "fast", "-w", "stop"]);
       if (st.code !== 0) throw Error(`template stop failed: ${st.stderr.slice(-400)}`);
-      globalThis.addEventListener("unload", () => { try { Deno.removeSync(dir, { recursive: true }); } catch { /* gone */ } });
+      // "unload" fires on a normal end and on Deno.exit, but not when the process dies of an uncaught error or rejection
+      // (Deno 2.9.6), which left each such run's ~68 MB template in the temp dir. The same removal runs on those too; the
+      // listeners do not handle the error, so the process still fails as before.
+      const rm = () => { try { Deno.removeSync(dir, { recursive: true }); } catch { /* gone */ } };
+      for (const ev of ["unload", "error", "unhandledrejection"]) globalThis.addEventListener(ev, rm);
       return dir;
     })());
     templates.get(key)!.catch(() => templates.delete(key));

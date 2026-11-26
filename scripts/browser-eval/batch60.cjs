@@ -132,7 +132,7 @@ function tally({ batch, finishes, final, audits, posts }) {
 // The TEST person's approved answers, as the queue payload carries them (fields by the form's label). Synthetic only.
 const TEST_FIELDS = [
   ["First Name", "Testy"], ["Last Name", "Example"], ["Full name", "Testy Example"], ["Name", "Testy Example"],
-  ["Email", "dry-run@example.invalid"], ["Phone", "+1 555 0100"], ["Location", "Chicago, IL"], ["Country", "United States"],
+  ["Email", "dry-run@example.invalid"], ["Phone", "+1 312 555 0100"], ["Location", "Chicago, IL"], ["Country", "United States"],
 ].map(([label, value], i) => ({ label, value, factId: `test-${i + 1}` }));
 
 async function main() {

@@ -103,6 +103,8 @@ async function undoEmails(o: { userId: string; store: UndoStore }, mails: UndoEm
     else before.push(e); // skipped (already withdrawn), failed, shown again: not out
   }
   const one = mails.length === 1;
+  // A try whose outcome is unknown (career_mail_reply.ts, career_inbox_followups.ts) is not "being sent right now": it is unconfirmed.
+  if (one && flying.length && /^unknown_outcome/.test(String(flying[0].result ?? ""))) return r(`Can't undo: it is unconfirmed whether your email to ${who(flying[0])} went (Gmail did not answer). Trainee will not send it again; look in your Sent folder to see whether it is there.`, "unconfirmed");
   if (one && cancelled.length) return r(`Cancelled: your email to ${who(cancelled[0])} won't be sent.`, "cancelled");
   if (one && went.length) return r(`That already went out: your email to ${who(went[0])} was sent, and email can't be unsent. You can send a short follow-up to correct it.`, "too_late");
   if (one && flying.length) return r(`Too late to cancel: your email to ${who(flying[0])} is being sent right now. If it needs correcting, you can send a short follow-up.`, "too_late");

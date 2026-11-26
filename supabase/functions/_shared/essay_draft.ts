@@ -40,6 +40,13 @@ export const MIN_FACTS = 2;
 // Facts: confirmed only (memory.ts and 122's rule: needs_confirmation or status "draft" is not theirs yet), never a
 // skill with no evidence (122 flags it unproven; it supports no written line), and never a D-007 quarantined fact (122).
 const unproven = (f: any) => f.unproven === true || (f.kind === "skill" && f.unproven !== false && !(Array.isArray(f.evidence) && f.evidence.length));
+// D-007's record: every fact the person confirmed (a confirmed skill not yet shown in an experience bullet included), never a draft,
+// one awaiting confirmation, one they withdrew or a quarantined one. (confirmedFacts below is stricter: it drops unproven skills,
+// for writing that claims them.)
+export function ownerConfirmedFacts(facts: unknown[]): any[] {
+  return (Array.isArray(facts) ? facts : []).filter((f: any) =>
+    f && typeof f === "object" && !f.needs_confirmation && f.status === "confirmed" && !f.withdrawn_by_owner && !CareerProfile.quarantinedFact(f));
+}
 export function confirmedFacts(facts: unknown[]): any[] {
   return (Array.isArray(facts) ? facts : []).filter((f: any) =>
     f && typeof f === "object" && !f.needs_confirmation && (!f.status || f.status === "confirmed") && !unproven(f) && !CareerProfile.quarantinedFact(f)

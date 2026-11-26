@@ -276,6 +276,17 @@ export function goalLines(profile: any): string[] {
   return out.map(memoryLine);
 }
 
+// D-072 (item 9b, d054 M07 on the real model): a fact the person stated in THIS chat (the router's stated-facts rows, said_in_chat)
+// was listed under "from their account, not from this chat", and the model told the person their school "was already waiting on
+// your yes from before this chat" and that the earlier one "was never saved". The row now says where and when it was said and
+// what it replaced, so the reply can say it as it happened.
+function saidInChat(f: any): string {
+  if (!f || f.said_in_chat !== true) return "";
+  const at = typeof f.said_at === "string" && /^\d{4}-\d{2}-\d{2}/.test(f.said_at) ? ` on ${f.said_at.slice(0, 10)}` : "";
+  const was = typeof f.replaces === "string" && f.replaces.trim() ? `; it corrects what they said before in this chat: "${f.replaces.trim()}"` : "";
+  return ` (they said this in this chat${at}, and it was saved in their words${was}; not confirmed yet)`;
+}
+
 export function personBlock(o: { profile?: any; standing: Standing[]; alerts: { prefs: AlertPrefs; tz: string } | null; pipeline: Pipeline | null; situation?: Situation | null; budget?: number }): string {
   const facts = factRows(o.profile);
   // Facts are appended to the profile; when space is short the newest must survive before the oldest.
@@ -311,7 +322,7 @@ export function personBlock(o: { profile?: any; standing: Standing[]; alerts: { 
     { lines: [alertLine(o.alerts)] },
     ...pipeline,
     { heading: "Confirmed facts (usable in applications):", lines: confirmed.length ? confirmed.map((f: any) => `- [${f.kind}] ${f.text}`) : ["- none yet"] },
-    { heading: "Facts waiting for their yes (never use these in an application until they confirm):", lines: drafts.length ? drafts.map((f: any) => `- ${f.id} [${f.kind}] ${f.text}`) : ["- none"] },
+    { heading: "Facts waiting for their yes (never use these in an application until they confirm):", lines: drafts.length ? drafts.map((f: any) => `- ${f.id} [${f.kind}] ${f.text}${saidInChat(f)}`) : ["- none"] },
   ];
   const budget = o.budget ?? BLOCK_BUDGET;
   const out = [...head, ""];

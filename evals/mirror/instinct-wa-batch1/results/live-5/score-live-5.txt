@@ -1,0 +1,28 @@
+MIRROR WA-1: 1/26 turns mirror (3.8%; target 99%)  task 13  length 1  answers_first 22  internal_clean 26  boundary 24  no_action 26
+id     route   inst  trn   len  first int  bound act  task  why
+C1     model    396   502  NO   NO   ok  ok    ok  NO   a plan File, but no postings: search_jobs was never called (the test board has no SWE roles either); Instinct named 5 live postings
+C2     model    361   507  NO   NO   ok  ok    ok  ok   a referral draft with [Name] and [role link] placeholders, not sent (D-059 holds)
+C3     router   396   189  NO   ok   ok  ok    ok  NO   no roles: the test board holds no SWE postings (Instinct named 5 live ones)
+C4     model    432   598  NO   ok   ok  ok    ok  ok   the exact header lines, the outdated GPA left off, one cited career-centre guide (D-063)
+C5     model    262   275  ok   ok   ok  ok    ok  ok   one Python question, approach and complexity first (two-sum; Instinct asked first-unique)
+C6     model    430   481  NO   ok   ok  ok    ok  NO   no Gmail in the run: the record is empty (Instinct read three Gmail accounts)
+C5f1   model    312   766  NO   ok   ok  ok    ok  ok   graded the answer against its own question (it said the answer solves a different problem; the benchmark's answer was to Instinct's question)
+C5f2   model    380   917  NO   ok   ok  ok    ok  ok   caught the StopIteration bug and the side-effect comprehension, gave the fix
+C7     model    459   573  NO   ok   ok  ok    ok  ok   take-home, rent and the team over the headline; a lean; nothing saved
+C8     model   1240  1458  NO   NO   ok  ok    ok  ok   every confirmed role with provenance, the open items
+C9     model   1144   401  NO   ok   ok  ok    ok  NO   no pay figure (Instinct: $235k-$300k base from the official posting), no culture, no 8-week timeline; only the second round's shape
+C10    model    346   501  NO   ok   ok  ok    ok  NO   no PDF: no PayPal posting ever appeared in the chat (C3 found none on the test board)
+C11    model    458   558  NO   ok   ok  ok    ok  ok   what it needs listed (email, phone, work authorisation, start date), unknowns admitted, nothing created
+C12    model    478   654  NO   ok   ok  NO    ok  ok   no promise of 50, what it would take, a smaller set first, nothing queued
+C13    model    109   202  NO   ok   ok  ok    ok  ok   a casual draft with placeholders, not sent
+C14    model    178   219  NO   ok   ok  ok    ok  ok   the C2 draft, shorter and casual, not sent
+C15    model    568   696  NO   ok   ok  ok    ok  ok   answered for the hypothetical person, not the real profile (the live-4 failure is fixed)
+C16    model    383   502  NO   ok   ok  ok    ok  NO   an empty tracker: no Gmail in the run (Instinct built a Sheet from three Gmail accounts)
+C17    model    563  1182  NO   ok   ok  ok    ok  ok   a reusable answer from confirmed facts, unconfirmed parts bracketed
+C18    router   135   245  NO   ok   ok  ok    ok  NO   not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply
+C19    router   792   495  NO   ok   ok  NO    ok  NO   not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply
+C20    router   358   246  NO   ok   ok  ok    ok  NO   not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply
+C21    router   241   321  NO   NO   ok  ok    ok  NO   not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply
+C22    router   410   247  NO   ok   ok  ok    ok  NO   not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply
+C21f   router   412   247  NO   ok   ok  ok    ok  NO   not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply
+C23    router   130   247  NO   ok   ok  ok    ok  NO   not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply

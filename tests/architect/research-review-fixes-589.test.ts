@@ -8,6 +8,7 @@ import assertNode from "node:assert/strict";
 import { agentTurn } from "../../supabase/functions/agent-chat/career_brain.ts";
 import { marketResearchAsk, researchAsk } from "../../supabase/functions/agent-chat/career_staged.ts";
 import { type MarketDeps } from "../../supabase/functions/_shared/agent/research/market.ts";
+import { testSupportJudge } from "./support-test-judge.ts";
 import { fetchSources } from "../../supabase/functions/_shared/research_sources.ts";
 import { dnsProbe, resolvedReader } from "../../supabase/functions/_shared/research_dns.ts";
 
@@ -49,7 +50,9 @@ Deno.test("research_market's effect is write_own when it published a File, read 
     conditions: [{ text: "Zentrafin keeps hiring new grads into engineering.", urls: [page] }], risks: [{ text: "Fewer open roles would mean fewer first jobs.", urls: [page] }] };
   const run = async (format: "file" | "inline") => {
     const d: MarketDeps = { search: { id: "first_party", needsKey: false, search: async () => ({ hits: [{ url: page, title: "t", provider: "company_site", foundAt: NOW }], notes: [], provider: "first_party", searches: 1 }) },
-      read: resolvedReader({ fetch: f, resolver: PUBLIC, now: () => NOW }), draft: async () => JSON.stringify(draft), publish: async () => ({ url: "https://trainee.example/file?t=v1.free2" }) };
+      read: resolvedReader({ fetch: f, resolver: PUBLIC, now: () => NOW }), draft: async () => JSON.stringify(draft), publish: async () => ({ url: "https://trainee.example/file?t=v1.free2" }),
+      // Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line.
+      judge: testSupportJudge };
     let step = 0;
     const model = async () => (++step === 1 ? { content: [{ type: "tool_use", id: "m1", name: "research_market", input: { question: "research Zentrafin", format, companies: ["Zentrafin"], sites: ["zentrafin.example"] } }], stop_reason: "tool_use" }
       : { content: [{ type: "text", text: "Zentrafin is hiring; the brief is in the file." }], stop_reason: "end_turn" });

@@ -14,6 +14,7 @@ import { RESEARCH_OFF_REPLY } from "../../supabase/functions/agent-chat/handler-
 import type { MarketDeps } from "../../supabase/functions/_shared/agent/research/market.ts";
 import { fetchSources } from "../../supabase/functions/_shared/research_sources.ts";
 import { ALL, companyWeb, NOW, PUBLIC, U, world } from "../helpers/research_company_web.ts";
+import { testSupportJudge } from "./support-test-judge.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -50,21 +51,34 @@ async function turn(message: string, history: any[], deps: MarketDeps, input: Re
 
 Deno.test("F.2 replay with research on: a sourced chat answer, interpretation labelled, grounded questions, sources listed", async () => {
   const w = world();
-  const a = await turn(F2A, [], w.deps, { company: "Stripe", role: "data analyst intern", question: F2A, format: "inline", sites: ["stripe.example"] },
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line
+  // (no judge fails closed); the test judge says yes only to a line the page sentence states, so every bar below still stands.
+  const deps = { ...w.deps, judge: testSupportJudge } as MarketDeps;
+  const a = await turn(F2A, [], deps, { company: "Stripe", role: "data analyst intern", question: F2A, format: "inline", sites: ["stripe.example"] },
     "Stripe Billing lets businesses bill customers with subscriptions and invoices [1]. The Data Analyst Intern will define metrics and build reports and dashboards for business teams [7]. Stripe has a demanding culture [3]. Stripe is the best place to start your career. Read more at https://stripe.example/jobs.");
   eq([a.call.ok, a.call.effect, w.published.length], [true, "read", 0], "an answer in chat makes no File");
   const r = a.t.reply as string;
-  ok(/Stripe Billing lets businesses bill customers with subscriptions and invoices \[\d\]\./.test(r), r);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
+  // ag/research-on-fixes, 80d6e4da1: the draft's cited unit is tried first): the sentence the model only repeats is the page's own,
+  // in quotation marks, with its source number.
+  ok(/"Stripe Billing lets businesses bill customers with subscriptions and invoices\." \[\d\]\./.test(r), r);
   ok(!/best place to start/.test(r), "an unsourced opinion stated as fact is removed");
   ok(!/demanding culture/.test(r), "a sentence its cited page does not say is removed (cite fidelity)");
-  ok(/The Data Analyst Intern will define metrics and build reports and dashboards for business teams \[7\]/.test(r), r);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the paywalled page's line is never shown (its
+  // sentence sits beside "Subscribe to continue reading.", an order to the reader), so that page is no source and the numbers shift;
+  // the role sentence carries the role page's own number, whatever number the model wrote.
+  const roleN = /\[(\d)\] Data Analyst Intern: https:\/\/stripe\.example\/jobs\/data-analyst-intern/.exec(r)?.[1];
+  ok(roleN && r.includes(`The Data Analyst Intern will define metrics and build reports and dashboards for business teams [${roleN}].`), r);
+  ok(!/bizdaily|enterprise customers/.test(r), "the paywalled page's line is not shown, so it is never shown unmarked");
   ok(/My interpretation, not a sourced fact: Stripe is easier to understand as payments plus software/.test(r), "interpretation is labelled");
   ok(/Questions you could ask:\n1\. Your team is working on blocking fraudulent payments with Radar\. How do you decide between/.test(r), r);
-  ok(/Not established by these sources:\n- Which team the role sits on/.test(r) && /\[\d\] is paywalled/.test(r) && /refuses\.example: not read/.test(r), "concerns and limits are listed");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the paywalled page is no source (above), so
+  // the limits listed are the outdated source's and the unopened page's.
+  ok(/Not established by these sources:\n- Which team the role sits on/.test(r) && /Source \[\d\] is outdated \(newest date Mar 3, 2023\)/.test(r) && /refuses\.example: not read/.test(r), "concerns and limits are listed");
   ok(/\[1\] [^\n]+: https:\/\/[^\s]+ \(read Nov 9, 2026\)/.test(r), "numbered sources with links, as asked");
   ok(!ACTIONS.test(r), "no batch, list, intro or outreach");
   // The correction turn, after the first: still research, still in chat.
-  const b = await turn(F2B, [{ role: "user", content: F2A }, { role: "assistant", content: r }], w.deps, { company: "Stripe", role: "data analyst intern", question: F2B, format: "inline", sites: ["stripe.example"] },
+  const b = await turn(F2B, [{ role: "user", content: F2A }, { role: "assistant", content: r }], deps, { company: "Stripe", role: "data analyst intern", question: F2B, format: "inline", sites: ["stripe.example"] },
     "Radar uses machine learning to help businesses block fraudulent payments [2].");
   ok(/Radar uses machine learning/.test(b.t.reply) && /Questions you could ask:/.test(b.t.reply) && !ACTIONS.test(b.t.reply), b.t.reply);
 });

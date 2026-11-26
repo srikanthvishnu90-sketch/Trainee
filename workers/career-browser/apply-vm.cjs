@@ -21,6 +21,7 @@ const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { applyOne, payloadHash, NeedsUser } = require("./parallel-apply.cjs");
+const { recheck, askedQuestions } = require("./handoff.cjs");
 // What the person is told was handed to them, per HANDOFF_REASONS (the same words as parallel-apply.cjs and scripts/apply.ts).
 const HANDED_BACK = {
   login_required: "the employer asks the person to sign in; they finish it at the link",
@@ -76,6 +77,8 @@ function restRpc({ url, key, fetchImpl = fetch }) {
   };
 }
 
+// The database has no such function (PostgREST's PGRST202 / Postgres 42883): this build is ahead of the migration.
+const NO_FUNCTION = /PGRST202|Could not find the function|does not exist|\b42883\b/i;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pct = (xs, p) => { if (!xs.length) return 0; const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.ceil(p * s.length) - 1)]; };
 
@@ -100,8 +103,8 @@ function createWorker(o) {
   const apply = o.applyOne || applyOne;
   const inflight = new Map(); // job id -> { row, host, lost }
   const hostCount = new Map(), hostLast = new Map();
-  const stats = { claimed: 0, done: {}, ms: [], refusedHosts: 0, completeErrors: 0 };
-  let stopping = false;
+  const stats = { claimed: 0, done: {}, ms: [], refusedHosts: 0, completeErrors: 0, handoffUnreadable: 0 };
+  let stopping = false, plainClaimUntil = 0;
 
   const rec = (state, reason) => { const k = `${state}${reason ? ":" + reason : ""}`; stats.done[k] = (stats.done[k] || 0) + 1; };
 
@@ -112,6 +115,26 @@ function createWorker(o) {
       catch (e) { last = e; if (/invalid apply claim/.test(e.message)) break; await sleep(200 * (i + 1)); }
     }
     stats.completeErrors++; log(`COMPLETE_FAILED ${row.id} ${String(last && last.message).slice(0, 120)}`); return false;
+  }
+
+  // The hand-off state a claimed row carries. { done, yes }, or { unreadable: true } when the hand-off claim's row does not say
+  // (no handoff object, or one that is not {done_at: null | text, yes: null | {card_hash}}): never read as "an ordinary row".
+  function handoffState(row) {
+    const ev = row.evidence && typeof row.evidence === "object" ? row.evidence : {};
+    // Review of #797: the yes has one source, the row's own hand-off state as the database hands it out. A hand-off row leaves the
+    // queue only through career_apply_vm_claim_handoff (the guard of 20261112160000 holds it back from every other claim), which
+    // carries {done_at, yes} from the columns career_apply_handoff_yes_as wrote; evidence (which the worker itself writes) is never
+    // read for a yes. A done noted in evidence still makes the row a re-check: that direction only ever sends less.
+    let done = row.handoff_done_at || ev.handoff_done_at || null, yes = row.handoff_yes || null;
+    if (row._handoffClaim) {
+      const h = row.handoff;
+      if (!h || typeof h !== "object" || Array.isArray(h)) return { unreadable: true };
+      const doneOk = h.done_at === null || (typeof h.done_at === "string" && h.done_at.length > 0);
+      const yesOk = h.yes === null || (h.yes && typeof h.yes === "object" && typeof h.yes.card_hash === "string");
+      if (!doneOk || !yesOk || (h.yes && !h.done_at)) return { unreadable: true };
+      done = done || h.done_at; yes = yes || h.yes;
+    }
+    return { done, yes };
   }
 
   // Everything checked before a browser is opened. Returns the pool payload, or { refuse: code }.
@@ -155,6 +178,14 @@ function createWorker(o) {
     const shotDir = cfg.evidenceDir ? path.join(cfg.evidenceDir, row.id) : undefined; // null: no screenshots kept (the scheduling load test)
     if (shotDir) fs.mkdirSync(shotDir, { recursive: true, mode: 0o700 });
     try {
+      // D-072 (item 4, round 2), review of #800: the row's hand-off state lives in its own columns (20261112160000) and comes WITH
+      // the row, in the claim's own answer (career_apply_vm_claim_handoff: handoff {done_at, yes}); there is no second call whose
+      // failure could turn a re-check into an ordinary drive. A row from that claim whose state cannot be read is never driven:
+      // it is let go unsent (nothing recorded, no browser opened), and the sweep puts it back for another try
+      // (career_apply_vm_reap: twice, then closed not sent). The plain claim never hands out a hand-off row (the database's
+      // guard, career_apply_handoff_claim_guard), so a row from it is an ordinary approved row.
+      const hs = handoffState(row);
+      if (hs.unreadable) { stats.handoffUnreadable++; rec("released", "HANDOFF_STATE_UNREADABLE"); log(`HANDOFF_STATE_UNREADABLE ${row.id} nothing sent; left for the sweep`); return; }
       const prep = await prepare(row, dir);
       if (prep.refuse) { await complete(row, "not_submitted", prep.refuse, { nothing_sent: true, link: row.url }); return; }
       const onPhase = async (phase) => {
@@ -162,6 +193,33 @@ function createWorker(o) {
         const r = await rpc("career_apply_vm_heartbeat", { p_id: row.id, p_lease: row.lease_token, p_worker: cfg.workerId, p_phase: phase });
         if (!r || r.ok !== true) throw new NeedsUser(r && r.why ? r.why : "lease_lost");
       };
+      // D-072 / WO-L: a row the person finished a wall on (handoff_done_at, set when they said done) is RE-CHECKED, never sent on
+      // that run: the same approved payload is driven to the instant before Submit and the exact answers the page holds are recorded
+      // as the card (needs_user / ready_for_yes). Only a later run carrying the person's yes to that card's hash (handoff_yes) may
+      // press Submit, and only while the page still holds exactly that card (handoff.cjs recheck).
+      const handoffDone = hs.done;
+      if (handoffDone) {
+        const yes = hs.yes;
+        const rc = await (o.recheck || recheck)(browser, prep.pool, { allowHosts: cfg.allowHosts, stepTimeoutMs: cfg.stepTimeoutMs, shotDir, onPhase, yes }, o.applyOne ? { runner: { applyOne: apply, NeedsUser } } : undefined);
+        if (rc.state === "ready_for_yes") return void (await complete(row, "needs_user", "ready_for_yes", { nothing_sent: true, link: row.url, answers_card: rc.card, handed_back: "re-checked after you finished the step: these are the exact answers on the page; reply yes to submit exactly this" }));
+        // The wall is still there on a re-check in a NEW cloud session, after the person said they finished it: the employer keeps the
+        // step in the person's own browser session (their sign-in, a check scored to their browser), which no cloud session carries.
+        // That application is the person's own browser's to finish (the extension, or submitting at the link themselves): marked
+        // needs_extension, kept as the hand-off stop, never a pass. Its reason stays the wall's, so the person's own answer
+        // (career_apply_person_finished_as) still applies.
+        // Review of #797: the check is still on the form and the person's own answers are still missing beside it: they are asked
+        // (needs_answers, the state the database re-prepares from), never left to end as needs_extension with nobody asked.
+        if (rc.state === "still_walled" && rc.handoff.reason === "bot_check_in_form" && askedQuestions(rc.handoff).length) return void (await askAnswers(row, { handoff: rc.handoff }, { link: row.url }, askedQuestions(rc.handoff)));
+        if (rc.state === "still_walled") {
+          const wall = rc.handoff.reason === "bot_check_in_form" ? "bot_check" : rc.handoff.reason;
+          const session = ["login_required", "bot_check", "email_code"].includes(wall);
+          return void (await complete(row, "needs_user", rc.handoff.reason === "person_answer" ? "needs_answers" : wall, { nothing_sent: true, link: row.url, handoff: rc.handoff,
+            ...(session ? { needs_extension: true, handed_back: "the step is still there when Trainee re-opens the page in its own browser: this employer keeps it in your own browser session, so finish this application in your browser (the link), or with the Trainee extension" }
+              : { handed_back: "the step is still there at the employer's page" }) }));
+        }
+        if (rc.state === "submitted") return void (await settle(row, rc.result, shotDir, t0));
+        return void (await complete(row, "not_submitted", rc.reason || "not_submitted", { nothing_sent: true, link: row.url, ...(rc.card ? { answers_card: rc.card } : {}) }));
+      }
       const res = await apply(browser, prep.pool, { allowHosts: cfg.allowHosts, retries: cfg.retries, stepTimeoutMs: cfg.stepTimeoutMs, shotDir, onPhase, backoffMs: 300 });
       await settle(row, res, shotDir, t0);
     } catch (e) {
@@ -176,6 +234,12 @@ function createWorker(o) {
   async function refused(row, why, retryAfter) {
     stats.refusedHosts++;
     try { await rpc("career_apply_host_refused_for", { p_id: row.id, p_lease: row.lease_token, p_reason: why, p_retry_after_seconds: retryAfter ?? null, p_now: new Date().toISOString() }); } catch (e) { log(`HOST_BACKOFF_FAILED ${e.message.slice(0, 100)}`); }
+  }
+  // The person's own questions, ended exactly as the cloud runner ends them (not_submitted / needs_answers, nothing sent).
+  async function askAnswers(row, res, ev, needs, alsoCheck = true) {
+    const questions = needs.map((n) => ({ label: String(n.label || "").replace(/\s+/g, " ").slice(0, 200), ...(Array.isArray(n.options) && n.options.length ? { options: n.options.map(String).slice(0, 60) } : {}) }));
+    return complete(row, "not_submitted", "needs_answers", { ...ev, nothing_sent: true, field: res.field, fields: questions.map((q) => q.label), questions, needs: res.needs || null, handed_back: "a required question has no confirmed answer",
+      ...(alsoCheck ? { also_check: true } : {}), ...(res.handoff ? { handoff: res.handoff } : {}) });
   }
   async function settle(row, res, shotDir, t0) {
     const before = shotDir && fileProof(path.join(shotDir, `${row.id}-1-filled.png`)), after = shotDir && fileProof(path.join(shotDir, `${row.id}-2-confirmation.png`));
@@ -192,10 +256,12 @@ function createWorker(o) {
     }
     if (res.status === "needs_user") {
       if (res.reason === "bot_check") await refused(row, "bot_wall", null);
+      // Review of #797: answers only the person can give, missing beside an in-form check, are asked now (both are theirs).
+      if (res.reason === "bot_check" && res.handoff && askedQuestions(res.handoff).length) return void (await askAnswers(row, res, ev, askedQuestions(res.handoff)));
       // A wall stops the run before Submit (parallel-apply never hands one back after the click): nothing was sent, which
       // is what lets the person finish it themselves or have it prepared again (WO-L). The wall kind is kept; the page's
       // contents are not.
-      return void (await complete(row, "needs_user", res.reason, { ...ev, nothing_sent: true, wall: res.wall || (res.reason === "bot_check" ? "bot_check" : null), handed_back: HANDED_BACK[res.reason] || HANDED_BACK.login_required }));
+      return void (await complete(row, "needs_user", res.reason, { ...ev, nothing_sent: true, wall: res.wall || (res.reason === "bot_check" ? "bot_check" : null), handed_back: HANDED_BACK[res.reason] || HANDED_BACK.login_required, ...(res.handoff ? { handoff: res.handoff } : {}) }));
     }
     if (res.status === "unknown_outcome") return void (await complete(row, "unknown_outcome", "application outcome unknown: " + String(res.reason || "").slice(0, 80), ev));
     // not_submitted
@@ -205,9 +271,7 @@ function createWorker(o) {
     // asked, and the new answer goes only on a NEW card and a NEW approval. The questions travel in the evidence, in the form's
     // own words and options, never in the reason (the trigger matches the reason exactly).
     if (res.reason === "missing_required_answer") {
-      const needs = Array.isArray(res.needs) && res.needs.length ? res.needs : [{ label: res.field || "" }];
-      const questions = needs.map((n) => ({ label: String(n.label || "").replace(/\s+/g, " ").slice(0, 200), ...(Array.isArray(n.options) && n.options.length ? { options: n.options.map(String).slice(0, 60) } : {}) }));
-      return void (await complete(row, "not_submitted", "needs_answers", { ...ev, nothing_sent: true, field: res.field, fields: questions.map((q) => q.label), questions, needs: res.needs || null, handed_back: "a required question has no confirmed answer" }));
+      return void (await askAnswers(row, res, ev, Array.isArray(res.needs) && res.needs.length ? res.needs : [{ label: res.field || "" }], false));
     }
     // One that could not be set and read back: handed back by name, never guessed.
     if (res.reason === "field_not_filled") {
@@ -217,6 +281,7 @@ function createWorker(o) {
     // The posting's own page answered 404 Not Found or 410 Gone on every try: the posting is closed, not a page that failed to
     // load (batch of 60: a Lever 404 read "retries_exhausted"). Reported as closed, with the status as its proof; the portal is
     // not held off for it.
+    if (res.reason === "posting_closed") return void (await complete(row, "not_submitted", "POSTING_CLOSED", { ...ev, nothing_sent: true, closed: "the board sent the posting's link to " + String(res.field || "").slice(0, 160) }));
     if (res.reason === "retries_exhausted" && /^page_load_(404|410)$/.test(res.error || "")) return void (await complete(row, "not_submitted", "POSTING_CLOSED", { ...ev, nothing_sent: true, error: res.error, closed: "the posting's page answered " + res.error.slice(-3) }));
     if (res.reason === "retries_exhausted") {
       if (res.error === "page_load_429") await refused(row, "rate_limited", null);
@@ -249,7 +314,23 @@ function createWorker(o) {
     // Ask for work in batches: a claim has a fixed cost, so with engines still running wait until a quarter of the slots are free.
     if (inflight.size > 0 && capacity < Math.max(1, Math.ceil(cfg.concurrency / 4))) return 0;
     const skip = [...hostCount.entries()].filter(([, n]) => n >= cfg.hostMax).map(([h]) => h.toLowerCase().replace(/^www\./, "").replace(/:(80|443)$/, ""));
-    const rows = await rpc("career_apply_vm_claim", { p_worker: cfg.workerId, p_limit: capacity, p_per_user: cfg.perUser, p_skip_hosts: skip });
+    const args = { p_worker: cfg.workerId, p_limit: capacity, p_per_user: cfg.perUser, p_skip_hosts: skip };
+    // The hand-off claim (20261112160000) first: the same rows as the plain claim plus the hand-off rows, each with its hand-off
+    // state. A database that does not have it yet (this build released before the migration), or one where the call fails,
+    // is asked with the plain claim instead: that one never hands out a hand-off row, so nothing from it is a re-check.
+    let rows = null;
+    if (Date.now() >= plainClaimUntil) {
+      try {
+        const got = await rpc("career_apply_vm_claim_handoff", args);
+        if (Array.isArray(got)) { rows = got; for (const r of rows) if (r && typeof r === "object") r._handoffClaim = true; }
+        else plainClaimUntil = Date.now() + 60000;
+      } catch (e) {
+        const missing = NO_FUNCTION.test(String(e && e.message));
+        plainClaimUntil = Date.now() + (missing ? 60000 : 5000);
+        log(`HANDOFF_CLAIM_UNAVAILABLE ${missing ? "not in this database" : String(e && e.message).slice(0, 100)}; plain claim (hand-off rows wait)`);
+      }
+    }
+    if (!rows) rows = await rpc("career_apply_vm_claim", args);
     for (const r of rows || []) { r._claimedAt = Date.now(); stats.claimed++; runOne(r).catch((e) => log(`RUN_ERROR ${e.message}`)); }
     return (rows || []).length;
   }

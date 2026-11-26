@@ -101,7 +101,8 @@ export async function reconcile(admin: Admin, userId: string): Promise<Counts> {
       return (r.data ?? []).map((x: any) => ({ s: String(x[col]) }));
     } catch { return null; }
   };
-  const d = await read("career_outreach_drafts", "status");
+  // Outreach drafts only: a reply to an email in the person's inbox is not outreach, and its own card says where it stands.
+  const d = await (async () => { try { const r = await admin.from("career_outreach_drafts").select("status").eq("user_id", userId).or("recipient->>kind.is.null,recipient->>kind.neq.mail_reply").limit(5000); return r.error ? null : (r.data ?? []).map((x: any) => ({ s: String(x.status) })); } catch { return null; } })();
   const q = await read("career_send_queue", "state");
   const a = await read("career_apply_jobs", "state");
   const x = await read("career_outreach_actions", "status");
@@ -175,6 +176,21 @@ export function workflowReply(o: { stop: StopControl; hold: Hold; counts: Counts
     ? `Your ask for ${s.outstanding} is still open, and I can't answer it here: ${o.researchBlocker}`
     : `Your ask for ${s.outstanding} is still open: I have not answered it in this message.`);
   return lines.join("\n");
+}
+
+// Review 2026-11-13 round 3: the one line for a hold that rode along with another ask ("find jobs at Plaid, don't contact
+// anyone"): the ask was answered, and what was waiting to go out was held, said from the hold's own writes.
+// Null when the hold found nothing waiting: the turn's own boundary line (D-061 G6) already says nothing was sent.
+export function alongsideHoldLine(h: Hold): string | null {
+  if ([h.held, h.cancelledEmails, h.actions, h.applications].some((x) => x === null)) return "I could not hold everything that was waiting to go out (a write failed), so something you approved earlier may NOT be stopped. Nothing was sent by me in this message.";
+  const parts: string[] = [];
+  if (h.held) parts.push(n(h.held, "approved outreach draft", "approved outreach drafts"));
+  if (h.cancelledEmails) parts.push(n(h.cancelledEmails, "queued email", "queued emails"));
+  if (h.actions) parts.push(n(h.actions, "approved follow-up or call invite", "approved follow-ups and call invites"));
+  if (h.applications) parts.push(n(h.applications, "approved application", "approved applications"));
+  if (h.wanted) parts.push(n(h.wanted, "application waiting to be prepared", "applications waiting to be prepared"));
+  return parts.length ? `Held, as you asked: ${parts.join(", ")}. Nothing goes out without a new yes, and nothing was sent by me in this message.`
+    : null;
 }
 
 // The same counts as countLines, said once for a pause (RESPONSE-RULES R2: a two-word ask gets about 600 characters): what

@@ -9,8 +9,10 @@
 // A posting-page read outside any turn is a fault.
 import { AsyncLocalStorage } from "node:async_hooks";
 
+// Architect amendment (D-062): a Workday posting's own page by id is its CXS job endpoint (/wday/cxs/<tenant>/<site>/job/<path>,
+// workday_posting.ts); a board listing (/wday/cxs/<tenant>/<site>/jobs) is still not a posting page.
 export const POSTING_PAGE =
-  /^https:\/\/(?:boards-api\.greenhouse\.io\/v1\/boards\/[^/]+\/jobs\/\d+|api\.lever\.co\/v0\/postings\/[^/]+\/[0-9a-f-]{8,}|api\.smartrecruiters\.com\/v1\/companies\/[^/]+\/postings\/\d+|jobs\.ashbyhq\.com\/[^/]+\/[0-9a-f-]{8,})$/i;
+  /^https:\/\/(?:boards-api\.greenhouse\.io\/v1\/boards\/[^/]+\/jobs\/\d+|api\.lever\.co\/v0\/postings\/[^/]+\/[0-9a-f-]{8,}|api\.smartrecruiters\.com\/v1\/companies\/[^/]+\/postings\/\d+|jobs\.ashbyhq\.com\/[^/]+\/[0-9a-f-]{8,}|[a-z0-9-]+\.wd\d{1,3}\.myworkdayjobs\.com\/wday\/cxs\/[a-z0-9-]+\/[^/]+\/job\/[^?#]+)$/i;
 export const SEARCH_READS_MAX = 10;
 export const shownIn = (reply: string) => reply.split("\n").filter((l) => /^\s*\d+\. /.test(l)).length;
 export const closedSaidIn = (reply: string) => Number(/(\d+) (?:matching )?roles? (?:was|were) (?:left out: closed when checked|found, but)/.exec(reply)?.[1] ?? 0);

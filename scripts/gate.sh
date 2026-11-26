@@ -117,6 +117,15 @@ edge_tests=(
   tests/edge/model-calls.test.ts
   tests/edge/model-errors.test.ts
   tests/edge/agent-guards.test.ts
+  tests/edge/s3-r12-fixes.test.ts
+  tests/edge/s3-r12c-h022.test.ts
+  tests/edge/s3-r12c-h013.test.ts
+  tests/edge/s3-r12c-h015.test.ts
+  tests/edge/s3-r12c-review-871.test.ts
+  tests/edge/s3-r12e.test.ts
+  tests/edge/s3-r12f.test.ts
+  tests/edge/s3-r12g.test.ts
+  tests/edge/eval-support-judge.test.ts
   tests/edge/conversation-hardening.test.ts
   tests/edge/career-ingest.test.ts
   tests/edge/career-ingest-scale.test.ts
@@ -138,6 +147,7 @@ edge_tests=(
   tests/edge/control-state.test.ts
   tests/edge/fact-quarantine.test.ts
   tests/edge/reply-rubric.test.ts
+  tests/edge/research-reply.test.ts
 )
 
 portable_test_paths() {
@@ -183,6 +193,7 @@ browser_node_tests=(
   tests/career-browser-eval.test.cjs
   tests/career-challenge-shown.test.cjs
   tests/career-browser-strict.test.cjs
+  tests/career-browser-d072.test.cjs
   tests/career-browser-full-persona.test.cjs
   tests/career-dashboard-browser.test.cjs
   tests/career-extension-agent-submits.test.cjs

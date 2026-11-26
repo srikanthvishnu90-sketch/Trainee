@@ -14,6 +14,7 @@ import { CareerJobs } from "./router_core.career.js";
 import { applyEmailOf } from "./apply_email.ts";
 import { BACKLOG_MS, freshWhenSeen } from "./career_fresh.ts";
 import { FEEDS, isMoreProvider, MORE_PROVIDERS } from "./career_ingest_feeds.ts";
+import { BOARD_SLUG, boardHost, cappedText, guardedFetch, parseJson, POSTING_UUID, type Resolve } from "./posting_fetch.ts";
 // Feature 6: the posting URL-shape guard (packages/domain/166-career-url-shape.js, MUSE-F-010), copied byte for byte
 // (tests/edge/career-ingest-scale.test.ts fails while the copy is stale). It sets globalThis.CareerUrlShape.
 import "./career_url_shape.js";
@@ -39,6 +40,7 @@ export interface FeedPosting {
   ats_id?: string; department?: string; posted_at?: string | null; remote?: string; role_family?: string; seniority_band?: string;
   apply_email?: string | null; // WO-032: the address the posting asks applications to be emailed to (apply_email.ts)
   pay?: string | null; // WO-069: the pay the board states in its own structured fields (boardPay), or null
+  pay_zones?: PayZone[] | null; // D-069: every zone the board states (boardPayZones), none dropped; null when it states none
 }
 // A feed returns its postings; `complete: false` says the board has more than was read (closes nothing). WO-037:
 // `not_modified` says the board answered 304 to a conditional request (nothing changed since the last read); etag and
@@ -111,9 +113,11 @@ const TEXT_DEFAULTS = new Set(["location", "description", "department"]); // nev
 
 // ------------------------------------------------------------------------------------------------ the run
 // The fields that, when a board changes them, rewrite the stored posting; anything else seen again is only touched.
-const CONTENT = ["company", "title", "location", "url", "description", "department", "posted_at", "ats_id", "remote", "role_family", "seniority_band", "apply_email", "pay"] as const;
+const CONTENT = ["company", "title", "location", "url", "description", "department", "posted_at", "ats_id", "remote", "role_family", "seniority_band", "apply_email", "pay", "pay_zones"] as const;
 // Postgres hands timestamps back in its own format ("+00:00"), so a time compares as a time.
-const sameValue = (k: string, x: any, y: any) => k === "posted_at" ? (x ? Date.parse(x) : null) === (y ? Date.parse(y) : null) : (x ?? (TEXT_DEFAULTS.has(k) ? "" : null)) === (y ?? (TEXT_DEFAULTS.has(k) ? "" : null));
+// pay_zones (D-069) is an array of objects: it compares by value, keys sorted (jsonb hands keys back in its own order).
+const canon = (v: any): string => v === null || v === undefined ? "null" : Array.isArray(v) ? `[${v.map(canon).join(",")}]` : typeof v === "object" ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(",")}}` : JSON.stringify(v);
+const sameValue = (k: string, x: any, y: any) => k === "posted_at" ? (x ? Date.parse(x) : null) === (y ? Date.parse(y) : null) : k === "pay_zones" ? canon(x?.length ? x : null) === canon(y?.length ? y : null) : (x ?? (TEXT_DEFAULTS.has(k) ? "" : null)) === (y ?? (TEXT_DEFAULTS.has(k) ? "" : null));
 const same = (a: any, b: any) => CONTENT.every((k) => sameValue(k, a[k], b[k]));
 // The same test against a stored row without its description (2026-10-30): the description compares by its SHA-256.
 const sameKnown = (a: KnownPosting, b: FeedPosting, descriptionSha: string) => a.description_sha === descriptionSha && CONTENT.every((k) => k === "description" || sameValue(k, (a as any)[k], (b as any)[k]));
@@ -437,7 +441,7 @@ export function memoryPostingsDb(): PostingsDb {
 // ------------------------------------------------------------------------------------------------ Supabase store
 // The tables: supabase/migrations/20261019000001_career_postings.sql (pay: 20261022110000). `admin` is a service-role client.
 const COLUMNS = ["job_id", "provider", "board", "ats_id", "company", "title", "location", "url", "description", "department",
-  "posted_at", "remote", "role_family", "seniority_band", "apply_email", "pay", "first_seen_at", "last_seen_at", "closed_at"] as const;
+  "posted_at", "remote", "role_family", "seniority_band", "apply_email", "pay", "pay_zones", "first_seen_at", "last_seen_at", "closed_at"] as const;
 const LIST_COLUMNS = COLUMNS.filter((c) => c !== "description").join(",");
 // Requests and statements stay small (2026-10-30 production fix):
 //   an in() list is cut by its URL length (idChunks: at most URL_MAX characters, and ID_CHUNK ids): 100 Workday ids made
@@ -691,6 +695,43 @@ export function boardPay(provider: string, raw: any): string | null {
   } catch { /* a malformed pay field is no pay field */ }
   return null;
 }
+// D-069 (real set item 13, finding 4): every pay zone a board states, as a structured array, so no zone is dropped. `pay` above
+// stays the column's whole-range text (PAY_MAX); Robinhood's third zone (Lake Mary, FL: $130,000–$152,000) did not fit in it
+// and was lost. Each zone is the board's own numbers, currency and period: `text` is written the way boardPay writes a part,
+// `label` is the board's own zone title (its places), `min`/`max` its figures in its currency, `period` its interval as stated
+// (null when the board states none). Never converted, never estimated. Stored in career_postings.pay_zones (migration
+// 20261112130000).
+export interface PayZone { text: string; label: string | null; currency: string | null; min: number | null; max: number | null; period: "year" | "month" | "week" | "day" | "hour" | null }
+export const PAY_ZONES_MAX = 24;
+const ASHBY_PER: Record<string, PayZone["period"]> = { "1 YEAR": "year", "1 MONTH": "month", "1 WEEK": "week", "1 DAY": "day", "1 HOUR": "hour" };
+export function boardPayZones(provider: string, raw: any): PayZone[] {
+  const out: PayZone[] = [];
+  const put = (z: PayZone) => { if (out.length < PAY_ZONES_MAX && !out.some((x) => x.text === z.text)) out.push(z); };
+  const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n >= 0.995 ? n : null; };
+  const cur = (c: unknown) => { const x = oneLine(c).toUpperCase(); return /^[A-Z]{3}$/.test(x) ? x : null; };
+  try {
+    if (provider === "greenhouse") {
+      for (const r of Array.isArray(raw?.pay_input_ranges) ? raw.pay_input_ranges : []) {
+        const loN = Number(r?.min_cents) / 100, hiN = Number(r?.max_cents) / 100;
+        const s = span(money(loN, r?.currency_type), money(hiN, r?.currency_type), loN, hiN);
+        if (!s) continue;
+        const label = cut(oneLine(r?.title).replace(/[\s:;,.-]+$/, ""), 160).trim() || null;
+        put({ text: label ? `${s} (${label})` : s, label, currency: cur(r?.currency_type), min: num(loN), max: num(hiN), period: null });
+      }
+    } else if (provider === "lever") {
+      const text = boardPay("lever", raw), r = raw?.salaryRange;
+      if (text && r) put({ text, label: null, currency: cur(r.currency), min: num(r.min), max: num(r.max), period: (/^per-(year|month|week|day|hour)\b/.exec(oneLine(r.interval).toLowerCase())?.[1] ?? null) as PayZone["period"] });
+    } else if (provider === "ashby") {
+      for (const t of Array.isArray(raw?.compensation?.compensationTiers) ? raw.compensation.compensationTiers : []) {
+        const text = cut(oneLine(t?.tierSummary), 300).trim();
+        if (!text) continue;
+        const sal = (Array.isArray(t?.components) ? t.components : []).find((c: any) => c?.compensationType === "Salary") ?? null;
+        put({ text, label: cut(oneLine(t?.title), 160).trim() || null, currency: cur(sal?.currencyCode), min: num(sal?.minValue), max: num(sal?.maxValue), period: ASHBY_PER[oneLine(sal?.interval).toUpperCase()] ?? null });
+      }
+    }
+  } catch { /* a malformed pay field is no pay field */ }
+  return out;
+}
 // The list request each provider answers with its structured pay (Lever always includes salaryRange).
 const PAY_QUERY: Record<string, string> = { greenhouse: "pay_transparency=true", ashby: "includeCompensation=true" };
 const withPay = (provider: string, url: string) => PAY_QUERY[provider] ? `${url}${url.includes("?") ? "&" : "?"}${PAY_QUERY[provider]}` : url;
@@ -705,13 +746,31 @@ export async function sha256Hex(text: string): Promise<string> {
   return h;
 }
 // 2026-10-30: the bounded read's limits (see streamRead).
+// The board read behind a link a person pasted (apply_here.ts). Round 5: 32 MB (8 MB turned real boards' feeds, 9 to 12 MB,
+// into "not read"); the posting's own API is asked first (`one` below), so the feed is the fallback.
+export const PERSON_LINK_MAX_BYTES = 32 * 1024 * 1024;
+export const BOARD_MAX_BYTES = 64 * 1024 * 1024; // a whole board's list read whole (not streamed): stopped beyond this
 export const WHOLE_MAX = 2_000_000, XML_MAX = 8_000_000, STREAM_TIMEOUT_MS = 45000;
 // Where each JSON provider's job array is: a key of the root object, or the root itself (null).
 const CORE_ARRAY: Record<string, string | null> = { greenhouse: "jobs", lever: null, ashby: "jobs" };
-export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?: string; timeoutMs?: number; bodyHash?: boolean; stream?: boolean; wholeMax?: number } = {}): FetchFeed {
+export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?: string; timeoutMs?: number; bodyHash?: boolean; stream?: boolean; wholeMax?: number; wholeBytes?: number; personLink?: boolean; resolve?: Resolve } = {}): FetchFeed {
+  const wholeBytes = opts.wholeBytes ?? (opts.personLink ? PERSON_LINK_MAX_BYTES : BOARD_MAX_BYTES);
   const headers: Record<string, string> = { accept: "application/json" };
   if (opts.userAgent) headers["user-agent"] = opts.userAgent;
   const timeoutMs = opts.timeoutMs ?? 15000;
+  // Review of #775, round 2 (2026-11-13): a board read never follows a redirect unchecked (posting_fetch.ts guardedFetch:
+  // redirect "manual", at most 3 hops, each https, on the host asked or a job board's own host, never a never-open site), and
+  // a whole-body read stops at BOARD_MAX_BYTES (the streamed read below has its own bounds). The first address is built here
+  // from the provider list (career_ingest_feeds.ts), so no name lookup is made for it.
+  const guarded = async (url: string, init: RequestInit): Promise<Response> => {
+    const hostOf = (h: string) => { try { return new URL(h).hostname.toLowerCase(); } catch { return ""; } };
+    // Round 4: a scheduled ingest reads feeds the operator configured, and a board may redirect off its host (Recruitee to the
+    // employer's careers domain, Personio .de to .com): any public https host that passes the refusals is followed (never a
+    // never-open site, a reserved or private name, or a name that leads to a private address where a resolver exists). The
+    // first address is built here from the provider list, so only the hops are looked up. A pasted link's read (personLink,
+    // the chat path) stays on the host asked and the job boards' own hosts.
+    return (await guardedFetch(fetchFn as any, url, init, opts.personLink ? { allow: (h) => boardHost(h) || hostOf(h) === hostOf(url), resolve: null } : { resolve: opts.resolve, trustFirst: true })).res;
+  };
   // WO-037: `cond` sends the board's last validators (If-None-Match / If-Modified-Since); a 304 comes back as NOT_MODIFIED
   // (2026-10-30: it was null, so a board whose body was the JSON `null` read as "not modified").
   async function getJson(prov: string, url: string, deadline: number, cond?: Board, seen?: { etag?: string | null; last_modified?: string | null; body_sha?: string | null }): Promise<any> {
@@ -721,12 +780,12 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
     if (cond?.etag) h["if-none-match"] = cond.etag;
     if (cond?.last_modified) h["if-modified-since"] = cond.last_modified;
     let res: Response;
-    try { res = await fetchFn(url, { headers: h, signal: AbortSignal.timeout(left) }); }
+    try { res = await guarded(url, { headers: h, signal: AbortSignal.timeout(left) }); }
     catch (e) { throw new Error(e instanceof Error && /timed? ?out|abort/i.test(`${e.name} ${e.message}`) ? `timed out after ${timeoutMs / 1000}s` : e instanceof Error ? e.message : String(e)); }
     if (seen) { seen.etag = res.headers.get("etag"); seen.last_modified = res.headers.get("last-modified"); }
     if (res.status === 304 && cond) { try { await res.body?.cancel(); } catch { /* already closed */ } return NOT_MODIFIED; }
     if (res.status < 200 || res.status >= 300) { try { await res.body?.cancel(); } catch { /* already closed */ } throw new Error(`HTTP ${res.status}`); }
-    const text = await res.text();
+    const text = await cappedText(res, wholeBytes);
     if (opts.bodyHash && seen) {
       seen.body_sha = await sha256Hex(text);
       if (cond?.body_sha && cond.body_sha === seen.body_sha) return NOT_MODIFIED; // the same body as the last full read
@@ -759,14 +818,14 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
       if (cond && b.last_modified) h["if-modified-since"] = b.last_modified;
       if (rq.body) h["content-type"] = "application/json";
       let res: Response;
-      try { res = await fetchFn(rq.url, { method: rq.method, headers: h, body: rq.body, signal: AbortSignal.timeout(left) }); }
+      try { res = await guarded(rq.url, { method: rq.method, headers: h, body: rq.body, signal: AbortSignal.timeout(left) }); }
       catch (e) {
         if (page > startPage) { complete = false; more = true; break; }
         throw new Error(e instanceof Error && /timed? ?out|abort/i.test(`${e.name} ${e.message}`) ? `timed out after ${timeoutMs / 1000}s` : e instanceof Error ? e.message : String(e)); }
       if (res.status === 304 && cond && (b.etag || b.last_modified)) { try { await res.body?.cancel(); } catch { /* already closed */ } return null; }
       if (res.status < 200 || res.status >= 300) { try { await res.body?.cancel(); } catch { /* already closed */ } throw new Error(`HTTP ${res.status}`); }
       if (cond) validators = { etag: res.headers.get("etag"), last_modified: res.headers.get("last-modified") };
-      const text = await res.text();
+      const text = await cappedText(res, wholeBytes);
       if (cond && opts.bodyHash) {
         const sha = await sha256Hex(text);
         if (b.body_sha && b.body_sha === sha) return { same: true as const, sha, validators };
@@ -852,7 +911,7 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
     let streaming = false;
     try {
       let res: Response;
-      try { res = await fetchFn(rq.url, { method: rq.method, headers: h, signal: ctl.signal }); }
+      try { res = await guarded(rq.url, { method: rq.method, headers: h, signal: ctl.signal }); }
       catch (e) { throw new Error(ctl.signal.aborted || (e instanceof Error && /timed? ?out|abort/i.test(`${e.name} ${e.message}`)) ? `timed out after ${timeoutMs / 1000}s` : e instanceof Error ? e.message : String(e)); }
       const notModified = { postings: [], complete: false, not_modified: true as const, etag: b.etag ?? null, last_modified: b.last_modified ?? null, ...(opts.bodyHash ? { body_sha: b.body_sha ?? null } : {}) };
       if (res.status === 304 && (b.etag || b.last_modified)) { try { await res.body?.cancel(); } catch { /* closed */ } return notModified; }
@@ -980,7 +1039,23 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
     if (validators && (validators.etag || validators.last_modified)) return { postings, complete, ...part, ...validators };
     return complete && !more && startPage === 0 ? postings : { postings, complete, ...part };
   };
-  return opts.stream ? streamRead : legacy;
+  // Round 5: ONE posting by its id from the board's own posting API, where it has one (Greenhouse's job endpoint, Lever's
+  // posting endpoint), normalised as the feed's postings are; null when the provider has none or the answer is not a posting
+  // (the caller then reads the feed). The same guarded request, 2 MB.
+  const one = async (b: Board, atsId: string): Promise<FeedPosting | null> => {
+    if (!BOARD_SLUG.test(b.board)) return null;
+    const url = b.provider === "greenhouse" && /^\d{1,20}$/.test(atsId) ? `https://boards-api.greenhouse.io/v1/boards/${b.board}/jobs/${atsId}?content=true&pay_transparency=true`
+      : b.provider === "lever" && POSTING_UUID.test(atsId) ? `https://api.lever.co/v0/postings/${b.board}/${atsId.toLowerCase()}` : null;
+    if (!url) return null;
+    const res = await guarded(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) { try { await res.body?.cancel(); } catch { /* already closed */ } return null; }
+    const j = parseJson(await cappedText(res));
+    if (!j || typeof j !== "object" || Array.isArray(j)) return null;
+    const clean = scrubRaw(j);
+    const normalized = b.provider === "greenhouse" ? CareerJobs.normalizeGreenhouse({ jobs: [clean] }, b.board, b.company) : CareerJobs.normalizeLever([clean], b.board, b.company);
+    return toPostings(b, normalized, [j])[0] ?? null;
+  };
+  return Object.assign(opts.stream ? streamRead : legacy, { one });
 }
 // One read's normalized jobs -> the rows the table takes. Every row must fit the table's constraints
 // (20261019000000_career_postings.sql): one bad row would otherwise fail its board's write on every run. A posting
@@ -1006,6 +1081,7 @@ function toPostings(b: Board, normalized: any[], raw: any[]): FeedPosting[] {
         location: plainLine(p.location, 1000), url, description,
         department: plainLine(p.department, 300), posted_at: p.posted_at || null, remote: p.remote, role_family: p.role_family, seniority_band: p.seniority_band,
         apply_email: applyEmailOf({ description, url }), pay: pay === null ? null : cut(storable(pay), PAY_MAX) || null,
+        pay_zones: (() => { const z = boardPayZones(b.provider, raw[i]).map((x) => ({ ...x, text: storable(x.text), label: x.label === null ? null : storable(x.label) })); return z.length ? z : null; })(),
       });
     });
     return postings;

@@ -49,8 +49,15 @@ const D037: Record<string, string> = { ...REAL_SUBMIT, ...SEND_AS_PERSON };
 const D047: Record<string, string> = { CAREER_RESEARCH_REPLY: "on", CAREER_RESEARCH_BRIEF: "on" };
 // D-049 (architect ruling 2026-11-09; architect amendment): the chat File card (spec C.2) ships on.
 const D049: Record<string, string> = { CAREER_FILE_CARD: "on" };
-const ALL = [...ON, ...Object.keys(D037), ...Object.keys(D047), ...Object.keys(D049)].sort();
-const UNMEASURED = ["CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE"];
+// Architect amendment (D-060; owner, 2026-11-11, in chat: "Web research"): the knowledge layer and web research ship on, rolled back
+// with CAREER_KNOWLEDGE=off. It leaves the unmeasured list; the reply writer and the judge stay there.
+const D060: Record<string, string> = { CAREER_KNOWLEDGE: "on" };
+// Architect amendment (D-062; owner, 2026-11-11, in chat: "be able to answer emails, find alumni, do all of it"; accepts D-043):
+// public people search and the contact connector ship on, each rolled back with its own =off. Every send still needs the
+// person's yes to the exact message (D-MN-2); every other flag, list and check here is unchanged.
+const D062: Record<string, string> = { CAREER_PEOPLE_SEARCH: "on", CAREER_CONTACT_OUTREACH: "on" };
+const ALL = [...ON, ...Object.keys(D037), ...Object.keys(D047), ...Object.keys(D049), ...Object.keys(D060), ...Object.keys(D062)].sort();
+const UNMEASURED = ["CAREER_REPLY_WRITER", "CAREER_JUDGE"];
 
 Deno.test("D-036: production serves exactly the release flags on, with the staged brain", () => {
   eq(Object.keys(RELEASE_FLAGS).sort(), ALL);
@@ -152,7 +159,12 @@ Deno.test("D-036: every switch that stays off is off in production, and none can
   }
   for (const f of UNMEASURED) ok(RELEASE_NEVER_ON.includes(f), `${f} changes reply words and is not measured yet (D-037 condition 3): off`);
   ok(!replyWriterOn(releaseEnv(PROD)), "the reply writer stays off");
-  ok(!knowledgeOn(releaseEnv(PROD)), "the knowledge library stays off");
+  // Architect amendment (D-060): the knowledge library is served on, and its rollback turns it off.
+  ok(knowledgeOn(releaseEnv(PROD)) && knowledgeOn(PROD), "D-060: the knowledge library is on in production");
+  ok(!knowledgeOn(envOf({ CAREER_KNOWLEDGE: "off" })), "D-060: CAREER_KNOWLEDGE=off rolls it back");
+  // Architect amendment (D-062): people search and the contact connector left the never-on list too, and each rolls back.
+  ok(!RELEASE_NEVER_ON.includes("CAREER_KNOWLEDGE") && !RELEASE_NEVER_ON.includes("CAREER_PEOPLE_SEARCH") && !RELEASE_NEVER_ON.includes("CAREER_CONTACT_OUTREACH"), "D-060, D-062: knowledge, people search and the contact connector left the never-on list");
+  for (const [f, v] of Object.entries(D062)) { eq(releaseValue(PROD, f), v, `D-062: ${f} is served ${v}`); eq(releaseValue(envOf({ [f]: "off" }), f), "off", `D-062: ${f}=off rolls it back`); }
   eq(AGENT_BRAIN_RELEASED, false, "the full agent brain stays pinned off");
   eq(servedBrain(envOf({ CAREER_BRAIN: "agent" })), "router", "CAREER_BRAIN=agent cannot turn the agent brain on");
 });

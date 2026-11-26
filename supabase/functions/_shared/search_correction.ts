@@ -26,13 +26,25 @@ const CONTRIB = new RegExp(LEAD + "(?:(?:only|just)\\s+(?:individual[- ]contribu
 // The reason changes nothing, so it is set aside before the WHOLE-message forms below are read; anything else after the
 // correction ("remote only, and find me nurse jobs too") still makes the message something other than a correction.
 const REASON_TAIL = /\s*(?:[,;:]|\s-|\s—)?\s+(?:because|since|cause|cuz|as|i\s+(?:can'?t|cannot|can\s+not|don'?t|do\s+not|won'?t|will\s+not|am\s+not|'m\s+not)|i'?m|i\s+am|i\s+have|i've|i\s+live|i\s+moved|i\s+(?:want|prefer|need)|i'd|my|no\s+car)\b[^?]*$/;
+// MIRROR-1000 gaps (2026-11-11): the guard and how to answer ride along with a correction ("wrong city, I meant Houston. Tell
+// me what changed. Don't apply.", "cut it down to remote roles (tell me what changed). Only looking."). Those clauses change no
+// constraint, so they are set aside before the whole-message forms are read; whatever else is left still has to be the correction.
+const ASIDE = /^(?:(?:and|also|but|then)\s+)?(?:(?:two things|one thing)$|(?:please\s+)?(?:tell|show) me what(?:'s| has)? changed|what changed|number them(?: so i can pick)?|(?:i'?m\s+)?(?:only|just) (?:looking|searching|browsing)(?: for now)?|search only|(?:still\s+)?(?:don'?t|do not|no|not|never|nothing)\s+(?:\w+\s+){0,3}?(?:apply(?:ing)?|appl(?:ied|ications?)|queue(?:d|ing)?|submit(?:ted|ting)?|send(?:ing)?|sent)\b.*)$/;
+export function withoutAsides(message: string): string {
+  const parts = String(message ?? "").replace(/[’`]/g, "'").split(/\s*(?:[.;!()]|:\s|,\s*(?:and\s+)?)\s*/).map((x) => x.trim()).filter(Boolean);
+  const kept = parts.filter((x) => !ASIDE.test(lc(x).replace(/[,.]+$/, "")));
+  return kept.length && kept.length < parts.length ? kept.join(", ") : String(message ?? "");
+}
+// "cut it down to remote roles", "narrow it to remote jobs": remote only, said as a narrowing.
+const NARROW_REMOTE = /^(?:(?:ok|okay|actually|so|and|also|please)[,!:]?\s+)*(?:cut|narrow|trim|limit|filter)\s+(?:it|this|that|them|the list|the search)\s+(?:down\s+)?to\s+(?:only\s+)?(?:fully\s+)?remote(?:\s+(?:roles?|jobs?|positions?|ones|postings?))?(?:\s+only)?[.!]*$/;
 export function correctionOf(message: string): Correction | null {
+  message = withoutAsides(message);
   const whole = lc(message);
   if (!whole || whole.length > 120 || /\?\s*$/.test(whole)) return null;
   const c: Correction = {};
   const bare = whole.replace(REASON_TAIL, "").trim();
   const t = bare && bare !== whole && (REMOTE_ONLY.test(bare) || NOT_REMOTE.test(bare)) ? bare : whole;
-  if (REMOTE_ONLY.test(t)) c.remoteOnly = true;
+  if (REMOTE_ONLY.test(t) || NARROW_REMOTE.test(t)) c.remoteOnly = true;
   else if (NOT_REMOTE.test(t)) c.notRemote = true;
   if (CONTRIB.test(t)) c.contributorOnly = true;
   if (!c.remoteOnly && !c.notRemote && !c.contributorOnly) Object.assign(c, replacementOf(message));
@@ -44,12 +56,14 @@ export function correctionOf(message: string): Correction | null {
 // and level corrections were read, so "sorry, I meant data analyst roles" searched for the role "sorry meant data analyst" and
 // "switch it to Denver instead of Chicago" was taken as a new message recipient. The WHOLE message must be the replacement;
 // a role needs a job word, a place must be a known city or written with a capital ("try harder" changes nothing).
-const ROLE_WORD = /\b(?:analyst|analytics|engineer(?:ing)?|developer|designer|design|scientist|science|coordinator|manager|intern(?:ship)?s?|associate|consultant|specialist|marketing|sales|product|data|finance|financial|accounting|ux|software|operations|research(?:er)?|writer|nurse|teacher|recruiter)\b/i;
-const R_LEAD = /^(?:(?:ok|okay|so|actually|sorry|oops|wait|hmm|no|and|also|please|right|um|correction|quick question|one more thing|hey(?: trainee)?)[,!:]?\s+)*/i;
+export const ROLE_WORD = /\b(?:analyst|analytics|engineer(?:ing)?|developer|designer|design|scientist|science|coordinator|manager|intern(?:ship)?s?|associate|consultant|specialist|marketing|sales|product|data|finance|financial|accounting|ux|software|operations|research(?:er)?|writer|nurse|teacher|recruiter)\b/i;
+const R_LEAD = /^(?:(?:ok|okay|so|actually|sorry|oops|wait|hmm|no|and|also|please|right|um|correction|quick question|one more thing|hey(?: trainee)?|wrong (?:city|place|location|role|title|one))[,!:.]?\s+)*/i;
 const R_TAIL = /(?:\s+(?:please|thanks|thank you|pls|now|for me|asap))*[.!]*$/i;
 const R_FORMS: RegExp[] = [
   /^(?:i meant|i mean|make (?:that|it)|change (?:it|that|the (?:city|place|location|role|title|job))? ?to|switch (?:it|that|the (?:city|place|role))? ?to|swap (?:it|that) (?:to|for)|let'?s do)\s+(.+?)(?:\s+instead(?:\s+of\s+(.+?))?)?(?:,?\s+not\s+(.+?))?$/i,
   /^not\s+(?<y>.+?),\s*(.+?)$/i,
+  // "scratch Atlanta, do Berlin instead", "forget Denver, try Austin"
+  /^(?:scratch|drop|forget|skip)\s+(?<y>.+?),?\s+(?:do|try|use|go with|make it)\s+(.+?)(?:\s+instead)?$/i,
   /^(.+?),?\s+not\s+(.+?)$/i,
   /^(.+?)\s+instead(?:\s+of\s+(.+?))?$/i,
 ];
@@ -110,4 +124,22 @@ export function correctedAsk(message: string, discovery: unknown, now: number = 
   if (typeof d?.lastAskAt !== "number" || now - d.lastAskAt > CORRECTION_WINDOW_MS || now < d.lastAskAt) return null;
   const c = correctionOf(message);
   return c ? applyCorrection(prev, c) : null;
+}
+
+// MIRROR-1000 gaps (2026-11-11, RESPONSE-RULES R3): a follow-up that changes only a limit of the last search and names no role
+// ("the start date doesn't matter anymore, only paid roles", "same level as before") keeps that search's role and place. Read
+// as a new search it was searched for the role "paid". Null: the message names a role, is a question, or is no refinement.
+const REFINE_CUE = /\b(?:doesn'?t|does not|don'?t|do not|no longer) matters?\b|\bdon'?t care about\b|\bsame (?:level|seniority|place|city|role|pay) as before\b|\b(?:expand|widen|broaden)\s+(?:it|the search|this|that)\b|\bonly paid\b|\b(?:drop|remove|lose|forget)\s+the\s+[\w-]+\s+(?:filter|limit|requirement)\b/i;
+const NOT_REFINE = /\b(?:why|compare|did|which|what|how|who|when|where|page|rank|order|sort|best|worst)\b/i;
+export function refinedAsk(message: string, discovery: unknown, now: number = Date.now()): SearchAsk | null {
+  const d = discovery as { lastAsk?: SearchAsk; lastAskAt?: number } | null;
+  const prev = d?.lastAsk;
+  if (!prev || typeof prev !== "object" || typeof prev.role !== "string" || !prev.role.trim()) return null;
+  if (typeof d?.lastAskAt !== "number" || now - d.lastAskAt > CORRECTION_WINDOW_MS || now < d.lastAskAt) return null;
+  const body = withoutAsides(message);
+  if (body.length > 160 || /\?\s*$/.test(body) || ROLE_WORD.test(body) || !REFINE_CUE.test(body) || NOT_REFINE.test(body)) return null;
+  if (/\b(?:find|search|look for|show me|apply|queue|line up|submit|prepare|cover letters?|resume|answer|question|tailor|draft|send|message|email)\b/i.test(body)) return null;
+  // A new place said beside the refinement ("wrong city, I meant Berlin, only paid roles") replaces the old one.
+  const place = body.split(/\s*,\s*/).map((x) => replacementOf(x).place).find(Boolean);
+  return place ? { ...prev, place, remote: false, remoteOnly: false } : { ...prev };
 }

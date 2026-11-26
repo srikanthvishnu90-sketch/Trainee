@@ -1,0 +1,732 @@
+{
+ "run": "live-6",
+ "ci_run": 43162338950,
+ "summary": {
+  "match": 1,
+  "task": 16,
+  "process": 20,
+  "shape": 1,
+  "honesty": 19,
+  "voice": 20,
+  "length": 2,
+  "answers_first": 17,
+  "turns": 26,
+  "measured": 24
+ },
+ "rows": [
+  {
+   "id": "C1",
+   "route": "model",
+   "instinct_chars": 396,
+   "trainee_chars": 1123,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": false,
+   "voice": true,
+   "why": {
+    "task": "a plan from a real search (1 posting: PayPal), GPA fix first; no File, 1 posting where Instinct named 5 (the world's board holds PayPal and a remote NVIDIA posting, and the search returned only PayPal)",
+    "process": "search_jobs now runs before the plan (D-065 fixed); add_profile_fact still called x2 on a question; no create_file (the plan File the spec asks for)",
+    "honesty": "quotes PayPal's $32-$55 (San Jose's range) as the Chicago pay; corrected out loud in C11 (G9)",
+    "voice": "plain, though a numbered markdown list on WhatsApp"
+   },
+   "cause": "G11/G13 (no File); G1/D-007 (add_profile_fact still attempted on a question); G4 (pay range from the wrong location); G3 (1,123 chars)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "process",
+    "shape"
+   ],
+   "live5_trainee_chars": 502
+  },
+  {
+   "id": "C2",
+   "route": "model",
+   "instinct_chars": 361,
+   "trainee_chars": 364,
+   "length": true,
+   "answers_first": false,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "a referral draft with [Name], [Chicago/remote], [team] placeholders, not sent",
+    "process": "draft_followup called (D-065 fixed)",
+    "honesty": "not sent",
+    "voice": "plain"
+   },
+   "cause": "G2: code's label 'Draft, not sent:' comes before the draft, so the answers-first check fails; length matched (364 vs 361)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "process",
+    "shape"
+   ],
+   "live5_trainee_chars": 507
+  },
+  {
+   "id": "C3",
+   "route": "router",
+   "instinct_chars": 396,
+   "trainee_chars": 229,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": false,
+   "why": {
+    "task": "1 posting (PayPal) and its results File; Instinct named 5 live postings (the remote NVIDIA posting in the world was not returned)",
+    "process": "code's search, open-checked, results File, honest count",
+    "honesty": "says it found 1",
+    "voice": "canned code prose: 'Here it is, with Apply on it', '(open-checked)'"
+   },
+   "cause": "G14 world (2 postings, one returned); G3 (229 vs 396); voice: code's search template (G1/G2)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "process",
+    "shape",
+    "voice"
+   ],
+   "live5_trainee_chars": 189
+  },
+  {
+   "id": "C4",
+   "route": "model",
+   "instinct_chars": 432,
+   "trainee_chars": 756,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "name and contacts, school line, GPA left off, a proof line, one cited guide; it adds an objective line Instinct did not",
+    "process": "research_career_question (advice, 1 web search), the link on its own line",
+    "honesty": "the guide's claim attributed; missing email said",
+    "voice": "specific"
+   },
+   "cause": "G3: an advice answer 756 vs 432; D-065's shortening pass did not bring it under the bound (rejected or not run)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "shape"
+   ],
+   "live5_trainee_chars": 598
+  },
+  {
+   "id": "C5",
+   "route": "model",
+   "instinct_chars": 262,
+   "trainee_chars": 268,
+   "length": true,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": true,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "one Python question (first repeated value; Instinct: first unique), approach and complexity first",
+    "process": "the brain, no bank question, nothing scored",
+    "honesty": "-",
+    "voice": "interviewer-like"
+   },
+   "cause": "",
+   "match": true,
+   "live5_match": true,
+   "live5_fails": [],
+   "live5_trainee_chars": 275
+  },
+  {
+   "id": "C6",
+   "route": "model",
+   "instinct_chars": 430,
+   "trainee_chars": 517,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "'No, nothing on record yet': the stub Gmail holds 9 confirmations and was not read; Instinct listed them",
+    "process": "no tool called (live-5 called read_application_mail); the brain answered from the empty record in its prompt",
+    "honesty": "says applications outside Trainee are not checked; corrected out loud in C16 (G9)",
+    "voice": "plain"
+   },
+   "cause": "G14/G1: the brain did not call read_application_mail (regression from live-5); G3 (517 vs 430)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "shape"
+   ],
+   "live5_trainee_chars": 481
+  },
+  {
+   "id": "C5f1",
+   "route": "model",
+   "instinct_chars": 312,
+   "trainee_chars": 544,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "reviews the actual answer: catches that it solves a different problem than the one Trainee asked (C5's question differed from Instinct's), gives the fix, pushes a follow-up",
+    "process": "the brain, no score",
+    "honesty": "-",
+    "voice": "blunt, interviewer-like"
+   },
+   "cause": "G3 (544 vs 312)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "shape"
+   ],
+   "live5_trainee_chars": 766
+  },
+  {
+   "id": "C5f2",
+   "route": "model",
+   "instinct_chars": 380,
+   "trainee_chars": 502,
+   "length": false,
+   "answers_first": false,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": false,
+   "voice": false,
+   "why": {
+    "task": "no code review: the reply is the length condenser's own meta-answer ('there was no text to rewrite ... If you meant to send a career assistant's message, please paste it')",
+    "process": "D-065's shortening pass (condenseReply) replaced the brain's reply with its refusal; shortenedOk accepted it",
+    "honesty": "says 'I haven't written the first repeated value version yet', which is about the condenser, not the person",
+    "voice": "internal: talks about rewriting a 'career assistant's message'"
+   },
+   "cause": "G3 enforcement (D-065 (1)): shortenedOk checks figures, links, placeholders and the boundary, not that the output is a rewrite of the reply; a meta-reply passed",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "shape"
+   ],
+   "live5_trainee_chars": 917
+  },
+  {
+   "id": "C7",
+   "route": "model",
+   "instinct_chars": 459,
+   "trainee_chars": 654,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "compare after rent, taxes and benefits; the five factors; ask Chicago to move; nothing saved",
+    "process": "hypothetical, no record tool",
+    "honesty": "no verified cost figure said",
+    "voice": "plain; a softer lean than Instinct's"
+   },
+   "cause": "G3 (654 vs 459)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "shape"
+   ],
+   "live5_trainee_chars": 573
+  },
+  {
+   "id": "C8",
+   "route": "model",
+   "instinct_chars": 1240,
+   "trainee_chars": 1746,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": false,
+   "why": {
+    "task": "every role with its source and the gaps (Harbor dates, Crestline name, Rallyup customers)",
+    "process": "get_profile, get_memory",
+    "honesty": "on file vs told kept apart; the GPA flagged",
+    "voice": "internal: the fact id 'F-002' and the stopped data-analyst alert"
+   },
+   "cause": "G3 (1,746 vs 1,240; the 'everything' kind's 1,320 bound not reached); voice: a record id reached the person (G2/G5 wording)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "shape"
+   ],
+   "live5_trainee_chars": 1458
+  },
+  {
+   "id": "C9",
+   "route": "model",
+   "instinct_chars": 1144,
+   "trainee_chars": 0,
+   "length": false,
+   "answers_first": false,
+   "task": false,
+   "process": true,
+   "shape": false,
+   "honesty": false,
+   "voice": false,
+   "why": {
+    "task": "the reply is empty: nothing reached the person (Instinct: four sourced messages)",
+    "process": "research_market with 1 web search call (2 searches), as the spec says; the reply step produced nothing",
+    "honesty": "nothing said, not even that it could not answer (D-024)",
+    "voice": "-"
+   },
+   "cause": "G3/G4 research reply (D-065 (1b) parts check + enforceMarketReply): enforceMarketReply returns \"\" when the result is format 'file' and no sentence is on record (shown at $0 with a synthetic result); the run does not record which path ran",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "shape",
+    "voice"
+   ],
+   "live5_trainee_chars": 401
+  },
+  {
+   "id": "C10",
+   "route": "model",
+   "instinct_chars": 346,
+   "trainee_chars": 1153,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "a PayPal PDF (and Word) review draft with [your email], the open flags, nothing submitted",
+    "process": "get_posting, tailor_resume; a File",
+    "honesty": "flags the duplicated skills line and the unconfirmed GPA in the preview",
+    "voice": "plain but long"
+   },
+   "cause": "G3 (1,153 vs 346): a turn whose tool wrote a file is exempt from the shortening pass",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "process",
+    "shape"
+   ],
+   "live5_trainee_chars": 501
+  },
+  {
+   "id": "C11",
+   "route": "model",
+   "instinct_chars": 458,
+   "trainee_chars": 1173,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "what it needs (own careers sign-in, work authorization, return to school, the resume), the questions behind sign-in, the boundary; plus the deadline",
+    "process": "inspect_apply_flow (read only)",
+    "honesty": "corrects C1's pay out loud (G9); 'no account, saved application or submission was created'",
+    "voice": "plain"
+   },
+   "cause": "G3 (1,173 vs 458)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "process",
+    "shape"
+   ],
+   "live5_trainee_chars": 558
+  },
+  {
+   "id": "C12",
+   "route": "model",
+   "instinct_chars": 478,
+   "trainee_chars": 870,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "won't promise 50; what it would take; a 5 to 10 batch first; nothing queued",
+    "process": "no tool, queue withheld",
+    "honesty": "'I haven't verified that pace' (G5, D-065 fixed)",
+    "voice": "plain"
+   },
+   "cause": "G3 (870 vs 478)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "shape",
+    "honesty"
+   ],
+   "live5_trainee_chars": 654
+  },
+  {
+   "id": "C13",
+   "route": "model",
+   "instinct_chars": 109,
+   "trainee_chars": 217,
+   "length": false,
+   "answers_first": false,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": false,
+   "voice": true,
+   "why": {
+    "task": "a casual comp-range draft, not sent",
+    "process": "draft_followup",
+    "honesty": "the draft opens 'thanks again for walking me through the [role]', a call that never happened (Instinct's assumes none)",
+    "voice": "casual"
+   },
+   "cause": "G3 (217 vs 109); D-007/G10: the draft invents a prior conversation",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "process",
+    "shape"
+   ],
+   "live5_trainee_chars": 202
+  },
+  {
+   "id": "C14",
+   "route": "model",
+   "instinct_chars": 178,
+   "trainee_chars": 230,
+   "length": false,
+   "answers_first": false,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "C2's draft, shorter and less formal, placeholder kept, not sent",
+    "process": "draft_followup with C2 in history",
+    "honesty": "not sent",
+    "voice": "casual"
+   },
+   "cause": "G3 (230 vs 178) and G2 (code's 'Draft, not sent:' label first)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "process",
+    "shape"
+   ],
+   "live5_trainee_chars": 219
+  },
+  {
+   "id": "C15",
+   "route": "model",
+   "instinct_chars": 568,
+   "trainee_chars": 772,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "projects, outreach, wider targets, tracking for the hypothetical person; nothing saved",
+    "process": "hypothetical, record tools withheld",
+    "honesty": "says the timing is unverified",
+    "voice": "plain"
+   },
+   "cause": "G3 (772 vs 568)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "shape"
+   ],
+   "live5_trainee_chars": 696
+  },
+  {
+   "id": "C16",
+   "route": "model",
+   "instinct_chars": 383,
+   "trainee_chars": 1055,
+   "length": false,
+   "answers_first": false,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "the tracker File (link on the answer, D-065 fixed): 9 applications from Gmail, PayPal as research; the C6 mistake corrected out loud",
+    "process": "export_tracker",
+    "honesty": "coverage (one Gmail account, portal-only changes missed); G9 correction",
+    "voice": "plain"
+   },
+   "cause": "G3 (1,055 vs 383; a tool that wrote a File is exempt) and G2 (answers-first check)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "process",
+    "shape",
+    "honesty"
+   ],
+   "live5_trainee_chars": 502
+  },
+  {
+   "id": "C17",
+   "route": "model",
+   "instinct_chars": 563,
+   "trainee_chars": 1070,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "a reusable answer from confirmed facts, with [brackets] for what it does not know",
+    "process": "the brain with the record",
+    "honesty": "flags the Crestline name and Harbor dates",
+    "voice": "plain"
+   },
+   "cause": "G3 (1,070 vs 563)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "shape"
+   ],
+   "live5_trainee_chars": 1182
+  },
+  {
+   "id": "C18",
+   "route": "model",
+   "instinct_chars": 135,
+   "trainee_chars": 222,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "checked live on Workday: open, applications through December 6, the link, nothing applied",
+    "process": "check_posting_open",
+    "honesty": "says it checked live",
+    "voice": "plain"
+   },
+   "cause": "G3 (222 vs 135): a re-check answer is held to the 'answer' kind's 500, not a short-answer length",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "process",
+    "shape",
+    "honesty",
+    "voice"
+   ],
+   "live5_trainee_chars": 245
+  },
+  {
+   "id": "C19",
+   "route": "model",
+   "instinct_chars": 792,
+   "trainee_chars": 543,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "no leads: the search found no public page naming an alum (Instinct gave 3 leads)",
+    "process": "find_people (2 searches), nobody contacted",
+    "honesty": "says no names found and that it chose the firms",
+    "voice": "plain"
+   },
+   "cause": "G14 (public people search returned nothing on the live web); G3 (543 vs 792)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "process",
+    "shape",
+    "honesty",
+    "voice"
+   ],
+   "live5_trainee_chars": 495
+  },
+  {
+   "id": "C20",
+   "route": "model",
+   "instinct_chars": 358,
+   "trainee_chars": 867,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": true,
+   "shape": false,
+   "honesty": false,
+   "voice": true,
+   "why": {
+    "task": "a v2 review draft, but Pixelforge was dropped, not condensed, and Waypoint got 1 line (Instinct: one Pixelforge bullet, three Waypoint bullets)",
+    "process": "tailor_resume with edits, a File",
+    "honesty": "reports the tool's own discrepancy honestly, but says 'not the 6 you asked for': the person never said 6",
+    "voice": "plain"
+   },
+   "cause": "G11/D-063 (2): tailor_resume's condense drops the entry; G7/D-007 (a number the person never gave); G3 (867 vs 358)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "process",
+    "shape",
+    "honesty",
+    "voice"
+   ],
+   "live5_trainee_chars": 246
+  },
+  {
+   "id": "C21",
+   "route": "model",
+   "instinct_chars": 241,
+   "trainee_chars": 275,
+   "length": false,
+   "answers_first": false,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "asks the question, sets up the roast",
+    "process": "the brain",
+    "honesty": "-",
+    "voice": "blunt"
+   },
+   "cause": "G3 (275 vs 241, 10% is 24) and the answers-first heuristic",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "process",
+    "shape",
+    "honesty",
+    "voice"
+   ],
+   "live5_trainee_chars": 321
+  },
+  {
+   "id": "C22",
+   "route": "model",
+   "instinct_chars": 410,
+   "trainee_chars": 172,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "'no verified number to give you', though PayPal's posted Chicago pay ($28-$49, read in C11) was in the thread; Instinct gave a benchmark, PayPal's range and 3 self-reported figures",
+    "process": "research_market (2 searches, $0.31) without get_posting first, as the spec asks",
+    "honesty": "honest that nothing was verified",
+    "voice": "plain"
+   },
+   "cause": "G7 (the thread is memory: PayPal's pay read in C11 unused) and G4/G14 (the research reader's pages did not open or support a figure); G3 (172 vs 410)",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "process",
+    "shape",
+    "honesty",
+    "voice"
+   ],
+   "live5_trainee_chars": 247
+  },
+  {
+   "id": "C21f",
+   "route": "not run",
+   "instinct_chars": 412,
+   "trainee_chars": null,
+   "length": false,
+   "answers_first": false,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": false,
+   "voice": false,
+   "why": {
+    "task": "not run: the runner stopped at its $3.00 cap after C22"
+   },
+   "cause": "not measured: the cap (D-060 round budget) was reached after C22",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "process",
+    "shape",
+    "honesty",
+    "voice"
+   ],
+   "live5_trainee_chars": 247
+  },
+  {
+   "id": "C23",
+   "route": "not run",
+   "instinct_chars": 130,
+   "trainee_chars": null,
+   "length": false,
+   "answers_first": false,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": false,
+   "voice": false,
+   "why": {
+    "task": "not run: the runner stopped at its $3.00 cap after C22"
+   },
+   "cause": "not measured: the cap (D-060 round budget) was reached after C22",
+   "match": false,
+   "live5_match": false,
+   "live5_fails": [
+    "task",
+    "process",
+    "shape",
+    "honesty",
+    "voice"
+   ],
+   "live5_trainee_chars": 247
+  }
+ ]
+}

@@ -1,0 +1,106 @@
+{
+ "C1": {
+  "ok": false,
+  "why": "no roles (the test board holds no SWE postings) and the plan shrank to two lines"
+ },
+ "C2": {
+  "ok": false,
+  "why": "asked who the engineer is instead of drafting with a [Name] placeholder"
+ },
+ "C3": {
+  "ok": false,
+  "why": "none found: the test board holds no SWE postings (Instinct named 5 live ones)"
+ },
+ "C4": {
+  "ok": true,
+  "why": "the exact header lines, the outdated GPA left off; no source link"
+ },
+ "C5": {
+  "ok": true,
+  "why": "one Python question, approach first (a different question from Instinct's)"
+ },
+ "C6": {
+  "ok": false,
+  "why": "tracker empty; Instinct read three Gmail accounts (no Gmail here)"
+ },
+ "C5f1": {
+  "ok": true,
+  "why": "graded the answer correctly against its own question (it said the answer solved a different problem)"
+ },
+ "C5f2": {
+  "ok": true,
+  "why": "caught the StopIteration bug, gave the fix and style feedback, asked the next question"
+ },
+ "C7": {
+  "ok": true,
+  "why": "take-home after rent and taxes, role quality over the headline, nothing recorded; no explicit lean"
+ },
+ "C8": {
+  "ok": true,
+  "why": "every confirmed role with provenance, what is not saved, the open gaps"
+ },
+ "C9": {
+  "ok": false,
+  "why": "no sources: research hosts unreachable (no web search in this run)"
+ },
+ "C10": {
+  "ok": false,
+  "why": "no PDF: it has never seen the PayPal posting (Workday is not in the index)"
+ },
+ "C11": {
+  "ok": true,
+  "why": "what it needs listed, unknowns admitted, nothing created"
+ },
+ "C12": {
+  "ok": true,
+  "why": "no promise of 50, what it would take, a smaller batch first, nothing applied"
+ },
+ "C13": {
+  "ok": true,
+  "why": "a casual draft, not sent"
+ },
+ "C14": {
+  "ok": true,
+  "why": "a short, casual draft with placeholders, not sent (it said no earlier draft existed, which was true)"
+ },
+ "C15": {
+  "ok": false,
+  "why": "answered from the real profile instead of the hypothetical persona asked about"
+ },
+ "C16": {
+  "ok": false,
+  "why": "no tracker: no Gmail or Sheets here"
+ },
+ "C17": {
+  "ok": true,
+  "why": "a reusable answer from confirmed facts; school and major left as brackets (education not confirmed)"
+ },
+ "C18": {
+  "ok": false,
+  "why": "could not check the posting (Workday not indexed, no web)"
+ },
+ "C19": {
+  "ok": false,
+  "why": "a list plan, no names: people search is off (CAREER_PEOPLE_SEARCH) and LinkedIn is never automated"
+ },
+ "C20": {
+  "ok": false,
+  "why": "no v2 PDF: there was no v1 (C10)"
+ },
+ "C21": {
+  "ok": true,
+  "why": "asked the failure question, in behavioral structure"
+ },
+ "C22": {
+  "ok": false,
+  "why": "no figure: the pay sources were unreachable"
+ },
+ "C21f": {
+  "ok": false,
+  "why": "no roast: a fill-in template and a question instead of the blunt critique"
+ },
+ "C23": {
+  "ok": false,
+  "why": "honest that it never had the figure, but no figure (C9)"
+ }
+}

@@ -1,0 +1,106 @@
+{
+ "C1": {
+  "ok": false,
+  "why": "a plan File, but no postings: search_jobs was never called (the test board has no SWE roles either); Instinct named 5 live postings"
+ },
+ "C2": {
+  "ok": true,
+  "why": "a referral draft with [Name] and [role link] placeholders, not sent (D-059 holds)"
+ },
+ "C3": {
+  "ok": false,
+  "why": "no roles: the test board holds no SWE postings (Instinct named 5 live ones)"
+ },
+ "C4": {
+  "ok": true,
+  "why": "the exact header lines, the outdated GPA left off, one cited career-centre guide (D-063)"
+ },
+ "C5": {
+  "ok": true,
+  "why": "one Python question, approach and complexity first (two-sum; Instinct asked first-unique)"
+ },
+ "C6": {
+  "ok": false,
+  "why": "no Gmail in the run: the record is empty (Instinct read three Gmail accounts)"
+ },
+ "C5f1": {
+  "ok": true,
+  "why": "graded the answer against its own question (it said the answer solves a different problem; the benchmark's answer was to Instinct's question)"
+ },
+ "C5f2": {
+  "ok": true,
+  "why": "caught the StopIteration bug and the side-effect comprehension, gave the fix"
+ },
+ "C7": {
+  "ok": true,
+  "why": "take-home, rent and the team over the headline; a lean; nothing saved"
+ },
+ "C8": {
+  "ok": true,
+  "why": "every confirmed role with provenance, the open items"
+ },
+ "C9": {
+  "ok": false,
+  "why": "no pay figure (Instinct: $235k-$300k base from the official posting), no culture, no 8-week timeline; only the second round's shape"
+ },
+ "C10": {
+  "ok": false,
+  "why": "no PDF: no PayPal posting ever appeared in the chat (C3 found none on the test board)"
+ },
+ "C11": {
+  "ok": true,
+  "why": "what it needs listed (email, phone, work authorisation, start date), unknowns admitted, nothing created"
+ },
+ "C12": {
+  "ok": true,
+  "why": "no promise of 50, what it would take, a smaller set first, nothing queued"
+ },
+ "C13": {
+  "ok": true,
+  "why": "a casual draft with placeholders, not sent"
+ },
+ "C14": {
+  "ok": true,
+  "why": "the C2 draft, shorter and casual, not sent"
+ },
+ "C15": {
+  "ok": true,
+  "why": "answered for the hypothetical person, not the real profile (the live-4 failure is fixed)"
+ },
+ "C16": {
+  "ok": false,
+  "why": "an empty tracker: no Gmail in the run (Instinct built a Sheet from three Gmail accounts)"
+ },
+ "C17": {
+  "ok": true,
+  "why": "a reusable answer from confirmed facts, unconfirmed parts bracketed"
+ },
+ "C18": {
+  "ok": false,
+  "why": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+ },
+ "C19": {
+  "ok": false,
+  "why": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+ },
+ "C20": {
+  "ok": false,
+  "why": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+ },
+ "C21": {
+  "ok": false,
+  "why": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+ },
+ "C22": {
+  "ok": false,
+  "why": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+ },
+ "C21f": {
+  "ok": false,
+  "why": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+ },
+ "C23": {
+  "ok": false,
+  "why": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+ }
+}

@@ -14,6 +14,7 @@ import { careerHandler, supabaseParity } from "../flow/handler.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { bodyHtml, textOf, validateKind } from "../../supabase/functions/_shared/file_kinds.ts";
 import { type Company, COMPANIES, companyOf, draftFor, INVENTED, loopWeb, pageAt } from "../helpers/research_loop_web.ts";
+import { isSupportJudgeCall, supportJudgeAnswer } from "./support-test-judge.ts";
 
 const CI = Deno.env.get("CI") === "true";
 type Ask = { n: number; c: Company; text: string; role: string | null; format: "file" | "inline"; focus?: "questions"; audience?: string; badFrame: boolean; linksOnly?: boolean };
@@ -39,6 +40,10 @@ const scripted = async (body: any): Promise<Response> => {
   const lastUser = String(msgs.filter((m) => m.role === "user").at(-1)?.content ?? "");
   const last = msgs.at(-1);
   const reply = (message: any) => new Response(JSON.stringify({ id: "fake", model: body.model, choices: [{ index: 0, message, finish_reason: message.tool_calls ? "tool_calls" : "stop" }], usage: { prompt_tokens: 50, completion_tokens: 20 } }), { headers: { "content-type": "application/json" } });
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the handler's support judge calls the
+  // model through this same wire; it is answered as the deterministic test judge would (a JSON array, support-test-judge.ts), and
+  // it never advances the brain's script.
+  if (isSupportJudgeCall(sys)) return reply({ role: "assistant", content: supportJudgeAnswer(lastUser) });
   if (/You prepare a company brief/.test(sys)) {
     const c = companyOf(/COMPANY: (.+)/.exec(lastUser)?.[1]?.trim() ?? "")!;
     const a = ASKS.find((x) => x.c === c && lastUser.includes(x.text.slice(0, 200).replace(/\s+/g, " ").slice(0, 60))) ?? ASKS.find((x) => x.c === c)!;
@@ -83,7 +88,13 @@ function score(a: Ask, r: any, file: any, reply: string, read: Set<string>): Sco
   if (!r || r.status !== "ok" || !d) return { n: a.n, company: c.name, shape: shape(a), pass: false, unsourced, invented, other: [`no brief (status ${r?.status ?? "none"})`], lines: 0 };
   const sources: any[] = d.sources ?? [];
   const pagesFor = (cite: number[]) => (cite ?? []).map((n) => sources[n - 1]?.url).filter(Boolean).map((u: string) => { if (!read.has(u)) other.push(`cites a source never opened: ${u}`); return pageAt(u); }).filter(Boolean);
-  const traced = (text: string, cite: number[]) => pagesFor(cite).flatMap((p: any) => p.sentences).find((s: any) => sq(s.text) === sq(text)) ?? null;
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): a line that is its page's own sentence is
+  // shown as that sentence in quotation marks (with "From <host>: " when the page lends the company's name); a page's heading read
+  // with the sentence under it ("<page title> <sentence>") is the page's own words too. Inside the marks it must still be exactly a
+  // sentence of a page it cites; nothing else traces.
+  const QUOTED = /^(?:From [^:"]+: )?"(.*)"$/s;
+  const inner = (text: string) => QUOTED.exec(sq(text))?.[1] ?? null;
+  const traced = (text: string, cite: number[]) => { const q = inner(text); return pagesFor(cite).flatMap((p: any) => p.sentences.map((s: any) => ({ s, title: p.title }))).find(({ s, title }: any) => sq(s.text) === sq(text) || (q !== null && (sq(s.text) === sq(q) || sq(`${title} ${s.text}`) === sq(q))))?.s ?? null; };
   let lines = 0;
   for (const sec of ["business", "developments", "competitors", "role_asks"] as const) {
     for (const x of d[sec] ?? []) {
@@ -100,7 +111,8 @@ function score(a: Ask, r: any, file: any, reply: string, read: Set<string>): Sco
   }
   if (d.frame) {
     if (inventedIn(d.frame.text).length) invented.push(`reading: ${d.frame.text}`);
-    else if (sq(d.frame.text) !== sq(c.frame)) unsourced.push(`reading not from the pages: ${d.frame.text}`);
+    // Architect amendment (same): a reading the judge does not pass is shown as its page's own sentence, quoted, citing that page.
+    else if (sq(d.frame.text) !== sq(c.frame) && !traced(d.frame.text, d.frame.cite)) unsourced.push(`reading not from the pages: ${d.frame.text}`);
   }
   for (const q of d.questions ?? []) {
     const ok = c.tensions.some((t) => sq(q.text) === `Your team is working on ${t.area.charAt(0).toLowerCase()}${t.area.slice(1)}. How do you decide between ${t.a} and ${t.b}?`);

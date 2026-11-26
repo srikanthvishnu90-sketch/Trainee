@@ -7,6 +7,7 @@ import { supabaseAlertStore } from "../_shared/career_alert_store.ts";
 import { supabasePostingsDb } from "../_shared/career_ingest.ts";
 import { supabaseMailStore } from "../_shared/career_mail_store.ts";
 import { CAREER_READ_SCOPE, careerToken, careerTokenFor, readMailSince, type TokenDeps } from "../_shared/career_mail_gmail.ts";
+import { accountToken, googleAccounts, readAllMailboxes } from "../_shared/career_google_accounts.ts"; // D-062
 import { mailModelWiring } from "../_shared/career_mail_model.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { supabaseDigestStore, supabaseInterviewStore } from "../_shared/career_brief_store.ts";
@@ -86,7 +87,8 @@ serve((req) => {
     mail: proactiveSwitches(Deno.env).mail ? {
       store: () => supabaseMailStore(admin),
       confirm: () => supabaseConfirmStore(admin),
-      read: (userId, since, now) => readMailSince({ fetch, token: careerToken(grant(admin)) }, userId, since, now),
+      // D-062: every Google account the person connected, each email tagged with the account it was read from.
+      read: (userId, since, now) => readAllMailboxes({ fetch, accounts: (u) => googleAccounts(admin, u), token: accountToken({ ...grant(admin), admin }, CAREER_READ_SCOPE) })(userId, since, now),
       // WO-040: the model's second look at ambiguous mail (Claude, through the gateway), only once the owner turns it on.
       model: Deno.env.get("CAREER_MAIL_MODEL") === "on" ? () => mailModelWiring(Deno.env, admin) : undefined,
     } : undefined,

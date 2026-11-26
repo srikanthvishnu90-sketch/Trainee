@@ -33,8 +33,10 @@ Deno.test("SERIAL-1410/1 the ask: these, both, all of them, the top N, the first
   eq(applyManyAsk("apply to the top 2"), { kind: "first", n: 2 });
   eq(applyManyAsk("apply to the first two"), { kind: "first", n: 2 });
   eq(applyManyAsk("apply to 3 roles"), { kind: "first", n: 3 });
-  eq(applyManyAsk("apply to 25 data analyst jobs"), null, "a count with a role family is the broad ask (the batch delegation's), not the list's");
-  eq(applyManyAsk("apply to 15 software engineering intern roles"), null, "the owner's delegation message stays the delegation's (career_batch_apply)");
+  // architect amendment (D-092, owner 2026-11-16, and the owner's mass-apply directive of that day): a count with a role is the
+  // searched first-N ask, no longer the router's batch delegation (career_batch_apply). Only the route changed.
+  eq(applyManyAsk("apply to 25 data analyst jobs"), { kind: "first", n: 25, what: { role: "data analyst jobs", words: ["data", "analyst"], place: null } }, "a count with a role is the searched first-N ask (D-092)");
+  eq(applyManyAsk("apply to 15 software engineering intern roles"), { kind: "first", n: 15, what: { role: "software engineering intern roles", words: ["software", "engineering", "intern"], place: null } }, "the owner's message is the searched first-N ask (D-092)");
   eq(applyManyAsk("apply to 2 of them"), { kind: "first", n: 2 });
   eq(applyManyAsk("apply to the first one"), { kind: "nth", i: 1 });
   eq(applyManyAsk("apply to the second one"), { kind: "nth", i: 2 });

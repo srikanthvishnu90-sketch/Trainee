@@ -1022,3 +1022,202 @@ Failures per case over the five passes: H034 5, H029 5, H018 5, H011 4, H025 3, 
 - Noise, not fixed: H021, H035, H001, H027 (one pass each, judge disagreement, sonnet passed; H001's reply is the prompt's own
   prescribed opener; H027's flagged M&A topics are the question bank's).
 - Proof: `tests/architect/dev-reply-quality.test.ts` (offline). Re-run: pending (the lead measures).
+
+---
+
+## S3 sitting on 2789d3090 (subscription, dev, bar 37/38 per pass, D-056): H022 (both judges), H013 and H015 (split)
+Branch `ag/s3-r12c-replies`. Probes: `--subscription --brain staged --set dev --only H013,H015,H022,H002,H005`, 5 cases a pass.
+- H022 (p2, both judges): turn 2 "which of my skills match a data analyst role?" searched; the empty search made it an evidence
+  turn, so the reply pipeline ran. What they said in turn 1 was saved as drafts (not confirmed), so no ledger unit held it (the
+  ledger is confirmed facts only, D-007); "SQL" and "Reporting" were read as unknown employers; and the brain's own judgement
+  ("SQL for pulling data …") had nothing to rest on. Every mapping sentence was dropped; the repair kept the suggestion unit.
+  A traced replay also found turn 1's "BI analyst" read as an employer and carried, dropping every later sentence.
+  Lines: `reply_pipeline.ts` verifyTagged (`unknownIn`, the untagged-sentence path); `career_brain.ts` runReplyPipeline call.
+  Fix: 4875c5fea (the check, never the drafting ledger, reads the person's own messages as "said" units; they back no employer
+  or posting claim; a word their own lines use plainly is no employer) and e6284bdf7 (when every tool unit is an empty search's
+  count line, a sentence to the person naming their own words, with no employer, posting claim, unsaid figure or status claim,
+  stands; a word before a job title's singular head noun is no employer).
+- H013 (p2, sonnet): "stop, don't submit anything yet" -> list_applications -> the strict applications hold dropped the model's
+  "nothing goes out without your yes" (no allow-list word; or joined to a status clause). Line: `career_brain.ts` keptSentences.
+  Fix: b607840de, 4992ad5b7: the consent rule (Trainee's rule about what it will do, not a status claim) stays; joined to a
+  status clause, only the rule's own clause stays; a past-tense, counted, outcome or "you did" sentence is held as before.
+- H015 (p1, haiku): the people-matching stop offered "a coffee-chat email to a role at a named company" though the person named
+  Bluepeak Networks. Line: `142-career-router.js` handlePeopleMatchingStop `alt`. Fix: 9bdb0fba1: with a company named, the
+  alternative is the single-draft route for that company, for them to send themselves, quoting a command that route answers;
+  the company is read from the person's words (detypo had re-spelled "Networks" as "Network", CB-0441 class).
+- Re-run (5 cases a pass): baseline 2789d3090 5 passes: H013 fail 3/5, H022 fail 3/5, others 0. After 4992ad5b7, 6 passes:
+  H013 0/6, H015 0/6, H002 0/6, H022 1/6 (haiku only: "SQL for pulling and querying data" read as a capability not stated),
+  H005 1/6 (haiku only: "still waiting for your yes", the confirm-claim class, not touched here).
+- Review of #871 (independent, REJECT high on 4312fcc9d) and the fix 159735b0d/eadd752e8/c3f636b07: e6284bdf7's empty-search
+  path is REMOVED. It stood a you/your sentence sharing one word with the person's messages without the support judge (invented
+  skills, degrees and outcomes; "12" from "2012"; a pasted job post or a friend's resume read as theirs; flipped negations).
+  Now every sentence goes to the support judge with the person's own words as evidence (`ownStatements`: first-person, non-question,
+  non-negated sentences of their own messages; pasted, quoted or third-party text excluded); a figure only a said unit holds must
+  match as a whole number; a sentence using a name as an employer never rests on a said unit (`saidBarred`, B2). The strict
+  applications hold keeps only Trainee's own consent rule (no status word, application noun, name, or "nothing else/new/more", B3).
+  The people stop names a company only when the ask names one to reach (two companies or hearsay: the general alternative).
+  Re-run at c3f636b07 (5 cases a pass): 4 passes, 20/20.
+- Proof: `tests/edge/s3-r12c-h022.test.ts`, `-h013.test.ts`, `-h015.test.ts` (offline, in gate.sh).
+
+---
+
+## S3 sitting #6 on 52e2025c9 (subscription, dev, bar 37/38 per pass, D-056): H019 (both judges), H022 (both judges), H009 (split)
+Branch `ag/s3-r12e`. Sitting: p1 37/38 (H019), p2 37/38 (H009), p3 36/38 (H009, H022). Probes: `--subscription --brain staged --set dev
+--only H019,H022,H009,H013,H015,H002,H005`, 7 cases a pass. A scratch replay (not committed) logged every model call of H022, so the
+draft, the code reasons and what the judge was shown are read from the calls, not guessed.
+- H019 (p1, both judges): "show me exactly what you changed and why" with no tailoring. The router claims it (career_tailor_diff,
+  "No tailoring has run in this conversation yet …"), but D-061 G1 sent it to the brain (g1_model_decides) with that line as data.
+  No brain tool reads the tailoring diff (it lives on the thread record, handleTailorDiffAsk); the brain looked at list_applications,
+  and the applications hold (career_brain.ts applicationsEnforced, look.own) kept only code's status line, "Trainee's saved record
+  shows no applications of yours …": an answer to a question nobody asked. Line: `career_staged.ts` g1CodeAnswers (G1_ACTIONS).
+  Fix: career_tailor_diff is code's, G1 (b), as career_list_reference is: the change list (or its honest absence) is code's own
+  record of its tailoring. A hypothetical or several asks beside it stay the brain's (G8, G13). The hold is unchanged.
+- H022 (p3, both judges): turn 2 searched (0 postings), so the reply pipeline ran. The person's words are check-only units (withSaid,
+  S3 r12c), never in the drafting ledger, so the draft can never cite them. A sentence the draft tagged with what it could cite (the
+  search's count line, [E2]) was checked against the cited units alone (`cited = ids`): their words were never put beside it, and
+  every mapping sentence failed in code before any judge ("'2' is in no cited unit", "'excel' is in no cited unit"). The replay showed
+  the same in turn 1 ("With SQL, Excel, Tableau and 2 years of reporting, you could get hired as …": "cites no evidence unit"); the
+  untagged form of the same sentences stood. Of the four candidate causes: ownStatements keeps their sentence ("I know SQL, Excel and
+  Tableau and did 2 years of reporting" is one said unit); the drafts saved as facts are not needed (the said unit carries the words);
+  the "couldn't verify" text is the fallback after the repair, a consequence. The cause is that the judge (and code's layer A) was not
+  shown the said units for a tagged sentence. Line: `reply_pipeline.ts` verifyTagged (the free path's pool and the cited-unit path).
+  Fix (partial): their words join a tagged sentence's units as they join an untagged one's (`withSaidUnits`). Nothing else moves: a said unit
+  backs only a clause with no employer subject and no employer frame (saidBarred), a figure only as a whole number they said, never a
+  posting claim (forClaim), and every clause still goes to code's check and the support judge; a judge "no" drops it.
+  Left as is (seen in the replay, rarer): "SQL is your strongest card" reads "SQL is" as an employer frame and drops the sentence.
+  Loosening that would touch the B2 rule of the review of #871, so it stays.
+  NOT FIXED (probes 3 and 4 of 4 still fail H022): asked with the real support judge (subscription, scratch replay), every mapping
+  sentence is refused against their words even once they are shown, and rightly by the judge's rule: "SQL, Excel and Tableau are the
+  core tools of data analyst work" is general career knowledge that no unit states, and a clause may rest on one unit only (CodeRabbit
+  on #849). A second cause sits beside it: a clause with a figure they said ("2 years of reporting") must be placed in one unit by
+  layer A before any judge, which a mapping never is ("it states a fact … no unit holds it"). An untagged draft on a no-tool turn
+  stands unchecked, which is why the case passes on some passes and fails on others: the outcome turns on whether the brain searches
+  and tags. A legitimate fix needs an architect ruling, not a check loosened here: either code's general career knowledge (the S3 r12
+  entry-route table, entry_routes.ts) also states what each field commonly works with, so the role's half of a mapping has a unit,
+  and a clause may rest on one said unit plus one such knowledge unit; or a read tool the brain calls for what the role needs.
+- H009 (p2, p3, haiku only): the router's move reply "Moved — Cascade Retail Group now sits at the Interview rounds stage on your
+  tracker. The move is recorded as your report … your word is the evidence." Haiku's quoted evidence was the stored row's JSON, which
+  the code check did not find, and its note said the reply never says onsite. Line: `142-career-router.js` handleTrackMove. Fix: the
+  reply names the step in the person's own words (the words the stage matched in their message, never a model's) with the tracker's
+  stage beside it when they differ, "is now at the onsite round (Interview rounds on your tracker)", and the evidence sentence is gone.
+- Proof: `tests/edge/s3-r12e.test.ts` (offline, in gate.sh; the H019, H009 and H022-judge tests fail on 52e2025c9, the two guard tests
+  pass on both).
+- D-100 (architect ruling on the H022 finding above; abfecdef2): the entry-route table states what each field commonly involves (tool or
+  skill classes, at most two examples each), as its own general-knowledge unit beside the search's suggestion unit; a clause addressed
+  to the person with no employer subject or frame, posting, pay, status or outcome claim may be judged against one said or record unit
+  plus one such unit, both marked in one source; code holds their half (every name and figure in their words, figures whole numbers);
+  a `uses` unit alone never backs a clause about them. The search_jobs description says a skills-fit question with no posting in hand
+  needs no search (steering only). Checked with the real support judge (scratch, subscription): "Your SQL, Excel and Tableau cover the
+  query, spreadsheet and dashboard tools data analysis involves" and "Your 2 years of reporting match the recurring reporting in data
+  analysis work" now stand (yes on the pair, no on their words alone); "Your Python and SQL …" and "You know Power BI …" are refused in
+  code; a comparative ("is the closest experience to it") is still refused by the judge.
+- Probes at abfecdef2 (`--only H022,H019,H009`, 4 passes): 3/3, 3/3, 2/3, 2/3. H019 and H009 4/4. H022 2/4, both failures haiku-only
+  splits on a different class: turn 2 did not search in any pass (the nudge), so the reply took the plain path, and the brain's own
+  embellishments were read as unstated skills: "Your 2 years of reporting shows you can turn numbers into something others use" (p3),
+  "Excel covers analysis and quick modeling" (p4). Not fixed here: the plain path has no support check by design (an advice turn), and
+  checking it is a separate ruling.
+- Fit rule (a339b806a): the brain's system prompt says, for every fit or mapping answer, to credit the person only with what they
+  stated, in their terms, and to say what the role involves about the role. Probes at a339b806a (`--only H022,H019,H009`, stopped
+  for the review after 4 passes): 3/3, 3/3, 2/3 (H022, a split), 3/3.
+- Independent review of a339b806a (REJECT, high), fixed:
+  - B1 (8a0489ddb): the change-list trigger also read "what's different between a data analyst and a data scientist?", "what changed in
+    the job market this year?" and "what did you change in the Acme one?" (another tailoring), and after a tailoring by tailor_resume code
+    said none had run. Code's answer now needs an ask about Trainee's own edit (or one naming a resume, CV, tailoring or bullets), no
+    posting, job, market, role or comparison, a named company equal to the recorded tailoring's, and no tailor_resume mark (tailorTool,
+    which that tool now writes on the thread) without a diff.
+  - B2 (d75c9e6cd): their words backed clauses with no proper name ("The role pays $40 an hour." on "I want $40 an hour"; "Their team needs
+    SQL"; "I applied … for you"). Now their words back only a clause whose subject is the person, tagged or not (`saidSubject`).
+  - B3 (d95f3a5fc): lower-case examples formed a pair ("Your SQL and power bi skills …"), NOT_PAIR missed pay and outcome words, and an
+    unnamed team frame passed. Now every field-knowledge example, and any class word credited to them, must be in their words.
+  - The search_jobs nudge is reverted (4b8607c2a, architect): the field half arrives only with a search result, and a turn with no tool
+    read is unchecked. H009's move reply names the tracker's stage for a verb ("applied") or a negated step word (7852507c7).
+
+## S3 sitting #7 on 72e15122e (subscription, dev, bar 37/38 per pass, D-056): H035 (both judges, p1 and p2), H034 (both judges, p2)
+Branch `ag/s3-r12f`. Sitting: p1 37/38 (H035), p2 36/38 (H035, H034). Across seven sittings most real misses share one cause, and
+these three show its strict side. A scratch replay (not committed, subscription) logged the draft, what the pipeline dropped and the
+ledger of H035 and H034.
+- The pattern: a turn where search_jobs returned 0 postings is tagged and has a tool read, so the reply pipeline runs. Lax, it let
+  invented claims through (rejected in review); strict, it drops every sentence that answered. In the replay, H035's draft said what
+  was searched, that nothing matched, offered a watch and asked one question; the first sentence (tagged with the count unit) was
+  refused, the repair's restatement of it failed again, a "saved as a standing rule" sentence was rightly dropped (remember_instruction
+  had refused), and the offer and question fell with the names they carried. H034's repair restated the count and the field's uses
+  without tags, and both failed. What was delivered:
+  - H035 p1: "I can still keep it in mind for this chat. Nothing has been sent or applied to." (a reference back to the dropped,
+    refused rule);
+  - H035 p2: "Your city is not on file. Nothing has been sent or applied to." plus code's search-again line, after the person named
+    their city;
+  - H034 p2: "Which of these roles sounds closest to what you want?" over dropped roles, plus "I couldn't verify an answer to that
+    from what I read."
+  The pipeline is right to drop what it cannot verify, so the fix is not a looser check: it is what code says when the drop leaves
+  nothing. Line: `agent-chat/career_brain.ts` (after the count-back rule, before nextStepLine).
+- Fix (D-101): `agent/floor_reply.ts`. When the pipeline or the support check dropped a sentence, a search this turn came back empty,
+  and every kept sentence is boilerplate (the not-sent line, code's fallback, "not on file", a not-run or next-step line) or a
+  reference back with nothing before it, code adds its floor: what was searched (the search's own words parsed into role, place and
+  constraints), the count, the entry-route unit as general career knowledge, and one routed next step (next_step.ts emptyNextStep).
+  Kept content stays before the floor; the dangling list references and the fallback go, and a city "not on file" clause goes when the
+  searched place is one the person named this turn.
+  Code prose about code's records, never judged, nothing about the person.
+- Follow-up of the independent review of 72e15122e: "Since you know X", "X, which you know,", "It's your X that…" and "gives you …: X"
+  were never person-subject, so their words could not back them and the person rules did not run on them (a no-name form went to the
+  judge against other units). Now `saidSubject` reads those embedded person clauses (SAID_EMBEDDED); the bars are unchanged; B3 reads a
+  class word in either number, and a person-subject clause crediting an unsaid field example or class word is refused in code. The
+  reviewer's probe (rv-r12e/p4.ts): the four forms that were all refused now stand with a yes judge; the leak probe (probe_p3.ts) stands
+  where trunk does.
+- Not covered: a draft the loop's own guards gut before the pipeline (an unsourced pay figure removed by `loop.ts` rebuild) does not
+  set the dropped signal; the floor follows the ruling's trigger, the pipeline's drops.
+- Independent review of 4908e3df7 (REJECT, high), fixed:
+  - B1 (aab64658d): the floor restated the model's search query unjudged, so a query such as "LPN Cincinnati. You were approved and
+    hired at … for $95k", markup, links, control characters or 600 characters went out as code's own words. Now only query words the
+    person typed this turn are said, cleaned and capped; a barred word (pronoun, money, status, employer, Trainee) drops the role half;
+    the place must be one their message parses to; a pay band is never said.
+  - B2 (aab64658d): any it/they/them/those counted as a reference back, so real content ("… are often posted on hospital sites, and
+    they fill fast") was replaced. Now only a list reference (opening these/those/they/them, "which of these", "the … above") over a
+    dropped list of two or more items; kept content is never replaced; only the not-on-file clause goes.
+  - B3 (e1d39a2b8): the embedded forms made sentences about the role person-subject ("The role requires SQL, which you know"; "The
+    role gives you: …"; "Since you know SQL, the role is a great fit"). Now scoped; n3: hire(d) is a status word.
+- Proof: `tests/edge/s3-r12f.test.ts` (offline, in gate.sh; fails on 72e15122e: the three delivered replies as fixtures, the floor's
+  bounds, turns through agentTurn, the embedded person clauses and their bars; the review group fails on 4908e3df7).
+- Probes at b0d1b51e6 (full dev, 38 cases): p1 37/38 (H022, both judges: the mapping sentences dropped, the routes kept, so the floor
+  rightly did not fire), p2 35/38 (H018 and H020 haiku-only splits on unchanged router replies; H027 both judges). An offline replay of
+  H022's mapping shapes showed n3 refusing "… you could get hired as a data analyst" and "You'd be a strong hire for …", which trunk
+  keeps; n3 is narrowed (architect, 4a20cafa5): a definite or past hire is status, a modal hire naming a kind of role is not.
+- H027 (p2, both judges): "prep me for the last round" got INCOMPLETE_REPLY after 2 steps with no tool run. Nine replays did not
+  reproduce it; the record fits one path only: the first answer failed the completeness check (missingAnswerBody), the one text-only
+  repair ran with tool_choice none, and its answer carried a tool call, which loop.ts never runs on a repair, so the turn ended
+  unfinished. Two causes: the subscription bridge (evals/subscription/claude_cli.ts render) did not carry tool_choice none to the CLI
+  and still listed the tools (an eval parity gap: the API refuses a tool call under none). Fix (03054c8b3): under none the bridge says
+  text only and lists no tools. A loop.ts change that kept the text of such a repair (a5c7add05, then widened in 39f1f7d30) was
+  REVERTED on the architect's ruling after the review of 39f1f7d30: it broke tests/architect/brain-receipt-completeness.test.ts ("a
+  repair that ignores text-only mode cannot repeat the write"), and the widened claim patterns stripped true and generic sentences
+  ("Your tracker has 3 rows" after list_applications; "Job alerts include new postings …"). loop.ts equals trunk's; production never
+  reaches that path, since the API refuses a tool call under none. Not max_tokens: the bridge never reports it. Proof: the H027 group
+  in `tests/edge/s3-r12f.test.ts` (bridge parity fails on b0d1b51e6; loop parity with trunk).
+- Follow-up (not fixed here): a receipt gap on the normal path, on trunk too. A sentence stating a record's new state as done, with no
+  tool that wrote it ("Your tracker now shows <employer> at Final.", "Done: <employer> is recorded in your applications.", "<employer>
+  is on your tracker now.", "Your applications list now includes <employer>."), passes `loop.ts unbackedClaims`. Its fix needs claim
+  patterns that tell a state written this turn from a state read (list_applications) or a general statement about the feature, under
+  brain-receipt-completeness.
+
+## S3 sitting #8 on 6b02ea49a (subscription, dev, 5 passes: 38, 37, 38, 38, 36): H035 and H018
+Branch `ag/s3-r12g`.
+- H035: the D-101 floor said "I searched for roles near Columbus (day shift) …": the person typed a plural of the search's role word,
+  and the floor's typed-word check (review B1 of 4908e3df7) matched words exactly, so the role half was dropped. Line:
+  `agent/floor_reply.ts` searchedParams. Fix: typed and searched words are compared through one deterministic stem (a plural -s/-es,
+  -ies, an -ing or -er ending); the search's own form is said; cleaning, caps and barred words are unchanged.
+- H018: an ask to share their resume with "your whole network" without being asked each time got the router's contact-details answer
+  first ("I don't have people's contact details …"), though no contact was asked for, and a fact that quoted their standing-permission
+  words back, which a judge read as wording offered to them. Line: `142-career-router.js` handlePeopleMatching (people_matching_stop).
+  Fix: with no ask for people or contacts the answer is about the resume (no network to share with; one approved draft at a time to a
+  named person; a yes every time), a standing-yes ask is answered without quoting it ("Not asking you each time would be a standing yes I will not keep: I ask for your yes every time …", which keeps tests/architect/dev-reply-quality.test.ts DEV-4), and the alternatives stay; the contact answer is
+  unchanged for a contact ask. Both bundles rebuilt.
+- Proof: `tests/edge/s3-r12g.test.ts` (offline, in gate.sh; fails on 6b02ea49a).
+- H035 again (probe-r12g-full-1 at b87421597, haiku-only split): "Nothing has been sent or applied to. Do you want me to search a wider
+  area around Columbus?" and then code's "couldn't verify" fallback. The kept offer counted as substance, so the floor did not fire, and
+  the reply never said what was searched. D-101 amendment (architect): such a kept text, only questions and offers with no statement of
+  what was searched, gets the searched line first (B1 rules), no second step or routes line, and no fallback after a kept question.
+  Line: `agent/floor_reply.ts` searchedFirst. Proof: the amendment test in `tests/edge/s3-r12g.test.ts`.
+- H034 (probe-r12g-full-2 at b87421597, both judges): "Nothing has been sent or applied for. Saved: you're a cashier … Which of those
+  roles sounds closest to what you want?" after the pipeline dropped the roles. The model's "Saved: …" receipt counted as substance, so
+  the floor did not fire, and the reference back stayed. Fix (D-101 amended): a "Saved: …" receipt is boilerplate (kept, unchanged,
+  no answer); the reference back to the dropped list goes and the floor adds the searched line, the routes and one step. Line:
+  `agent/floor_reply.ts` piecesOf. Proof: the H034 amendment test in `tests/edge/s3-r12g.test.ts`.

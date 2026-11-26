@@ -5,7 +5,7 @@
 // sent the graduation-window template with "as of 2026-10-13" and then "The limit resets at midnight UTC."
 //
 // The limits, from the model call's own refusal (model_calls.ts ModelUnavailableError types):
-//   global        the product's AI budget is used up (model_budget.ts, $70 for the cycle): the owner must approve more
+//   global        the product's AI budget is used up (model_budget.ts, $93 for the cycle): the owner must approve more
 //   budget_day    an approved day window's own cap is used up: it resets when the budget day turns, midnight US Central
 //                 (model_budget_day: the America/Chicago date; chicagoDay is its twin), said in the person's own zone
 //   budget_after  the budget window ended: the owner must approve more
@@ -13,6 +13,9 @@
 //   paused        the owner switched the AI off for a while (MODEL_BUDGET_PAUSED or its database twin)
 //   unchecked     the budget could not be read, so no call was made
 //   rate_limit    the AI provider refused for rate (HTTP 429) or was overloaded (529); its retry-after, when it gave one
+//   spend_limit   D-065: the provider refused at a spending limit set on the account ("Your credit balance is too low", "You have
+//                 reached your specified API usage limits"), or a caller's own spend cap refused it the same way (the mirror
+//                 runner's --budget-usd). Live round 1 said "an error on its side, not a limit" there, which was false.
 // Any other model failure is an outage, not a limit (stop "outage", below): the router answers when it has a real intent for
 // the message, else the turn is held the same way (architect amendment, r-states 2026-11-10). Nothing here changes any limit.
 import { ModelBudgetBlockedError, ModelUnavailableError } from "./model_calls.ts";
@@ -21,7 +24,9 @@ import type { PersonZone } from "./person_zone.ts";
 
 // outage: not a limit (stopOfError never returns it); the model call failed. Architect amendment (r-states, 2026-11-10): the
 // turn is held the same way, so the router's catch-all never answers a different question.
-export type LimitStop = "global" | "budget_day" | "budget_after" | "budget_before" | "paused" | "unchecked" | "rate_limit" | "outage";
+export type LimitStop = "global" | "budget_day" | "budget_after" | "budget_before" | "paused" | "unchecked" | "rate_limit" | "spend_limit" | "outage";
+// The provider's own words for a spending-limit refusal (Anthropic answers HTTP 400 invalid_request_error with one of these).
+export const SPEND_LIMIT = /\bcredit balance is too low\b|\breached your (?:specified )?(?:api )?usage limits?\b|\bspend(?:ing)? (?:limit|cap)\b|\bbilling (?:limit|hard limit)\b|\bbudget (?:reached|exceeded|cap)\b/i;
 export const HELD_INTENT = "career_limit_held";
 
 export function stopOfError(e: unknown): LimitStop | null {
@@ -32,6 +37,7 @@ export function stopOfError(e: unknown): LimitStop | null {
   if (t === BUDGET_ERROR_TYPE.before) return "budget_before";
   if (t === BUDGET_ERROR_TYPE.paused) return "paused";
   if (t === BUDGET_ERROR_TYPE.unavailable) return "unchecked";
+  if (SPEND_LIMIT.test(`${e.detail ?? ""} ${e.message ?? ""}`)) return "spend_limit";
   if (e.status === 429 || e.status === 529 || /rate_limit|overloaded/.test(t)) return "rate_limit";
   return null;
 }
@@ -67,7 +73,9 @@ function timeIn(ms: number, zone: PersonZone | null): string {
 }
 
 // What stopped and the next step, said for this limit. A time is given only when one is known (the provider's retry-after).
-export function nextStepOf(stop: LimitStop, zone: PersonZone | null, retryAt: number | null = null): string {
+// `noneSent`: the turn's recorded effects show nothing ran that could have sent or applied (effectsOf); only then does the
+// spending-limit line say "nothing was sent".
+export function nextStepOf(stop: LimitStop, zone: PersonZone | null, retryAt: number | null = null, noneSent = true): string {
   switch (stop) {
     case "rate_limit": return retryAt
       ? `The AI service is turning requests away for now. Say "continue" after ${timeIn(retryAt, zone)} and I'll pick it up.`
@@ -80,6 +88,7 @@ export function nextStepOf(stop: LimitStop, zone: PersonZone | null, retryAt: nu
     case "budget_before": return `Trainee's AI budget hasn't opened yet. Once it opens, say "continue" and I'll pick it up.`;
     case "paused": return `Trainee's AI is switched off for a short while. Say "continue" later and I'll pick it up.`;
     case "unchecked": return `I couldn't check Trainee's AI budget, so I made no AI call. Say "continue" later and I'll pick it up.`;
+    case "spend_limit": return `The AI was stopped at a spending limit, so this was not finished${noneSent ? " and nothing was sent" : ""}. Once more spend is approved, say "continue" and I'll pick it up.`;
     case "outage": return `The AI service failed on this one (an error on its side, not a limit). Say "continue" in a minute and I'll pick it up.`;
   }
 }
@@ -102,9 +111,34 @@ export function taskOf(message: string): string {
   return of ? `your question about ${of.trim()}` : "your last request";
 }
 
-// The reply in place of an answer the AI could not give: the kept task named, the next step, nothing applied for.
-export function heldReply(message: string, stop: LimitStop, zone: PersonZone | null, retryAt: number | null = null): string {
-  return `I couldn't finish ${taskOf(message)} without the AI: it is kept. ${nextStepOf(stop, zone, retryAt)} Nothing was applied for, and searching postings still works now.`;
+// Review 2026-11-13 (fail closed): what the turn did before the AI stopped, from the loop's own record of its tool calls
+// (agent/loop.ts TurnResult.tool_calls: name, ok, effect). "Nothing was sent" / "Nothing was applied for" is said only when
+// that record shows no write ran and none failed partway. An external action is never run by the loop (it is put up for the
+// person's yes), so it is named as waiting. A write that ran is named; a write or an unknown tool that failed, or a turn whose
+// record is missing (null), is said as not confirmed.
+export interface TurnEffectCall { name: string; ok: boolean; effect: "read" | "write_own" | "external" | null }
+const words = (name: string) => String(name || "a step").replace(/_/g, " ");
+export function effectsOf(calls: readonly TurnEffectCall[] | null): { none: boolean; line: string } {
+  if (!Array.isArray(calls)) return { none: false, line: "I couldn't confirm what this turn did before it stopped, so whether anything was sent or applied for is not confirmed." };
+  const ran = [...new Set(calls.filter((c) => c.ok && c.effect === "write_own").map((c) => words(c.name)))];
+  const unsure = [...new Set(calls.filter((c) => !c.ok && c.effect !== "read").map((c) => words(c.name)))];
+  const waiting = calls.filter((c) => c.ok && c.effect === "external").length;
+  if (!ran.length && !unsure.length && !waiting) return { none: true, line: "" };
+  const out: string[] = [];
+  if (ran.length) out.push(`Before it stopped, this ran: ${ran.join(", ")}.`);
+  if (unsure.length) out.push(`${unsure.join(", ")} failed partway, and I couldn't confirm what it changed.`);
+  if (waiting && !ran.length && !unsure.length) out.push(`Nothing was sent: ${waiting === 1 ? "one action waits" : `${waiting} actions wait`} for your yes.`);
+  else if (waiting) out.push(`${waiting === 1 ? "One action waits" : `${waiting} actions wait`} for your yes and was not sent.`);
+  return { none: false, line: out.join(" ") };
+}
+
+// The reply in place of an answer the AI could not give: the kept task named, the next step, and what the turn did (`effects`:
+// its recorded tool calls; [] when no tool ran, null when the record is missing).
+export function heldReply(message: string, stop: LimitStop, zone: PersonZone | null, retryAt: number | null = null, effects: readonly TurnEffectCall[] | null = []): string {
+  const e = effectsOf(effects);
+  return e.none
+    ? `I couldn't finish ${taskOf(message)} without the AI: it is kept. ${nextStepOf(stop, zone, retryAt)} Nothing was applied for, and searching postings still works now.`
+    : `I couldn't finish ${taskOf(message)} without the AI: it is kept. ${nextStepOf(stop, zone, retryAt, false)} ${e.line} Searching postings still works now.`;
 }
 
 // The task a limit stopped, kept on the thread (discovery.heldAtLimit), and the message that resumes it, once a minute has

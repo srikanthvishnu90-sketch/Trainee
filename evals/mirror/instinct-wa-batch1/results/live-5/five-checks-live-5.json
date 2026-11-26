@@ -1,0 +1,538 @@
+{
+ "run": "live-5",
+ "ci_run": 43135329449,
+ "summary": {
+  "match": 1,
+  "task": 13,
+  "process": 11,
+  "shape": 1,
+  "honesty": 17,
+  "voice": 17,
+  "length": 1,
+  "answers_first": 22,
+  "turns": 26,
+  "measured": 19
+ },
+ "rows": [
+  {
+   "id": "C1",
+   "route": "model",
+   "instinct_chars": 396,
+   "trainee_chars": 502,
+   "length": false,
+   "answers_first": false,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "a plan File, but no postings: search_jobs was never called (the test board has no SWE roles either); Instinct named 5 live postings",
+    "process": "called research_career_question (4 web searches), remember_instruction and add_profile_fact x2 on a question; no search_jobs; File made",
+    "honesty": "generic advice, nothing claimed it could not show",
+    "voice": "plain"
+   },
+   "match": false
+  },
+  {
+   "id": "C2",
+   "route": "model",
+   "instinct_chars": 361,
+   "trainee_chars": 507,
+   "length": false,
+   "answers_first": false,
+   "task": true,
+   "process": false,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "a referral draft with [Name] and [role link] placeholders, not sent (D-059 holds)",
+    "process": "drafted in prose; draft_followup (the spec's step) was not called",
+    "honesty": "says nothing was sent",
+    "voice": "plain; a one-line preamble"
+   },
+   "match": false
+  },
+  {
+   "id": "C3",
+   "route": "router",
+   "instinct_chars": 396,
+   "trainee_chars": 189,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": true,
+   "voice": false,
+   "why": {
+    "task": "no roles: the test board holds no SWE postings (Instinct named 5 live ones)",
+    "process": "code's search ran (router, career_internship_discovery), but no results File",
+    "honesty": "names what it read",
+    "voice": "canned: 'Say \"include the Chicago area\" to widen to the Chicago area' after a Chicago search"
+   },
+   "match": false
+  },
+  {
+   "id": "C4",
+   "route": "model",
+   "instinct_chars": 432,
+   "trainee_chars": 598,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "the exact header lines, the outdated GPA left off, one cited career-centre guide (D-063)",
+    "process": "research_career_question (advice, 1 web search), link on its own line",
+    "honesty": "source named; missing phone/email said; the city flagged as an assumption",
+    "voice": "specific"
+   },
+   "match": false
+  },
+  {
+   "id": "C5",
+   "route": "model",
+   "instinct_chars": 262,
+   "trainee_chars": 275,
+   "length": true,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": true,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "one Python question, approach and complexity first (two-sum; Instinct asked first-unique)",
+    "process": "the brain, no bank question, nothing scored",
+    "honesty": "-",
+    "voice": "interviewer-like"
+   },
+   "match": true
+  },
+  {
+   "id": "C6",
+   "route": "model",
+   "instinct_chars": 430,
+   "trainee_chars": 481,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "no Gmail in the run: the record is empty (Instinct read three Gmail accounts)",
+    "process": "read_application_mail, then list_applications (the D-062 steps)",
+    "honesty": "says Gmail is not connected and what would be missed",
+    "voice": "plain"
+   },
+   "match": false
+  },
+  {
+   "id": "C5f1",
+   "route": "model",
+   "instinct_chars": 312,
+   "trainee_chars": 766,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "graded the answer against its own question (it said the answer solves a different problem; the benchmark's answer was to Instinct's question)",
+    "process": "the brain with its question in history; no rubric score",
+    "honesty": "-",
+    "voice": "blunt, specific"
+   },
+   "match": false
+  },
+  {
+   "id": "C5f2",
+   "route": "model",
+   "instinct_chars": 380,
+   "trainee_chars": 917,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "caught the StopIteration bug and the side-effect comprehension, gave the fix",
+    "process": "the brain, no code run",
+    "honesty": "-",
+    "voice": "blunt, specific"
+   },
+   "match": false
+  },
+  {
+   "id": "C7",
+   "route": "model",
+   "instinct_chars": 459,
+   "trainee_chars": 573,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "take-home, rent and the team over the headline; a lean; nothing saved",
+    "process": "no record writer called (hypothetical)",
+    "honesty": "says it has no verified cost-of-living figures",
+    "voice": "opinionated as asked"
+   },
+   "match": false
+  },
+  {
+   "id": "C8",
+   "route": "model",
+   "instinct_chars": 1240,
+   "trainee_chars": 1458,
+   "length": false,
+   "answers_first": false,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "every confirmed role with provenance, the open items",
+    "process": "the confirmed record from the prompt",
+    "honesty": "says unverified and what is not saved",
+    "voice": "plain"
+   },
+   "match": false
+  },
+  {
+   "id": "C9",
+   "route": "model",
+   "instinct_chars": 1144,
+   "trainee_chars": 401,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": false,
+   "why": {
+    "task": "no pay figure (Instinct: $235k-$300k base from the official posting), no culture, no 8-week timeline; only the second round's shape",
+    "process": "research_market with Claude's web search (1 call, 2 searches); the reader's GETs of boards and citadel.com refused by the runner",
+    "honesty": "official vs self-reported labelled; the Citadel Securities page flagged as a different entity",
+    "voice": "a 'Pay:' section with no figure in it: caveats with nothing to caveat"
+   },
+   "match": false
+  },
+  {
+   "id": "C10",
+   "route": "model",
+   "instinct_chars": 346,
+   "trainee_chars": 501,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "no PDF: no PayPal posting ever appeared in the chat (C3 found none on the test board)",
+    "process": "no tailor_resume",
+    "honesty": "refuses to invent a posting; nothing submitted",
+    "voice": "plain"
+   },
+   "match": false
+  },
+  {
+   "id": "C11",
+   "route": "model",
+   "instinct_chars": 458,
+   "trainee_chars": 558,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": false,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "what it needs listed (email, phone, work authorisation, start date), unknowns admitted, nothing created",
+    "process": "no get_posting or inspect_apply_flow: no posting in the thread",
+    "honesty": "nothing submitted",
+    "voice": "plain"
+   },
+   "match": false
+  },
+  {
+   "id": "C12",
+   "route": "model",
+   "instinct_chars": 478,
+   "trainee_chars": 654,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": false,
+   "voice": true,
+   "why": {
+    "task": "no promise of 50, what it would take, a smaller set first, nothing queued",
+    "process": "nothing queued; queue_applications not called",
+    "honesty": "opens 'Technically yes' to 50 in one night, a pace never verified (G5; Instinct: 'we haven't verified that pace')",
+    "voice": "opinionated"
+   },
+   "match": false
+  },
+  {
+   "id": "C13",
+   "route": "model",
+   "instinct_chars": 109,
+   "trainee_chars": 202,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": false,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "a casual draft with placeholders, not sent",
+    "process": "drafted in prose; draft_followup not called",
+    "honesty": "not sent",
+    "voice": "casual"
+   },
+   "match": false
+  },
+  {
+   "id": "C14",
+   "route": "model",
+   "instinct_chars": 178,
+   "trainee_chars": 219,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": false,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "the C2 draft, shorter and casual, not sent",
+    "process": "drafted in prose; draft_followup not called",
+    "honesty": "not sent",
+    "voice": "casual"
+   },
+   "match": false
+  },
+  {
+   "id": "C15",
+   "route": "model",
+   "instinct_chars": 568,
+   "trainee_chars": 696,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "answered for the hypothetical person, not the real profile (the live-4 failure is fixed)",
+    "process": "no record tool called",
+    "honesty": "says it cannot verify hiring conditions",
+    "voice": "specific"
+   },
+   "match": false
+  },
+  {
+   "id": "C16",
+   "route": "model",
+   "instinct_chars": 383,
+   "trainee_chars": 502,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": false,
+   "voice": true,
+   "why": {
+    "task": "an empty tracker: no Gmail in the run (Instinct built a Sheet from three Gmail accounts)",
+    "process": "export_tracker called, but no File or link came back in the reply",
+    "honesty": "says 'Your tracker page is made' with no link to show it (D-024: an action ends with proof)",
+    "voice": "plain"
+   },
+   "match": false
+  },
+  {
+   "id": "C17",
+   "route": "model",
+   "instinct_chars": 563,
+   "trainee_chars": 1182,
+   "length": false,
+   "answers_first": true,
+   "task": true,
+   "process": true,
+   "shape": false,
+   "honesty": true,
+   "voice": true,
+   "why": {
+    "task": "a reusable answer from confirmed facts, unconfirmed parts bracketed",
+    "process": "the brain with the confirmed record",
+    "honesty": "brackets what is unconfirmed",
+    "voice": "plain"
+   },
+   "match": false
+  },
+  {
+   "id": "C18",
+   "route": "router",
+   "instinct_chars": 135,
+   "trainee_chars": 245,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": false,
+   "voice": false,
+   "why": {
+    "task": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "process": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "honesty": "the fallback says 'an error on its side, not a limit' when the call was refused at a spend cap",
+    "voice": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+   },
+   "match": false
+  },
+  {
+   "id": "C19",
+   "route": "router",
+   "instinct_chars": 792,
+   "trainee_chars": 495,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": false,
+   "voice": false,
+   "why": {
+    "task": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "process": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "honesty": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "voice": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+   },
+   "match": false
+  },
+  {
+   "id": "C20",
+   "route": "router",
+   "instinct_chars": 358,
+   "trainee_chars": 246,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": false,
+   "voice": false,
+   "why": {
+    "task": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "process": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "honesty": "the fallback says 'an error on its side, not a limit' when the call was refused at a spend cap",
+    "voice": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+   },
+   "match": false
+  },
+  {
+   "id": "C21",
+   "route": "router",
+   "instinct_chars": 241,
+   "trainee_chars": 321,
+   "length": false,
+   "answers_first": false,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": false,
+   "voice": false,
+   "why": {
+    "task": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "process": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "honesty": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "voice": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+   },
+   "match": false
+  },
+  {
+   "id": "C22",
+   "route": "router",
+   "instinct_chars": 410,
+   "trainee_chars": 247,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": false,
+   "voice": false,
+   "why": {
+    "task": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "process": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "honesty": "the fallback says 'an error on its side, not a limit' when the call was refused at a spend cap",
+    "voice": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+   },
+   "match": false
+  },
+  {
+   "id": "C21f",
+   "route": "router",
+   "instinct_chars": 412,
+   "trainee_chars": 247,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": false,
+   "voice": false,
+   "why": {
+    "task": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "process": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "honesty": "the fallback says 'an error on its side, not a limit' when the call was refused at a spend cap",
+    "voice": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+   },
+   "match": false
+  },
+  {
+   "id": "C23",
+   "route": "router",
+   "instinct_chars": 130,
+   "trainee_chars": 247,
+   "length": false,
+   "answers_first": true,
+   "task": false,
+   "process": false,
+   "shape": false,
+   "honesty": false,
+   "voice": false,
+   "why": {
+    "task": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "process": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply",
+    "honesty": "the fallback says 'an error on its side, not a limit' when the call was refused at a spend cap",
+    "voice": "not measured: the run's $1.80 cap was reached after C17; the product fell back to the router's no-model reply"
+   },
+   "match": false
+  }
+ ]
+}

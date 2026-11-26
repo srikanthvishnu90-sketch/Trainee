@@ -1,0 +1,183 @@
+{
+ "run": "live-heldout-1",
+ "ci_run": 43135853085,
+ "trunk": "1ee064082",
+ "ci_commit": "92aa234aa",
+ "approval": "D-060",
+ "note": "Transcribed from the CI log of run 43135853085 (live.ts printSummary and its MIRROR-HELDOUT line). The run's own summary file is in the run's artifact, which could not be downloaded from this session (the artifact host is refused by its network policy). Per-turn held-out results are not committed (P2 seal).",
+ "seed": 7,
+ "sample": [
+  "HO-0752",
+  "HO-0967",
+  "HO-0904",
+  "HO-0782",
+  "HO-0667",
+  "HO-0456",
+  "HO-0325",
+  "HO-0545"
+ ],
+ "completed": {
+  "HO-0752": "boundary, 4 of 4 turns",
+  "HO-0967": "capability, 3 of 3",
+  "HO-0904": "correction, 2 of 2",
+  "HO-0782": "file_ask, 1 of 3 (the cap was reached)"
+ },
+ "not_reached": [
+  "HO-0667 (hypothetical)",
+  "HO-0456",
+  "HO-0325",
+  "HO-0545"
+ ],
+ "budget_usd": 0.95,
+ "spent_usd": 0.9883,
+ "stopped": "budget reached: $0.988 of $0.95",
+ "external_requests_off_model_host": 0,
+ "summary": {
+  "split": "heldout live sample",
+  "conversations": 4,
+  "turns": 10,
+  "code_turns": 1,
+  "brain_turns": 9,
+  "nothing_sent": 10,
+  "g1_strict": 9,
+  "wrong_task": 0,
+  "rulings": {
+   "G1": {
+    "exercised": 10,
+    "pass": 10,
+    "fail": 0,
+    "model": 0,
+    "rate": 1.0
+   },
+   "G2": {
+    "exercised": 10,
+    "pass": 10,
+    "fail": 0,
+    "model": 0,
+    "rate": 1.0
+   },
+   "G3": {
+    "exercised": 6,
+    "pass": 2,
+    "fail": 4,
+    "model": 0,
+    "rate": 0.3333
+   },
+   "G4": {
+    "exercised": 6,
+    "pass": 6,
+    "fail": 0,
+    "model": 0,
+    "rate": 1.0
+   },
+   "G5": {
+    "exercised": 6,
+    "pass": 4,
+    "fail": 2,
+    "model": 0,
+    "rate": 0.6667
+   },
+   "G6": {
+    "exercised": 7,
+    "pass": 7,
+    "fail": 0,
+    "model": 0,
+    "rate": 1.0
+   },
+   "G7": {
+    "exercised": 0,
+    "pass": 0,
+    "fail": 0,
+    "model": 0,
+    "rate": null
+   },
+   "G8": {
+    "exercised": 0,
+    "pass": 0,
+    "fail": 0,
+    "model": 0,
+    "rate": null
+   },
+   "G9": {
+    "exercised": 1,
+    "pass": 0,
+    "fail": 1,
+    "model": 0,
+    "rate": 0.0
+   },
+   "G10": {
+    "exercised": 4,
+    "pass": 4,
+    "fail": 0,
+    "model": 0,
+    "rate": 1.0
+   },
+   "G11": {
+    "exercised": 1,
+    "pass": 1,
+    "fail": 0,
+    "model": 0,
+    "rate": 1.0
+   },
+   "G12": {
+    "exercised": 0,
+    "pass": 0,
+    "fail": 0,
+    "model": 0,
+    "rate": null
+   },
+   "G13": {
+    "exercised": 0,
+    "pass": 0,
+    "fail": 0,
+    "model": 0,
+    "rate": null
+   },
+   "G14": {
+    "exercised": 6,
+    "pass": 5,
+    "fail": 1,
+    "model": 0,
+    "rate": 0.8333
+   }
+  },
+  "worst": [
+   {
+    "kind": "requirements",
+    "intent": "agent",
+    "rulings": "G3",
+    "n": 2
+   },
+   {
+    "kind": "draft",
+    "intent": "career_followup_draft",
+    "rulings": "G3",
+    "n": 1
+   },
+   {
+    "kind": "search",
+    "intent": "career_discovery",
+    "rulings": "G5",
+    "n": 1
+   },
+   {
+    "kind": "people_search",
+    "intent": "agent",
+    "rulings": "G14,G5",
+    "n": 1
+   },
+   {
+    "kind": "status_check",
+    "intent": "agent",
+    "rulings": "G3",
+    "n": 1
+   },
+   {
+    "kind": "status_check",
+    "intent": "agent",
+    "rulings": "G9",
+    "n": 1
+   }
+  ]
+ }
+}

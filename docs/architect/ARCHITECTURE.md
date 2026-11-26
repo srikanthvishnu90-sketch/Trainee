@@ -76,7 +76,7 @@ interface from a terminal, so every capability is built and tested exactly as it
   - `external` — touches the world (send an email, submit an application, message a person).
     Never runs inside the loop. It becomes a pending approval with an exact preview; it runs only
     after the user approves that exact payload (hash-bound), under daily caps.
-- No canned prose. The only fixed strings are the safety and failure sentences in `loop.ts`.
+- No canned prose. The only fixed strings are the safety and failure sentences: in `loop.ts`; the research failure lines in `_shared/research_reply.ts` (`NO_SOURCES`, `NOT_CONFIRMED`, `UNSUPPORTED`, said when no source could be opened or none supports an answer); and the company research blocker line in `agent/research/company.ts` (`enforceCompanyReply`: "I couldn't do this research: ... Nothing was applied for or sent.").
 
 ### 3.2 Jobs
 - Ingestion is a scheduled cloud job that polls public ATS boards (Greenhouse, Lever, Ashby,

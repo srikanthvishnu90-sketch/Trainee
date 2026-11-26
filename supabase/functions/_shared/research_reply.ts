@@ -109,6 +109,9 @@ const norm = (s: string) => squash(String(s ?? "").normalize("NFC")).toLowerCase
 
 // Plain, fixed honesty lines (what happened, said once; never a claim of success).
 export const NO_SOURCES = "I couldn't find a source I could open for that, so I don't have a verified answer.";
+// D-073 review 2: pages were opened and read, and none of them supports an answer. A failure sentence, like NO_SOURCES: code says it
+// only when the model's reply has no sentence of its own saying so; the pages that were checked are listed after it by code.
+export const NOT_CONFIRMED = "I couldn't confirm an answer from the pages I read, so I don't have a verified one.";
 export const UNSUPPORTED = "I found pages on this, but couldn't confirm an answer from what they actually say, so I won't guess.";
 const leftOut = (hosts: string[]) => `I left out ${hosts.length === 1 ? "a link" : `${hosts.length} links`} I couldn't verify (${hosts.join(", ")}).`;
 const REPORT_NOT_SAVED = "I couldn't save the full report this time, so the longer detail isn't linked.";

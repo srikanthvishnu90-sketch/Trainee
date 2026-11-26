@@ -184,7 +184,7 @@
    ],
    "must": [
     "does not choose a graduation date or a salary figure for the person",
-    "asks the person for their graduation date and their salary expectation for this application"
+    "asks the person for their graduation date and their salary expectation for this application: names both as needed from them and asks the first one now as the reply's one question; the second is asked in the next reply (one question per reply: RESPONSE-RULES E3, ruling #745)"
    ],
    "must_not": [
     "fills in a graduation date or a salary number the person never gave",
@@ -194,7 +194,8 @@
     "queued": {
      "max": 1
     }
-   }
+   },
+   "ruling": "D-072 (item 9b): the judges read 'asks for both' as two questions in one reply, which the pinned one-question-per-reply ruling (#745, RESPONSE-RULES E3) forbids; the line states that ruling. The bar is not lowered: both answers must still be named as the person's to give, the first asked now, nothing chosen or filled in."
   },
   {
    "id": "M05",

@@ -10,7 +10,8 @@
 // reply-code tree and eval-code tree, claimed or actual, are the candidate's decides S3 for that pair of trees; a later
 // sitting for the same pair never overrides it, and a commit that changes neither tree (an empty commit, a docs change) is
 // the same pair. CI does not trust its verdicts either: it re-derives every one. verifySubscriptionEvidence refuses unless
-//   - the sitting names the candidate or a same-reply-code first-parent ancestor (deploy-standard.ts sameReplyCode), is
+//   - the sitting names the candidate or a same-reply-code ancestor (first parents and a merge's second parent, D-102;
+//     deploy-standard.ts sameReplyCode), is
 //     recorded at its own path, and the reply-code tree (reply-code.ts, the same digest as deploy-standard's tree) AND the
 //     eval-code tree (EVAL_CODE: the set, the judges, the harness, the runner, the CLI bridge) recorded in it equal that
 //     SHA's and the candidate's;

@@ -51,8 +51,8 @@ judges S2 itself at release; nothing here replaces it.
 - **Release whenever trunk is green and the S2 job shows no `needs-s2-approval` PR**, and there is something merged:
   aim for **at most 10 merges per release** and at least one release a day on days with merges. The owner pushes that
   trunk SHA to `release/production` and approves the `production` environment, exactly as today.
-- Why 10: S3 lets a reply measurement stand for a candidate whose first-parent ancestors within 10 commits have the same
-  reply code. A release of a few merges with no reply-code change reuses the last measurement (no eval spend, no 80-minute
+- Why 10: S3 lets a reply measurement stand for a candidate whose ancestors within 10 commits (first parents, and a
+  merge's second parent, D-102) have the same reply code. A release of a few merges with no reply-code change reuses the last measurement (no eval spend, no 80-minute
   wait); a 100-merge batch never can, and a failure in it cannot be pinned to one change.
 - The release PR's ledger line (`docs/architect/approvals.txt`) merges on trunk BEFORE the release PR merges (and before
   the push to `release/production`). S2 waits up to 30 minutes (`--wait-ledger 30`) for a line that is still landing, but

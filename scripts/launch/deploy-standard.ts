@@ -32,7 +32,7 @@
 //      a flag flipped or a flagged module changed needs a fresh measurement. A config that cannot be read is a
 //      FAIL, never a guess. "Reply code" is the one list in scripts/launch/reply-code.ts (the router bundle and packages/domain,
 //      agent-chat, the brain under _shared/agent, and the _shared modules the reply path imports). A measurement counts for
-//      a SHA when its brain commit is that SHA, or a first-parent ancestor within 10 commits with no reply-code change
+//      a SHA when its brain commit is that SHA, or an ancestor within 10 commits (first parents, and a merge's second parent) with no reply-code change
 //      since, or a measurement commit on ci/brain-eval whose second parent is one of those (the brain-eval convention: a
 //      measurement commit merges the measured commit as its second parent) and whose reply code is identical, or a
 //      measurement-branch commit descending from one of those whose reply code is identical. Rows that stopped, or are NOT
@@ -348,16 +348,27 @@ export interface Measurement { set: string; size: number; run: string; rate: num
 const comparable = (rows: ScoreRow[], m: Measurement) => rows.filter((r) => r.set === m.set && r.size === m.size && harnessOf(r) === m.harness && judgesOf(r) === m.judges);
 const onWhat = (m: Measurement) => `set ${m.set}/${m.size}, harness "${m.harness || "(none)"}", judges "${m.judges}"`;
 
-// The SHAs a measurement may stand for: sha and its first-parent ancestors within 10 commits, up to the first one whose
-// reply code differs from sha's.
+// The SHAs a measurement may stand for: sha and its ancestors within 10 commits, up to the first one on each path whose
+// reply code differs from sha's. First parents are walked first, so the first-parent chain keeps its order.
+// (Release 12, run 45874743067: the release PR's merge commit 96692b828 on release/production had the tree of the measured
+// trunk commit 8e1a4bd18, which was its SECOND parent; its first parent was the never-deployed release 11b with other reply
+// code. Walking first parents only, no release PR merge could ever stand on the sitting of the commit it merged. A merge's
+// second parent counts only when its reply code is identical to sha's, exactly as a first parent does.)
 export async function sameReplyCode(src: Sources, sha: string): Promise<string[]> {
   const out = [sha];
-  let cur = sha;
-  for (let i = 0; i < 10; i++) {
-    const p = await src.parent(cur);
-    if (!p || (await src.changed(p, sha, REPLY_CODE))) break;
-    out.push(p);
-    cur = p;
+  let frontier: [string, number][] = [[sha, 0]];
+  while (frontier.length) {
+    const next: [string, number][] = [];
+    for (const [cur, depth] of frontier) {
+      if (depth >= 10) continue;
+      const ps = [await src.parent(cur), src.secondParent ? await src.secondParent(cur) : null];
+      for (const p of ps) {
+        if (!p || out.includes(p) || (await src.changed(p, sha, REPLY_CODE))) continue;
+        out.push(p);
+        next.push([p, depth + 1]);
+      }
+    }
+    frontier = next;
   }
   return out;
 }

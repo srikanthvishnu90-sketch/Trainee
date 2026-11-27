@@ -268,30 +268,69 @@ const CareerOnboarding = (() => {
   // that snapshot. Never cache corrections by profile email/name/id here:
   // those are user data, not owner authority, and a failed host commit must
   // leave no process-local state that can replay into another turn/account.
-  // Extract the new source's token for a conflicting fact from the fact's own
-  // labeled text ("resume-old.txt says ... 2013; resume-new.txt says ... 2014")
-  // or, when the host passes the resume texts in ctx, from the new text itself.
-  function newSourceToken(fact, ctx) {
-    const text = `${fact.title || ""} ${fact.text || ""}`;
-    const labeled = text.match(/resume-old[^;]*?(\d{4}(?:\s*[-–]\s*\d{4})?)\b[^;]*;\s*resume-new[^;]*?(\d{4}(?:\s*[-–]\s*\d{4})?)\b/i);
-    if (labeled) return { from: labeled[1].replace(/\s+/g, ""), to: labeled[2].replace(/\s+/g, "") };
-    const texts = (ctx && (ctx.resumeTexts || ctx.resumeSources)) || null;
-    const newText = texts && (texts["resume-new.txt"] || texts.new || texts.newText);
-    if (newText) {
-      if (/graduat|education/i.test(text)) { const m = String(newText).match(/graduating\s+(?:in\s+)?(\d{4})/i); if (m) return { from: null, to: m[1] }; }
-      const org = (fact.title || "").match(/,\s*([^,—]+?)\s*—/) || (fact.text || "").match(/at\s+([A-Z][^,;]+?)[\s,]/);
-      if (org) { const esc = org[1].trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); const m = String(newText).match(new RegExp(esc + "[^\\n]*?(\\d{4})\\s*[-–]\\s*(\\d{4})", "i")); if (m) return { from: null, to: `${m[1]}-${m[2]}` }; }
-    }
-    return null;
+  // A later explicit source may supersede confirmed dates too. Its fingerprint
+  // stays in this profile's audit solely to reject already-superseded source
+  // replay; neither a filename nor a larger year establishes freshness.
+  function correctionInstruction(text) {
+    const t = String(text || "").trim();
+    return /^(?:(?:please|yes|ok|okay)[,!]?\s+|(?:can|could|would) you\s+|i (?:want|need) you to\s+)?(?:use the new (?:one|resume|version)|switch to the new(?: one|resume|version)?|use the newer(?: one|resume|version)?|(?:the )?old resume'?s wrong)\b/i.test(t)
+      && !/\b(?:suppose|imagine|hypothetical|what if|if|unless|don't use|do not use)\b/i.test(t);
   }
-  function applyResolutionToFact(fact, res, at) {
+  function selectedResume(ctx) {
+    const boxes = [ctx.resumeTexts, ctx.resumeSources].filter((x) => x != null);
+    if (!boxes.length) return { present: false };
+    const values = [];
+    for (const box of boxes) {
+      if (typeof box !== "object" || Array.isArray(box)) return { error: "invalid_resume_source" };
+      for (const key of ["resume-new.txt", "new", "newText"]) if (Object.prototype.hasOwnProperty.call(box, key)) {
+        if (typeof box[key] !== "string" || !box[key].trim()) return { error: "invalid_resume_source" };
+        values.push(box[key].trim());
+      }
+    }
+    const unique = [...new Set(values)];
+    if (unique.length !== 1) return { error: unique.length ? "ambiguous_resume_source" : "new_resume_required" };
+    // Reuse existing synchronous SHA-256: 141 is in the staged career graph;
+    // Node can hash directly. No source text or authority is cached globally.
+    let digest;
+    try { digest = typeof CareerDoorstep !== "undefined" ? CareerDoorstep.sha256(unique[0]) : require("crypto").createHash("sha256").update(unique[0], "utf8").digest("hex"); } catch { return { error: "resume_hash_unavailable" }; }
+    return { present: true, text: unique[0], sha256: digest };
+  }
+  const graduationFact = (f) => /graduat|education/i.test(`${f.kind || ""} ${f.title || ""} ${f.text || ""}`);
+  const normalizedRange = (s) => String(s).replace(/\s+/g, "").replace(/–/g, "-");
+  function newSourceToken(fact, source) {
+    const text = `${fact.title || ""} ${fact.text || ""}`;
+    // Explicit owned source text is the only authority for later updates.
+    // Historical embedded labels are a first-conflict compatibility path only.
+    if (!source.present) {
+      const labeled = text.match(/resume-old[^;]*?(\d{4}(?:\s*[-–]\s*\d{4})?)\b[^;]*;\s*resume-new[^;]*?(\d{4}(?:\s*[-–]\s*\d{4})?)\b/i);
+      return labeled ? { from: normalizedRange(labeled[1]), to: normalizedRange(labeled[2]) } : null;
+    }
+    let tokens, selector = "graduation_date";
+    if (graduationFact(fact)) {
+      const dates = [...source.text.matchAll(/\bgraduat(?:ing|ion(?:\s+date)?)\s*(?::|is)?\s*(?:in\s+)?(?:(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+)?(\d{4})\b/gi)];
+      if (source.text.split(/\r?\n/).some((line) => /graduat/i.test(line) && /\b(?:or|either|maybe|uncertain)\b/i.test(line))) return { ambiguous: true };
+      tokens = dates.map((m) => m[1]);
+    } else {
+      const org = fact.org ? [null, fact.org] : (fact.title || "").match(/,\s*([^,—]+?)\s*—/) || (fact.text || "").match(/at\s+([A-Z][^,;]+?)[\s,]/);
+      if (!org) return null;
+      selector = "organization:" + String(org[1]).trim().toLowerCase();
+      const esc = String(org[1]).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      tokens = [...source.text.matchAll(new RegExp(esc + "[^\\n]*?(\\d{4})\\s*[-–]\\s*(\\d{4})\\b", "gi"))].map((m) => `${m[1]}-${m[2]}`);
+    }
+    const unique = [...new Set(tokens)];
+    return unique.length > 1 ? { ambiguous: true } : unique.length ? { to: unique[0], selector } : null;
+  }
+  function applyResolutionToFact(fact, res, at, source) {
     fact.needs_confirmation = false;
     fact.status = "confirmed";
-    fact.resolution = { source: "resume-new.txt", value: res.to, basis: "user instruction in chat: use the new resume; the old one is wrong", at: at || null };
-    const note = ` Resolved by your instruction to use the new resume: ${res.to}.`;
-    if (!String(fact.text || "").includes("Resolved by your instruction")) fact.text = `${fact.text || ""}${note}`;
-    const range = String(res.to).match(/^(\d{4})-(\d{4})$/);
-    if (range) { fact.start = range[1]; fact.end = range[2]; if (!String(fact.title || "").includes(`resolved: ${res.to}`)) fact.title = `${fact.title || ""} — resolved: ${res.to} (new resume)`; }
+    fact.resolution = { source: "resume-new.txt", value: res.to, basis: "user instruction in chat: use the new resume; the old one is wrong", at: at || null, ...(source.sha256 ? { source_sha256: source.sha256 } : {}) };
+    // There is one active annotation. Prior values remain in the audit, never
+    // in an accumulating series of annotations that could be read as current.
+    const priorText = String(fact.text || "").replace(/\s*Resolved by your instruction to use the new resume: \d{4}(?:[-–]\d{4})?\./g, "").trimEnd();
+    fact.text = `${priorText} Resolved by your instruction to use the new resume: ${res.to}.`;
+    fact.title = String(fact.title || "").replace(/\s*— resolved: \d{4}(?:[-–]\d{4})? \(new resume\)/g, "");
+    const range = res.to.match(/^(\d{4})-(\d{4})$/);
+    if (range) { fact.start = range[1]; fact.end = range[2]; fact.title += ` — resolved: ${res.to} (new resume)`; }
   }
   function rebuildDependents(profile, at) {
     const confirmed = (profile.facts || []).filter((f) => !f.needs_confirmation).length;
@@ -299,23 +338,48 @@ const CareerOnboarding = (() => {
     return profile.dependent_state;
   }
   function applyProfileCorrection(profile, text, ctx) {
-    const c = ctx || {};
-    const at = c.now || null;
-    const changes = [];
-    for (const fact of profile.facts || []) {
-      if (!fact.needs_confirmation) continue;
-      const res = newSourceToken(fact, c);
+    const c = ctx || {}, at = c.now || null;
+    const refused = (code) => ({ ok: false, code, changes: [], text: code === "stale_resume_source"
+      ? "That resume was already superseded in your saved profile. I kept the current facts. Supply the intended current resume; I will not replay the older source."
+      : "I could not identify one current new resume and an unambiguous date correction. Nothing changed. Supply the intended new resume and identify the date to correct." });
+    if (!correctionInstruction(text)) return refused("direct_correction_required");
+    const source = selectedResume(c);
+    if (source.error) return refused(source.error);
+    const history = Array.isArray(profile.profile_corrections) ? profile.profile_corrections : [];
+    // Once a source was resolved, an old labelled conflict cannot reacquire
+    // write authority just because a stale import marks it unconfirmed again.
+    if (!source.present && history.length) return refused("new_resume_required");
+    const facts = (profile.facts || []).filter((f) => f && typeof f === "object");
+    const proposals = [], targets = new Map();
+    let resolved = 0;
+    for (const fact of facts) {
+      if (!fact.needs_confirmation && !source.present) continue;
+      const res = newSourceToken(fact, source);
       if (!res) continue;
-      const isGrad = /graduat|education/i.test(`${fact.kind} ${fact.title} ${fact.text}`);
-      applyResolutionToFact(fact, res, at);
-      if (isGrad && /^\d{4}$/.test(res.to)) profile.constraints = Object.assign({}, profile.constraints, { graduationDate: res.to });
-      changes.push({ fact_id: fact.id, field: isGrad ? "graduation_date" : "fact_dates", from: res.from, to: res.to, source: "resume-new.txt" });
+      const isGrad = graduationFact(fact);
+      if (res.ambiguous || (source.present && isGrad && facts.filter(graduationFact).length !== 1)) return refused("ambiguous_resume_source");
+      if (source.present && targets.has(res.selector) && targets.get(res.selector) !== fact) return refused("ambiguous_resume_source");
+      if (source.present) targets.set(res.selector, fact);
+      resolved++;
+      const current = isGrad ? (profile.constraints || {}).graduationDate || (fact.resolution || {}).value || res.from || null
+        : (fact.start && fact.end ? `${fact.start}-${fact.end}` : (fact.resolution || {}).value || res.from || null);
+      if (fact.needs_confirmation || String(current) !== res.to) proposals.push({ fact, res, isGrad, current });
     }
-    if (!changes.length) return { ok: false, code: "no_resolvable_conflict", changes: [], text: "I do not have a newer resume source on file that resolves a stored conflict, so I changed nothing. Upload the new resume or tell me the corrected value and I will record it." };
-    bumpFactVersion(profile); // R2B: a correction is a fact write — packets/approvals bound to the old facts are stale from here
-    const auditEntry = { at, instruction: String(text || ""), source: "resume-new.txt", precedence: "new source wins per the user's explicit instruction; the old source (resume-old.txt) is superseded, not deleted", changes, outcome: "user-directed correction" };
-    profile.profile_corrections = [...(profile.profile_corrections || []), auditEntry];
-    profile.resume_sources = { active: "resume-new.txt", status: "active_new_wins", precedence: auditEntry.precedence };
+    if (!proposals.length) return resolved ? { ok: true, code: "already_current", changes: [], reply: "The matching saved dates already agree with this source; no fact correction was needed." } : refused("no_resolvable_conflict");
+    const used = source.sha256 && history.some((h) => h.source_sha256 === source.sha256);
+    if (used && ((profile.resume_sources || {}).active_sha256 !== source.sha256 || proposals.some((p) => !p.fact.needs_confirmation && String(p.current) !== p.res.to))) return refused("stale_resume_source");
+    // Preflight every target before writing any field: ambiguity/staleness must
+    // not partially confirm other facts or advance the prepared-packet version.
+    const changes = [];
+    for (const { fact, res, isGrad, current } of proposals) {
+      applyResolutionToFact(fact, res, at, source);
+      if (isGrad) profile.constraints = Object.assign({}, profile.constraints, { graduationDate: res.to });
+      changes.push({ fact_id: fact.id, field: isGrad ? "graduation_date" : "fact_dates", from: current, to: res.to, source: "resume-new.txt" });
+    }
+    bumpFactVersion(profile);
+    const auditEntry = { at, instruction: String(text || ""), source: "resume-new.txt", precedence: "new source wins per the user's explicit instruction; prior sources are superseded, not deleted", changes, outcome: "user-directed correction", ...(source.sha256 ? { source_sha256: source.sha256 } : {}) };
+    profile.profile_corrections = [...history, auditEntry];
+    profile.resume_sources = { active: "resume-new.txt", status: "active_new_wins", precedence: auditEntry.precedence, ...(source.sha256 ? { active_sha256: source.sha256 } : {}) };
     rebuildDependents(profile, at);
     const grad = changes.find((x) => x.field === "graduation_date");
     return { ok: true, changes, audit: auditEntry, reply: `Done — I switched your active resume to the new one and recorded that it wins over the old one.${grad ? ` Your graduation year is now ${grad.to} from the new resume,` : ""} and I rebuilt your eligibility and materials on the new facts.` };
@@ -593,7 +657,7 @@ const CareerOnboarding = (() => {
     const c = ctx || {};
     // The host supplied the committed profile. Only an explicit correction
     // instruction below may resolve its conflicts; reads never replay state.
-    if (c.profile && /\buse the new (one|resume|version)\b|\bswitch to the new\b|\bold resume'?s wrong\b|\buse the newer\b/.test(t)) {
+    if (c.profile && correctionInstruction(text)) {
       const r = applyProfileCorrection(c.profile, text, c);
       return { intent: "profile_correction", resultStatus: r.ok ? "completed" : "blocked", ok: r.ok, changes: r.changes, audit: r.audit || null, reply: r.ok ? r.reply : r.text };
     }

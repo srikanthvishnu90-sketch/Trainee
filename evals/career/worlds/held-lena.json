@@ -1,0 +1,162 @@
+{
+ "version": 1,
+ "author": "independent judge (held-out)",
+ "note": "SYNTHETIC person. Lena Okafor, CS junior in Boston; summer 2027 internships only; US citizen; one prepared application with an open GPA question.",
+ "now": "2026-10-28T15:00:00Z",
+ "postings": [
+  {
+   "job_id": "greenhouse:harborline:9101001",
+   "company": "Harborline",
+   "title": "Software Engineering Intern, Summer 2027",
+   "location": "Boston, MA",
+   "url": "https://job-boards.greenhouse.io/harborline/jobs/9101001",
+   "description": "Summer 2027 software engineering internship, on-site in Boston, 12 weeks. Python or Java. $42 per hour.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:kestreldata:9102002",
+   "company": "Kestrel Data",
+   "title": "Data Science Intern",
+   "location": "Remote - US",
+   "url": "https://job-boards.greenhouse.io/kestreldata/jobs/9102002",
+   "description": "Remote data science internship for summer 2027. SQL and Python. $38 per hour.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:northwind:9103003",
+   "company": "Northwind Robotics",
+   "title": "Senior Software Engineer",
+   "location": "Boston, MA",
+   "url": "https://job-boards.greenhouse.io/northwind/jobs/9103003",
+   "description": "Senior software engineer, 8 or more years of experience required. $175,000-$205,000.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:brightpath:9104004",
+   "company": "Brightpath",
+   "title": "Software Engineer I (New Grad 2027)",
+   "location": "Boston, MA",
+   "url": "https://job-boards.greenhouse.io/brightpath/jobs/9104004",
+   "description": "Full-time new grad software engineer starting in 2027. $112,000-$128,000.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:tidewater:9105005",
+   "company": "Tidewater Bank",
+   "title": "Technology Summer Analyst Intern",
+   "location": "New York, NY",
+   "url": "https://job-boards.greenhouse.io/tidewater/jobs/9105005",
+   "description": "On-site summer analyst internship in New York, 5 days a week. $45 per hour.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:pinecrest:9106006",
+   "company": "Pinecrest Labs",
+   "title": "Machine Learning Engineering Intern",
+   "location": "Cambridge, MA (hybrid)",
+   "url": "https://job-boards.greenhouse.io/pinecrest/jobs/9106006",
+   "description": "Hybrid machine learning internship in Cambridge, 3 days on site. PyTorch required. $50 per hour.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  }
+ ],
+ "apply_jobs": [],
+ "wanted": [],
+ "prepared": [
+  {
+   "id": "p-harbor",
+   "job_id": "greenhouse:harborline:9101001",
+   "company": "Harborline",
+   "url": "https://job-boards.greenhouse.io/harborline/jobs/9101001",
+   "state": "ready",
+   "card_lines": [
+    "Harborline - Software Engineering Intern, Summer 2027 (Boston, MA)",
+    "Resume: base. Answers: 9 filled from your facts, 1 open."
+   ],
+   "created_at": "2026-10-27T09:00:00.000Z"
+  }
+ ],
+ "questions": [
+  {
+   "id": "q1",
+   "key": "label:00000000000000c1",
+   "kind": "label",
+   "label": "What is your current GPA?",
+   "type": "text",
+   "options": [],
+   "company": "Harborline",
+   "job_ids": [
+    "greenhouse:harborline:9101001"
+   ],
+   "misfit": false,
+   "answer": null,
+   "created_at": "2026-10-27T09:00:00.000Z"
+  }
+ ],
+ "outreach": [],
+ "connections": [],
+ "cloud": null,
+ "channel": {
+  "opted_out": false
+ },
+ "standing": [
+  {
+   "id": "S-001",
+   "text": "Internships only, no full-time roles",
+   "said": "internships only please, I'm still in school",
+   "at": "2026-10-14T15:00:00.000Z"
+  },
+  {
+   "id": "S-002",
+   "text": "Boston area or remote only",
+   "said": "I can't move for the summer, Boston or remote",
+   "at": "2026-10-14T15:00:00.000Z"
+  }
+ ],
+ "alerts": {
+  "input": {
+   "keywords": [
+    "software intern",
+    "machine learning intern"
+   ],
+   "locations": [
+    "boston"
+   ],
+   "remote_ok": true
+  },
+  "tz": "America/New_York",
+  "since": "2026-10-14T15:00:00Z"
+ },
+ "facts": [
+  {
+   "kind": "education",
+   "text": "Junior studying Computer Science at Northeastern University, graduating May 2028"
+  },
+  {
+   "kind": "experience",
+   "text": "Research assistant in a computer vision lab for 8 months, using Python and PyTorch"
+  },
+  {
+   "kind": "skill",
+   "text": "Python, Java and PyTorch"
+  },
+  {
+   "kind": "location",
+   "text": "Based in Boston, Massachusetts"
+  },
+  {
+   "kind": "goal",
+   "text": "Wants a summer 2027 software or machine learning internship"
+  },
+  {
+   "kind": "preference",
+   "text": "Internships only, Boston area or remote. US citizen, needs no sponsorship"
+  }
+ ],
+ "tracked": []
+}

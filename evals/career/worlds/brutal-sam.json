@@ -1,0 +1,145 @@
+{
+ "version": 1,
+ "author": "architect (task-context-brutal)",
+ "note": "SYNTHETIC person. Sam, former teacher moving into product operations; remote only; salary floor 85k; one recruiter draft waiting; Gmail not connected.",
+ "now": "2026-10-20T15:00:00Z",
+ "postings": [
+  {
+   "job_id": "greenhouse:lumen:8201001",
+   "company": "Lumen Software",
+   "title": "Product Operations Analyst",
+   "location": "Remote - US",
+   "url": "https://job-boards.greenhouse.io/lumen/jobs/8201001",
+   "description": "Product operations analyst, fully remote in the US. SQL, Notion, process design. $88,000-$104,000.",
+   "posted_at": "2026-10-18T14:00:00Z",
+   "first_seen_at": "2026-10-18T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:harbor:8202002",
+   "company": "Harbor Systems",
+   "title": "Product Operations Manager",
+   "location": "Austin, TX",
+   "url": "https://job-boards.greenhouse.io/harbor/jobs/8202002",
+   "description": "On-site product operations manager in Austin, 5 days a week. $95,000-$115,000.",
+   "posted_at": "2026-10-18T14:00:00Z",
+   "first_seen_at": "2026-10-18T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:quill:8203003",
+   "company": "Quill",
+   "title": "Operations Associate",
+   "location": "Remote - US",
+   "url": "https://job-boards.greenhouse.io/quill/jobs/8203003",
+   "description": "Operations associate, remote. Spreadsheets and customer support. $58,000-$66,000.",
+   "posted_at": "2026-10-18T14:00:00Z",
+   "first_seen_at": "2026-10-18T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:marlow:8204004",
+   "company": "Marlow Health",
+   "title": "Program Operations Lead",
+   "location": "Remote - US",
+   "url": "https://job-boards.greenhouse.io/marlow/jobs/8204004",
+   "description": "Lead program operations for a remote-first health startup. SQL, Excel, stakeholder work. $90,000-$110,000.",
+   "posted_at": "2026-10-18T14:00:00Z",
+   "first_seen_at": "2026-10-18T15:00:00Z"
+  }
+ ],
+ "apply_jobs": [],
+ "wanted": [],
+ "prepared": [
+  {
+   "id": "p-lumen",
+   "job_id": "greenhouse:lumen:8201001",
+   "company": "Lumen Software",
+   "url": "https://job-boards.greenhouse.io/lumen/jobs/8201001",
+   "state": "ready",
+   "card_lines": [
+    "Lumen Software - Product Operations Analyst (Remote - US)",
+    "Resume: base. Answers: 11 filled from your facts, 1 open."
+   ],
+   "created_at": "2026-10-20T09:00:00.000Z"
+  }
+ ],
+ "questions": [
+  {
+   "id": "q1",
+   "key": "label:00000000000000bb",
+   "kind": "label",
+   "label": "Why do you want to work at Lumen?",
+   "type": "text",
+   "options": [],
+   "company": "Lumen Software",
+   "job_ids": [
+    "greenhouse:lumen:8201001"
+   ],
+   "misfit": false,
+   "answer": null,
+   "created_at": "2026-10-20T09:00:00.000Z"
+  }
+ ],
+ "outreach": [
+  {
+   "n": 1,
+   "recipient": {
+    "name": "Dana Whitfield",
+    "email": "dana.whitfield@lumen.example.test",
+    "firm": "Lumen Software",
+    "title": "Recruiting Lead"
+   },
+   "subject": "Product Operations Analyst role",
+   "body": "Hi Dana, I taught high school math for six years and I am moving into product operations. I applied for the Product Operations Analyst role and would be glad to talk.",
+   "footer": "Sent by TEST person",
+   "hash": "2222222222222222222222222222222222222222222222222222222222222222",
+   "status": "shown",
+   "approved_hash": null,
+   "approved_at": null,
+   "sent_at": null,
+   "shared": [],
+   "created_at": "2026-10-20T10:00:00.000Z"
+  }
+ ],
+ "connections": [],
+ "cloud": null,
+ "channel": {
+  "opted_out": false
+ },
+ "standing": [
+  {
+   "id": "S-001",
+   "text": "Remote only, will not relocate",
+   "said": "I can only do remote, I'm not relocating",
+   "at": "2026-10-11T15:00:00.000Z"
+  },
+  {
+   "id": "S-002",
+   "text": "Minimum salary $85,000",
+   "said": "Nothing under 85k",
+   "at": "2026-10-11T15:00:00.000Z"
+  }
+ ],
+ "alerts": null,
+ "facts": [
+  {
+   "kind": "experience",
+   "text": "Taught high school math for 6 years"
+  },
+  {
+   "kind": "education",
+   "text": "M.Ed., Curriculum and Instruction"
+  },
+  {
+   "kind": "skill",
+   "text": "SQL, Excel and Notion"
+  },
+  {
+   "kind": "goal",
+   "text": "Wants to move into product operations"
+  },
+  {
+   "kind": "preference",
+   "text": "Remote only, no relocation, minimum salary $85,000"
+  }
+ ],
+ "tracked": []
+}

@@ -112,3 +112,77 @@ saved-profile restoration and empty-pool honesty, not a real database, upload
 service, public-source fetch, Deno deployment or end-user live flow. Direct host
 tests separately prove fresh observations and skill gaps. No paid model call,
 Browserbase, employer application, email or production write was performed.
+
+## Independent-review follow-up (2026-10-16)
+
+`3157b65` is **not ready**: the independent frozen cohort found 11 failures,
+including the inherited module 130 cross-owner cache leak now assigned to
+Crew A. This follow-up fixes the ten capability-2-owned boundaries. H20 stays
+unchanged and failing in the original frozen runner; the normal regression suite
+marks it as pending rather than calling it passed. The independent cohort is
+22 targeted boundary assertions, not an accuracy or launch score. The original
+private 50-case evaluator was not recovered or recreated.
+
+Evidence now requires an explicit work relation and retains the exact quote,
+field and offsets. A recruiter mentioning Python engineers is not Python skill
+evidence. Negative statements, including contractions and zero experience, block
+positive findings. Active positive/negative records produce `conflicted`, with
+both IDs and the denial recorded; timestamps alone do not resolve the conflict.
+Only explicit canonical supersession by confirmed records, or a corrected active
+fact, removes superseded authority. This is conservative deterministic English
+matching, not a general semantic proof system. Ambiguous mentions remain unknown.
+
+Legacy `fact_id` values become the matching `id` on the ingestion clone; they
+never acquire an unrelated F-number. Conflicting/missing canonical IDs are a
+typed `canonical_id_required` refusal until the host resolves them. Existing
+source hashes/evidence links and extra profile metadata remain intact. Extraction
+still creates drafts; no host or confirmation receipt is fabricated.
+
+Observation selection now coalesces by canonical employer/requisition identity
+before matching. Numeric/string requisition aliases normalize alike. The newest
+trusted closed observation suppresses old open rows; a same-time closed row wins.
+Conflicting same-time open rows fail closed. The newest row never borrows old
+location or requirement fields. Even without location preferences, absent or
+placeholder remote geography is excluded. Parsed reserved example.com/org/net
+hosts (including subdomains and trailing-dot spelling), localhost and .test
+sources fail closed. Synthetic .invalid URLs are only local-test stand-ins;
+a production loader must establish actual source provenance and an approved
+source origin, not trust a `live_public` string sent by a client.
+
+Mechanical design/verification, supervised electrical installation/maintenance,
+teaching/instructional content, and graphic/publication design now have distinct
+recipes. Work-sample and gap fields cite the applicable evidence; no license,
+software brand, independent trade authority or credential is inferred.
+
+### Minimal integration into the existing atomic path
+
+No recommendation table or new migration is needed. The integration owner must:
+
+1. Load the authenticated owner's canonical profile, stable IDs, active
+   corrections, `profile_revision` and `privacy_epoch`. Apply account location
+   corrections before recommendation. Never grant confirmation based on body
+   facts, client flags or an ambient correction cache. Module 130's owner-bound
+   correction/rollback repair belongs to Crew A, outside this source branch.
+2. Inject validated `skill`, `hoursPerWeek`, `targetRole`, selected `posting_id`
+   and explicit geography, plus the latest trusted observation per requisition.
+   The recommendation route also extracts simple explicit skill/budget wording
+   locally (SQL, one hour/week, 90 minutes/week, etc.). Multiple/conflicting or
+   unparsed budgets require clarification. It never substitutes a generic skill
+   for an explicit named one. Message-derived fields are already covered by the
+   existing message turn hash; any independently supplied typed fields must be
+   included in that same stable idempotency hash.
+3. Preserve `out.result.artifact` and its versioned `grounding` envelope through
+   the existing `career_host_commit` response receipt and idempotent replay.
+   The envelope carries profile revision/epoch (null if the loader omitted them),
+   fact IDs, exact supporting relations, original source hashes/spans when
+   available, conflicts, posting observations and uncertainty. Null provenance
+   is not a verified source. Enforce the existing bounded JSON response contract,
+   and extend response validation for this read-only artifact. Persist the
+   profile, artifact/provenance and reply in the same atomic transaction; do not
+   introduce another save path. Erasure fences/tombstones must cover the artifact
+   and cached response, not only its prose.
+
+The current source branch deliberately leaves handler/host/storage/130 unchanged.
+A local scratch composition with atomic owner commit `bfd8577` is compatibility
+validation only; trusted uploads, live posting reads, canonical correction and
+artifact response retention still need integration by their respective owners.

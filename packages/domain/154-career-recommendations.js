@@ -3,7 +3,7 @@
    employer requirements. Host-supplied postings need provenance + freshness;
    fixture/snapshot rows are never current openings. */
 const CareerRecommendations = (() => {
-  const VERSION = "2026-10-15";
+  const VERSION = "2026-10-16";
   const str = (v) => typeof v === "string" ? v : "";
   const list = (v) => Array.isArray(v) ? v : [];
   const unique = (v) => [...new Set(v)];
@@ -11,23 +11,66 @@ const CareerRecommendations = (() => {
   const factId = (f) => str(f.id || f.fact_id);
   const confirmed = (p) => {
     const facts = list(p && p.facts).filter((f) => f && typeof f === "object");
-    return facts.filter((f) => factId(f) && facts.filter((x) => factId(x) === factId(f)).length === 1 && !f.needs_confirmation && (!f.status || f.status === "confirmed"));
+    return facts.filter((f) => factId(f) && !(f.id && f.fact_id && f.id !== f.fact_id) && facts.filter((x) => factId(x) === factId(f)).length === 1 && !f.needs_confirmation && (!f.status || f.status === "confirmed"));
   };
   const factText = (f) => [f.name, f.title, f.text, ...list(f.bullets), ...list(f.skills)].filter(Boolean).join(" ");
   // Negative statements and instructions in source documents are not positive
   // qualification evidence. Conservative exclusion beats inventing a skill.
   const usable = (f) => !/\b(no|not|never|without|lack|lacking|ignore|pretend|invent|unfamiliar|learning|beginner)\b/i.test(factText(f));
   const matches = (text, term) => new RegExp("(?:^|[^a-z0-9])" + term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?:$|[^a-z0-9])", "i").test(text);
-  function evidence(profile, term) {
-    const facts = confirmed(profile).filter(usable);
-    const direct = facts.filter((f) => f.kind !== "skill" && ["experience", "project", "leadership", "publication", "certification"].includes(f.kind) && (list(f.skills).some((s) => str(s).toLowerCase() === term.toLowerCase()) || matches(factText(f), term)));
-    const claimed = facts.filter((f) => f.kind === "skill" && str(f.name || f.title).toLowerCase() === term.toLowerCase());
-    const backed = claimed.filter((f) => list(f.evidence).some((id) => facts.some((x) => factId(x) === id && x.kind !== "skill" && matches(factText(x), term))));
-    const ids = unique([...direct, ...backed].map(factId));
-    return { status: ids.length ? "evidence_present" : claimed.length ? "self_reported_only" : "not_evidenced", factIds: ids.length ? ids : claimed.map(factId) };
-  }
   function citations(profile, ids) {
     return confirmed(profile).filter((f) => ids.includes(factId(f))).map((f) => ({ type: "profile_fact", fact_id: factId(f), label: label(f.title || f.name || f.kind), source: f.source || "user-confirmed profile", as_of: f.confirmed_at || null }));
+  }
+  const ALIASES = {
+    scheduling: ["scheduling", "scheduled", "schedule"], editing: ["editing", "edited", "edit"],
+    reconciliation: ["reconciliation", "reconciled", "reconcile"],
+    "circuit installation": ["circuit installation", "installed residential circuits", "installed circuits"],
+    "fault diagnosis": ["fault diagnosis", "diagnosed electrical faults", "diagnosed faults"],
+    "instructional delivery": ["instructional delivery", "taught algebra", "taught", "teaching"],
+    "learning assessment": ["learning assessment", "assessed learning outcomes", "assessed"],
+    "vector illustration": ["vector illustration", "vector illustrations"],
+    "accessible layout": ["accessible layout", "accessibility-tested publication layouts", "accessible layouts"],
+  };
+  const mentions = (text, term) => (ALIASES[str(term).toLowerCase()] || [str(term)]).some((t) => t && matches(text, t));
+  // Evidence is a relation to performed work, not a word in a resume. Preserve
+  // exact quotes and offsets; no inferred span/hash is presented as provenance.
+  function relations(f, term) {
+    const parts = ["text", "title"].filter((field) => str(f[field])).map((field) => ({ field, text: f[field] }));
+    parts.push(...list(f.bullets).map((text, i) => ({ field: `bullets[${i}]`, text: str(text) })));
+    const out = [];
+    for (const part of parts) for (const m of part.text.matchAll(/[^.;\n!?]+/g)) {
+      const quote = m[0], t = quote.toLowerCase().replace(/[’‘]/g, "'");
+      if (!mentions(t, term)) continue;
+      const negative = /\b(no|zero|never|without|lack|lacking|unfamiliar|unable|cannot|can't|haven't|hasn't|hadn't|don't|doesn't|didn't|isn't|wasn't|not|yet to|beginner)\b/.test(t);
+      const studying = /\blearning\b/.test(t) && !/learning (assessment|outcomes)/.test(t);
+      const escape = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const aliases = (ALIASES[str(term).toLowerCase()] || [str(term)]).map(escape).join("|");
+      const token = `(?:${aliases})`;
+      const toolRelation = new RegExp(`\\b(?:used?|using|with|in|via)\\s+(?:(?:a|an|the)\\s+)?${token}(?:$|[^a-z0-9])`, "i").test(t);
+      const builtRelation = new RegExp(`\\b(?:built|developed|implemented|coded|programmed|wrote|queried|automated|debugged|tested|added|taught)\\b(?:\\s+(?!for\\b|about\\b|of\\b)[a-z0-9-]+){0,7}\\s+${token}(?:$|[^a-z0-9])`, "i").test(t);
+      const otherPeople = new RegExp(`\\b(?:for|of|about)\\s+(?:[a-z0-9-]+\\s+){0,4}${token}\\s+(?:engineers?|developers?|candidates?|students?|teams?|designers?|drafters?)\\b`, "i").test(t)
+        || new RegExp(`${token}\\s+(?:engineers?|developers?|candidates?|designers?|drafters?)\\b`, "i").test(t)
+        || /\b(interviewed|hired|recruited|screened)\b/.test(t);
+      const action = /\b(built|build|developed|implemented|coded|programmed|wrote|used|using|with|tested|testing|verified|validated|designed|created|maintained|performed|prepared|reviewed|resolved|documented|coordinated|managed|scheduled|scheduling|edited|editing|reconciled|installed|diagnosed|taught|assessed|analyzed|analysed|queried|automated|added)\b/.test(t);
+      const technical = /^(python|sql|rust|go|golang|java|javascript|typescript|c\+\+|react|excel|crm|cad)$/i.test(term);
+      const demonstrated = !/\b(ignore|pretend|invent)\b/.test(t) && !otherPeople && action && (!technical || toolRelation || builtRelation);
+      out.push({ fact_id: factId(f), quote, field: part.field, start: m.index, end: m.index + quote.length,
+        relation: negative || studying ? "explicit_denial_or_unproven" : demonstrated ? "performed_work" : "mention_only",
+        source: f.source || "canonical profile", artifact_hash: f.artifact_hash || f.source_hash || null, source_span: f.source_span || null });
+    }
+    return out;
+  }
+  function evidence(profile, term) {
+    const all = confirmed(profile);
+    const superseded = new Set(all.flatMap((f) => list(f.supersedes)));
+    const facts = all.filter((f) => !superseded.has(factId(f)) && !(f.superseded_by && all.some((n) => factId(n) === f.superseded_by)));
+    const links = facts.filter((f) => ["experience", "project", "leadership", "publication", "certification"].includes(f.kind)).flatMap((f) => relations(f, term));
+    const negative = facts.flatMap((f) => relations(f, term)).filter((r) => r.relation === "explicit_denial_or_unproven");
+    const positive = links.filter((r) => r.relation === "performed_work");
+    const claimed = facts.filter((f) => f.kind === "skill" && str(f.name || f.title).toLowerCase() === str(term).toLowerCase());
+    if (negative.length) return { status: positive.length || claimed.length ? "conflicted" : "not_evidenced", factIds: unique([...positive, ...negative].map((r) => r.fact_id)), supportingRelations: [], conflicts: negative, unknowns: ["An active denial or unproven statement prevents a positive finding; confirm the canonical correction."] };
+    const ids = unique(positive.map((r) => r.fact_id));
+    return { status: ids.length ? "evidence_present" : claimed.length ? "self_reported_only" : "not_evidenced", factIds: ids.length ? ids : claimed.map(factId), supportingRelations: positive, conflicts: [], mentionFactIds: unique(links.filter((r) => r.relation === "mention_only").map((r) => r.fact_id)) };
   }
   // These samples deliberately describe work products, not licenses or
   // employer eligibility. Every role still needs a particular posting check.
@@ -44,12 +87,20 @@ const CareerRecommendations = (() => {
     { id: "software-engineering", title: "Software engineering", signals: ["computer science", "python", "javascript", "typescript", "software", "java", "c++"], skills: ["testing", "version control"], sample: "build a small software feature, document one design tradeoff and add runnable tests", tradeoffs: "degree or coursework alone does not establish production coding experience" },
     { id: "data-analytics", title: "Data / analytics", signals: ["sql", "statistics", "analytics", "python", "data analysis", "data science"], skills: ["SQL", "data validation"], sample: "answer a question from a public dataset and write the limitations alongside the result", tradeoffs: "check quantitative and tool requirements; programming alone does not prove statistical depth" },
     { id: "health-operations", title: "Healthcare administration or coordination", signals: ["nursing", "patient", "clinical", "healthcare", "medical"], skills: ["scheduling", "record keeping"], sample: "map a fictional appointment workflow without using any patient information", tradeoffs: "verify local credentials for clinical duties; none are inferred from this administrative hypothesis" },
+    { id: "mechanical-design", title: "Mechanical design engineering", signals: ["mechanical engineering", "hydraulic", "CAD", "load calculations"], skills: ["CAD", "load calculations"], sample: "document a fictional component design with load assumptions and a review checklist", tradeoffs: "verify seniority, safety review and local credential requirements; none are inferred" },
+    { id: "manufacturing-quality", title: "Manufacturing or design verification", signals: ["hydraulic", "load calculations", "manufacturing", "mechanical engineering"], skills: ["load calculations", "test documentation"], sample: "write a fictional component verification plan with measurable acceptance criteria", tradeoffs: "check quality-system experience and supervision requirements" },
+    { id: "electrical-trades", title: "Electrical installation under appropriate supervision", signals: ["electrical", "circuits", "electrician", "apprenticeship"], skills: ["circuit installation", "fault diagnosis"], sample: "document a fictional installation inspection checklist for review by a qualified supervisor", tradeoffs: "confirm jurisdiction, apprenticeship level and permitted duties; no independent license is inferred" },
+    { id: "electrical-maintenance", title: "Electrical maintenance technician", signals: ["electrical", "circuits", "faults", "apprenticeship"], skills: ["fault diagnosis", "maintenance documentation"], sample: "outline a fictional fault-report workflow for review without performing electrical work", tradeoffs: "verify safety training, supervision and employer-specific credentials" },
+    { id: "teaching", title: "Teaching or tutoring", signals: ["taught", "algebra", "education", "students"], skills: ["instructional delivery", "learning assessment"], sample: "prepare a short fictional algebra lesson and an assessment rubric", tradeoffs: "check age group, subject depth and local teaching credentials; no teaching license is inferred" },
+    { id: "instructional-content", title: "Instructional content development", signals: ["taught", "algebra", "learning outcomes", "education"], skills: ["learning assessment", "curriculum design"], sample: "write an annotated learning activity with an answer key and accessibility review", tradeoffs: "check curriculum ownership, portfolio and subject requirements" },
+    { id: "graphic-design", title: "Graphic design", signals: ["vector illustrations", "publication layouts", "graphic design", "typography"], skills: ["vector illustration", "accessible layout"], sample: "prepare a fictional poster and explain visual hierarchy and accessibility choices", tradeoffs: "verify portfolio, software and production requirements without assuming a specific tool" },
+    { id: "publication-design", title: "Publication or production design", signals: ["publication layouts", "vector illustrations", "public exhibits", "graphic design"], skills: ["accessible layout", "production handoff"], sample: "create an annotated publication handoff checklist with print and digital checks", tradeoffs: "confirm prepress, digital accessibility and employer workflow requirements" },
   ];
   function roleHypotheses(ctx) {
     const p = ctx.profile || {};
-    const facts = confirmed(p).filter(usable);
+    const facts = confirmed(p);
     const ranked = ROLES.map((r) => {
-      const anchors = facts.filter((f) => r.signals.some((s) => matches(factText(f), s)));
+      const anchors = facts.filter((f) => r.signals.some((term) => mentions(factText(f), term) && (f.kind === "education" && usable(f) || ["evidence_present", "self_reported_only"].includes(evidence(p, term).status))));
       return { ...r, score: anchors.length, factIds: unique(anchors.map(factId)) };
     }).filter((r) => r.score).sort((a, b) => b.score - a.score || ROLES.findIndex((r) => r.id === a.id) - ROLES.findIndex((r) => r.id === b.id));
     let selected = ranked.slice(0, 3);
@@ -61,7 +112,7 @@ const CareerRecommendations = (() => {
     }
     // An education-only record anchors exploration context, never a skill claim.
     const contextIds = facts.filter((f) => f.kind === "education").map(factId);
-    return selected.map((r) => ({ ...r, signals: r.signals.slice(), skills: r.skills.slice(), status: "hypothesis", evidenceLevel: r.score ? "record_signal" : "exploration_only", factIds: r.factIds.length ? r.factIds : contextIds, why: r.score ? `Confirmed record signals [${r.factIds.join(", ")}] suggest work to test; this does not establish qualification` : `An exploration option; ${contextIds.length ? `education context [${contextIds.join(", ")}] establishes no role skills` : "no confirmed role evidence is available"}`, gaps: r.skills.map((skill) => ({ skill, basis: "exploration_recipe_not_employer_requirement", ...evidence(p, skill) })) }));
+    return selected.map((r) => ({ ...r, signals: r.signals.slice(), skills: r.skills.slice(), status: "hypothesis", evidenceLevel: r.score ? "record_signal" : "exploration_only", factIds: r.factIds.length ? r.factIds : contextIds, why: r.score ? `Confirmed record signals [${r.factIds.join(", ")}] suggest work to test; this does not establish qualification` : `An exploration option; ${contextIds.length ? `education context [${contextIds.join(", ")}] establishes no role skills` : "no confirmed role evidence is available"}`, supportingRelations: r.signals.flatMap((term) => list(evidence(p, term).supportingRelations)), gaps: r.skills.map((skill) => ({ skill, basis: "exploration_recipe_not_employer_requirement", ...evidence(p, skill) })) }));
   }
   function locationScope(ctx) {
     const p = ctx.profile || {}, prefs = p.preferences || {}, cons = { ...(p.constraints || {}), ...(ctx.constraints || {}) };
@@ -70,13 +121,43 @@ const CareerRecommendations = (() => {
     const remoteOnly = ctx.remoteOnly === true || cons.remoteOnly === true || prefs.remote === "only" || prefs.remote === "remote_only";
     return { locations, remoteOnly, relocation: typeof cons.relocation === "boolean" ? cons.relocation : null, basis: "user-supplied preferences/constraints; residence alone is not relocation consent", unknowns: [...(!locations.length ? ["Preferred work locations are unknown."] : []), "Remote hiring geography and work authorization need each employer's wording; remote does not mean work from anywhere.", "No local market volume, salary or cost comparison is available."] };
   }
+  function reservedSource(url) {
+    try { const host = new URL(str(url)).hostname.toLowerCase().replace(/\.$/, ""); return /(^|\.)(example\.(com|org|net|test)|localhost)$/.test(host) || /\.test$/.test(host); }
+    catch { return true; }
+  }
+  function latestObservations(rows, now) {
+    const groups = new Map(), excluded = [];
+    for (const row of list(rows)) {
+      if (!row || typeof row !== "object") continue;
+      const trust = freshness({ ...row, status: "open" }, now);
+      if (!trust.current) { excluded.push({ id: row.id || null, reason: trust.reason }); continue; }
+      const rawReq = row.requisition_id ?? row.id;
+      const req = typeof rawReq === "string" || typeof rawReq === "number" && Number.isFinite(rawReq) ? String(rawReq) : "";
+      if (!req) { excluded.push({ id: null, reason: "missing_requisition_identity" }); continue; }
+      const employer = row.employer_id || str(row.company).trim().toLowerCase() || new URL(trust.url).hostname;
+      const key = JSON.stringify([employer, req]);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    }
+    const latest = [];
+    for (const group of groups.values()) {
+      const at = (row) => Date.parse(row.observed_at || (row.source || {}).observed_at);
+      const newest = Math.max(...group.map(at)), winners = group.filter((row) => at(row) === newest);
+      const closed = winners.find((row) => row.status === "closed");
+      if (closed) latest.push(closed);
+      else if (new Set(winners.map((row) => JSON.stringify(row))).size > 1) excluded.push({ id: winners[0].id, reason: "conflicting_latest_observation" });
+      else latest.push(winners[0]);
+      excluded.push(...group.filter((row) => at(row) !== newest).map((row) => ({ id: row.id, reason: "superseded_observation" })));
+    }
+    return { latest, excluded };
+  }
   function freshness(row, now) {
     const source = row.source || {};
     const kind = row.source_kind || source.kind;
     const url = row.source_url || source.url || row.url;
     const observed = row.observed_at || source.observed_at;
     const age = typeof now === "number" ? now - Date.parse(observed) : NaN;
-    const fixture = row.isTestFixture || row.fixture || row.is_fixture || kind !== "live_public" || /fixture|snapshot|example\.(test|com)|localhost/i.test([url, row.id, row.source_path].join(" "));
+    const fixture = reservedSource(url) || row.isTestFixture || row.fixture || row.is_fixture || kind !== "live_public" || /fixture|snapshot|example\.(test|com)|localhost/i.test([url, row.id, row.source_path].join(" "));
     let reason = null;
     if (fixture) reason = "fixture_or_unverified_source";
     else if (!/^https:\/\//i.test(str(url))) reason = "missing_source_url";
@@ -88,8 +169,9 @@ const CareerRecommendations = (() => {
     return list(posting && posting.requirements).filter((r) => r && typeof r.skill === "string" && r.skill.trim()).map((r) => ({ skill: r.skill, level: ["required", "preferred"].includes(r.level) ? r.level : "unknown", quote: r.text || null, source: { posting_id: posting.id || null, url: posting.source_url || (posting.source || {}).url || posting.url || null }, ...evidence(profile, r.skill) }));
   }
   function openingRecommendations(ctx, paths, scope) {
-    const excluded = [], candidates = [], hypotheses = paths || roleHypotheses(ctx);
-    for (const row of list(ctx.postings)) {
+    const observations = latestObservations(ctx.postings, ctx.now);
+    const excluded = observations.excluded.slice(), candidates = [], hypotheses = paths || roleHypotheses(ctx);
+    for (const row of observations.latest) {
       if (!row || typeof row !== "object") continue;
       const fresh = freshness(row, ctx.now);
       if (!fresh.current) { excluded.push({ id: row.id || null, reason: fresh.reason }); continue; }
@@ -99,6 +181,7 @@ const CareerRecommendations = (() => {
       // Exact normalized location matching avoids York matching New York, or
       // remote US silently matching a different jurisdiction. Host normalizes.
       const norm = (v) => str(v).trim().toLowerCase();
+      if (!places.length || places.every((v) => /^(remote|anywhere|worldwide|global)$/i.test(v.trim()) || /unknown|unspecified|not (specified|provided)|tbd|worldwide|anywhere/i.test(v))) { excluded.push({ id: row.id, reason: "hiring_geography_unverified" }); continue; }
       if (scope.locations.length && !places.some((v) => scope.locations.some((l) => norm(v) === norm(l)))) { excluded.push({ id: row.id, reason: "location_unverified_or_mismatch" }); continue; }
       const cons = { ...((ctx.profile || {}).constraints || {}), ...(ctx.constraints || {}) };
       if ((ctx.needsIncome || cons.needsIncome) && row.paid !== true) { excluded.push({ id: row.id, reason: "paid_status_unverified" }); continue; }
@@ -134,8 +217,10 @@ const CareerRecommendations = (() => {
         { action: "Build a fictional work sample for one missing-evidence task", timeframe: "one short session this week" },
         { action: "Ask a practitioner to review the sample and update confirmed facts only after review", timeframe: "after the sample" },
       ];
-      const text = ["These are work-sample gaps for role hypotheses; employer requirements remain unknown.", ...paths.map((r) => `${r.title}: ${r.gaps.map((g) => `${g.skill} — ${g.status}${g.factIds.length ? ` [${g.factIds.join(", ")}]` : ""}`).join("; ")}; try ${r.sample}.`), "Missing evidence does not prove a lack of ability; no skill is added to your profile.", "What exact posting task should the work sample demonstrate?"].join("\n");
-      return { ok: true, kind: "skill_gap_plan", text, gaps, factIds: ids, alreadyHasSkill: false, requirementLevel: "unknown", sources: [...citations(p, ids), { type: "exploration_recipes", label: "Work-sample hypotheses, not employer requirements", as_of: VERSION }], basis: { source_class: "confirmed evidence plus explicitly hypothetical work-sample tasks", as_of: VERSION }, as_of: VERSION, plan, unknowns: ["The target employer requirements and screening weight are unknown."], nextStep: "What exact posting task should the work sample demonstrate?" };
+      const minutes = Number.isFinite(c.hoursPerWeek) && c.hoursPerWeek > 0 ? Math.floor(c.hoursPerWeek * 60) : null;
+      const phases = minutes === null ? [] : plan.map((p, i) => ({ task: p.action, minutes: i < 2 ? Math.floor(minutes / 3) : minutes - 2 * Math.floor(minutes / 3) }));
+      const text = ["These are work-sample gaps for role hypotheses; employer requirements remain unknown.", ...(minutes === null ? [] : [`Budget: ${minutes} total minutes per week across the three steps.`]), ...paths.map((r) => `${r.title}: ${r.gaps.map((g) => `${g.skill} — ${g.status}${g.factIds.length ? ` [${g.factIds.join(", ")}]` : ""}`).join("; ")}; try ${r.sample}.`), "Missing evidence does not prove a lack of ability; no skill is added to your profile.", "What exact posting task should the work sample demonstrate?"].join("\n");
+      return { ok: true, kind: "skill_gap_plan", text, gaps, factIds: ids, totalMinutesPerWeek: minutes, phases, alreadyHasSkill: false, requirementLevel: "unknown", sources: [...citations(p, ids), { type: "exploration_recipes", label: "Work-sample hypotheses, not employer requirements", as_of: VERSION }], basis: { source_class: "confirmed evidence plus explicitly hypothetical work-sample tasks", as_of: VERSION }, as_of: VERSION, plan, unknowns: ["The target employer requirements and screening weight are unknown."], nextStep: "What exact posting task should the work sample demonstrate?" };
     }
     let gaps = requirementGaps(p, posting);
     if (skill && !gaps.some((g) => g.skill.toLowerCase() === skill.toLowerCase())) gaps.push({ skill, level: ["required", "preferred", "preferred_not_required"].includes(c.requirementLevel) ? c.requirementLevel : "unknown", quote: null, source: { type: "caller_supplied_requirement", verified: false }, ...evidence(p, skill) });
@@ -157,6 +242,9 @@ const CareerRecommendations = (() => {
   function ingestResume(ctx, input) {
     const P = typeof CareerProfile !== "undefined" ? CareerProfile : require("./122-career-profile.js");
     const existing = JSON.parse(JSON.stringify((ctx || {}).profile || {}));
+    const existingFacts = list(existing.facts);
+    if (existingFacts.some((f) => !f || !factId(f) || f.id && f.fact_id && f.id !== f.fact_id)) return { ok: false, code: "canonical_id_required", profile: existing, confirmationRequired: true, unknowns: ["Existing fact IDs must be canonical and unambiguous before ingestion."] };
+    for (const f of existingFacts) if (!f.id) f.id = f.fact_id;
     const profile = { ...existing, ...P.createProfile(existing) };
     const result = P.ingestResume(profile, input, { now: (ctx || {}).now || null });
     return { ...result, profile, confirmationRequired: true, recommendations: planPaths({ ...(ctx || {}), profile }) };
@@ -179,16 +267,45 @@ const CareerRecommendations = (() => {
     // out / pipeline / tracker) excludes the turn here so 142's tracker
     // family owns it; a genuine openings ask carries no such possession.
     if (/\btracker\b|\bmy pipeline\b|\bmy applications?\b[^.?!]*\b(status|stage|state|out|open|pending|progress)\b|\bapplications?\b[^.?!]*\bdo i have out\b|\bhave out\b[^.?!]*\b(applications?|apps?)\b|\bstatus of my\b[^.?!]*\bapplications?\b/.test(t)) return null;
-    if (/\b(resume|résumé|cv|background|profile)\b/.test(t) && /\b(fit|recommend|recommendations?|suit|suited|qualified|match)\b/.test(t)) return "resume_roles";
     if (/\b(skill gaps?|missing skills?)\b/.test(t)) return "skill_gaps";
     if (/\b(current|fresh|live|today|right now)\b/.test(t) && /\b(openings?|jobs?|roles?|hiring)\b/.test(t)) return "current_openings";
+    if (/\b(resume|résumé|cv|background|profile)\b/.test(t) && /\b(fit|recommend|recommendations?|suit|suited|qualified|match)\b/.test(t)) return "resume_roles";
     if (/\b(what|which)\b[^?]*\b(roles?|jobs?|careers?)\b[^?]*\b(fit|suit|recommend|qualified)\b|\brecommend\b[^?]*\b(roles?|jobs?|careers?)\b/.test(t)) return "resume_roles";
     if (/\b(where should i (work|look)|which (cities|locations)|location recommendations?)\b/.test(t)) return "locations";
     return null;
   }
+  // Conservative local extraction for explicit, simple conversation fields.
+  // The host may supply validated typed fields; conflicting/multiple values
+  // require clarification rather than a generic target or silent budget.
+  function extractQuery(text, ctx) {
+    const c = ctx || {}, t = str(text), ambiguities = [], typed = {};
+    const m = t.match(/\b(?:what|which)\s+(.{1,80}?)\s+skill gaps?\b/i)
+      || t.match(/\bskill gaps?\s+(?:in|for)\s+([^?;.]{1,80})/i)
+      || t.match(/\b(?:the|my)\s+([^?;.]{1,60}?)\s+skill gaps?\b/i)
+      || t.match(/\b(?:recommend|close|assess|identify)\s+(?:(?:the|my)\s+)?([^?;.]{1,60}?)\s+skill gaps?\b/i);
+    const named = m ? m[1].trim() : "";
+    if (named && /\band\b|\bor\b|[,/]/i.test(named)) ambiguities.push("multiple_target_skills");
+    else if (named && c.skill && str(c.skill).toLowerCase() !== named.toLowerCase()) ambiguities.push("conflicting_target_skills");
+    else if (c.skill || named) typed.skill = str(c.skill || named);
+    const nums = { zero: 0, half: 0.5, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+    const budgets = [...t.matchAll(/\b(\d+(?:\.\d+)?|zero|half|one|two|three|four|five|six|seven|eight|nine|ten)\s*(?:an?\s+)?(hours?|hrs?|minutes?|mins?)\s*(?:(?:per|a|each|\/)\s*week|weekly)\b/gi)].map((x) => (nums[x[1].toLowerCase()] ?? Number(x[1])) / (/^(min)/i.test(x[2]) ? 60 : 1));
+    if (!budgets.length && c.hoursPerWeek === undefined && /\b(hours?|hrs?|minutes?|mins?)\b[^?.;]{0,25}\b(week|weekly)\b/i.test(t)) ambiguities.push("unparsed_weekly_budget");
+    if (new Set(budgets).size > 1) ambiguities.push("multiple_weekly_budgets");
+    const hours = c.hoursPerWeek !== undefined ? Number(c.hoursPerWeek) : budgets[0];
+    if (hours !== undefined) {
+      if (!Number.isFinite(hours) || hours <= 0 || hours > 40) ambiguities.push("invalid_weekly_budget");
+      else if (budgets.length && c.hoursPerWeek !== undefined && budgets[0] !== hours) ambiguities.push("conflicting_weekly_budgets");
+      else typed.hoursPerWeek = hours;
+    }
+    if (c.targetRole) typed.targetRole = str(c.targetRole);
+    if (c.posting_id) typed.posting_id = str(c.posting_id);
+    return { typed, ambiguities, source: "explicit_user_query_or_validated_host_fields" };
+  }
   function recommend(ctx) {
-    const c = ctx || {};
-    if (c.recommendationIntent === "skill_gaps") return skillGapPlan(c);
+    const query = extractQuery((ctx || {}).text, ctx);
+    const c = { ...(ctx || {}), ...query.typed };
+    if (query.ambiguities.length) return { ok: false, kind: "recommendation_clarification", query, unknowns: query.ambiguities, text: "Which single skill and weekly time budget should I use?", nextStep: "Which single skill and weekly time budget should I use?" };
+    if (c.recommendationIntent === "skill_gaps") return attachGrounding(skillGapPlan(c), c, query);
     const out = planPaths(c);
     if (c.recommendationIntent === "current_openings") {
       out.kind = "current_openings";
@@ -202,8 +319,16 @@ const CareerRecommendations = (() => {
       out.text = `Location scope: ${out.locationScope.locations.join(" / ") || "not stated"}${out.locationScope.remoteOnly ? "; remote only" : ""}. Preferences guide the search; no evidence supports ranking cities by demand or pay. Remote hiring geography and work authorization remain employer-specific.\nWhich work locations and relocation limits should I use?`;
       out.nextStep = "Which work locations and relocation limits should I use?";
     }
+    return attachGrounding(out, c, query);
+  }
+  function attachGrounding(out, ctx, query) {
+    out.query = query;
+    const gaps = [...list(out.gaps), ...list(out.paths).flatMap((p) => list(p.gaps)), ...list(out.currentOpenings && out.currentOpenings.openings).flatMap((p) => list(p.gaps))];
+    out.grounding = { schema_version: 1, profile_revision: ctx.profile_revision ?? null, privacy_epoch: ctx.privacy_epoch ?? null,
+      fact_ids: list(out.factIds), sources: list(out.sources), supporting_relations: [...gaps.flatMap((g) => list(g.supportingRelations)), ...list(out.paths).flatMap((p) => list(p.supportingRelations))], conflicts: gaps.flatMap((g) => list(g.conflicts)),
+      posting_observations: out.currentOpenings || null, unknowns: list(out.unknowns) };
     return out;
   }
-  return { confirmed, evidence, citations, roleHypotheses, locationScope, freshness, requirementGaps, openingRecommendations, planPaths, quantEvidence, skillGapPlan, ingestResume, intentFor, recommend };
+  return { confirmed, evidence, citations, relations, latestObservations, extractQuery, roleHypotheses, locationScope, freshness, requirementGaps, openingRecommendations, planPaths, quantEvidence, skillGapPlan, ingestResume, intentFor, recommend };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRecommendations;

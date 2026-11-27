@@ -10,6 +10,11 @@
 //   facts      every figure and every name in the draft is in the person's own words, a confirmed fact, or the recipient and
 //              company they named; a "[Your name]" placeholder stays visible, never filled with a guess;
 //   address    no email address the person did not type is ever written: a company name is never turned into a guessed address.
+//   context    (review F1, D-007, 2026-11-27) a reply to an email is checked with that email kept apart from the person's words:
+//              its sender's name and subject (`named`) and its text (`context`) may supply who is written to, the subject and what
+//              the sender stated about the role or company. They never license history (a meeting, a referral, a relationship),
+//              and a sentence that claims something about the person ("I have", "I hold", "I confirm", "my ...") takes its
+//              figures, names and borrowed words only from the person's own words or confirmed facts.
 // Nothing is sent from here: the draft is shown, and sending remains the exact-payload approval flow (D-MS-1).
 import { numbersIn, numEq, specifics } from "./agent/research/guard.ts";
 
@@ -67,8 +72,16 @@ function initialsOf(n: string, support: string): boolean {
   return false;
 }
 
+// Review F1 (D-007): a sentence that states something about the person. Wanting, thanking and being available are not claims.
+const SELF_CLAIM = /\b(?:my|mine|myself)\b|\bI\s+(?:have|hold|held|had|confirm|own|earn|earned|make|made|possess|bring|led|lead|built|managed|worked|graduated|studied|completed|did|can\s+confirm|currently)\b|\bI(?:'|’)ve\b|\bI(?:\s+am|'m|’m)\s+(?!(?:interested|excited|happy|glad|keen|looking|eager|thrilled|delighted|available|free|sorry|afraid|writing|reaching|following|replying|responding|grateful|open|still|very|really|so|definitely|not)\b)/i;
+// Words a reply to an email may share with it whatever it claims: the email's own business, not facts about the person.
+const SHARED = new Set(["about", "confirm", "confirmed", "confirming", "after", "again", "available", "before", "being", "best", "could", "email", "great", "happy", "hello", "interest", "interested", "looking", "message", "might", "note", "opportunity", "position", "reaching", "regards", "reply", "role", "should", "thank", "thanks", "their", "there", "these", "they", "this", "those", "time", "very", "what", "when", "where", "which", "while", "will", "with", "would", "your", "yours", "from", "have", "that", "team", "know", "glad", "like", "just", "also", "more", "some", "than", "then", "them", "were", "been", "into", "here", "hear", "back", "work", "working", "week", "today", "tomorrow"]);
+const wordsOf = (t: string) => new Set((String(t).toLowerCase().match(/\p{L}[\p{L}'’-]*/gu) ?? []).map((w) => w.replace(/['’]s$/, "")).filter((w) => w.length >= 4));
+
 // The draft, checked. `said` is everything the person typed in this conversation; `facts` their confirmed facts as text.
-export function checkFollowup(i: FollowupIn, o: { said: string; facts: string[] }): FollowupOut {
+// `named` (the recipient's name and the subject of the email answered) and `context` (that email's text) are someone else's words:
+// support for names, figures and addresses the sender gave, never for history or for a claim about the person (review F1, D-007).
+export function checkFollowup(i: FollowupIn, o: { said: string; facts: string[]; named?: string[]; context?: string }): FollowupOut {
   const docs = [...new Set(i.documents.map(squash).filter(Boolean))].slice(0, 4), opts = [...new Set(i.recipient_options.map(squash).filter(Boolean))].slice(0, 4);
   const one = " Ask exactly one short question and nothing else; draft nothing yet.";
   if (!i.document && docs.length > 1) return { status: "ask", ask: "document", options: docs, note: `It is not clear which document this is about: ${docs.join(" or ")}.${one}` };
@@ -77,7 +90,8 @@ export function checkFollowup(i: FollowupIn, o: { said: string; facts: string[] 
   // person wants it sent (the send is its own exact-payload approval, D-MS-1). A name that fits several people still asks.
   if (opts.length > 1) return { status: "ask", ask: "recipient", options: opts, note: `The name fits more than one person: ${opts.join(" or ")}.${one}` };
   const body = squash(i.body).replace(/\r\n?/g, "\n"), to = squash(i.recipient).slice(0, 80);
-  const support = [o.said, ...o.facts, to, i.document ?? ""].join("\n"), low = support.toLowerCase();
+  const own = [o.said, ...o.facts, to, i.document ?? "", ...(o.named ?? [])].join("\n"), context = String(o.context ?? "");
+  const support = [own, context].join("\n"), low = support.toLowerCase();
   const problems: string[] = [];
   if (!body) problems.push("the draft is empty");
   if (body.length > 1500) problems.push("the draft is over 1,500 characters; keep it short");
@@ -89,13 +103,25 @@ export function checkFollowup(i: FollowupIn, o: { said: string; facts: string[] 
     if (!h.said.test(o.said) && !o.facts.some((f) => h.said.test(f))) problems.push(`"${m[0]}" states ${h.kind} the person never mentioned; remove it, do not invent history`);
     else if (TIED.has(h.kind) && !pastWith(h.said, to, [o.said, ...o.facts])) problems.push(`"${m[0]}" states ${h.kind} with ${to || "the recipient"} that has not happened yet or was with someone else; thank or recall only a past event the person had with ${to || "them"}`);
   }
-  const sNums = numbersIn(support);
-  for (const n of numbersIn(plain)) if (!sNums.some((x) => numEq(x, n))) problems.push(`the figure "${n.raw}" is not in the person's words or confirmed facts`);
-  const word = (n: string) => new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(support);
+  // A sentence claiming something about the person is checked against their own words only; any other sentence may also use what
+  // the email's sender wrote (without an email, `own` and `support` are the same text).
+  const self = (t: string) => !context || SELF_CLAIM.test(t);
+  const pieces = context ? plain.split(/(?<=[.!?])\s+|\n+/).map((t) => t.trim()).filter(Boolean) : [plain];
+  const nums = { own: numbersIn(own), all: numbersIn(support) };
+  const word = (n: string, from: string) => new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(from);
   // D-065: a possessive is its name ("Google's" when they typed "google"): the draft tool is the only path for a draft, and it
   // refused the benchmark's own C2 draft for "Google's".
   const bare = (n: string) => n.replace(/['’]s$/i, "");
-  for (const n of specifics(plain).names) if (!word(n) && !word(bare(n)) && !signOff(n) && !initialsOf(bare(n), support)) problems.push(`the name "${n}" is not in the person's words or confirmed facts`);
+  const ownWords = wordsOf(own), mailWords = wordsOf(context);
+  for (const t of pieces) {
+    const mine = self(t), from = mine ? own : support;
+    for (const n of numbersIn(t)) if (!(mine ? nums.own : nums.all).some((x) => numEq(x, n))) problems.push(context && mine && nums.all.some((x) => numEq(x, n)) ? `the figure "${n.raw}" about the person comes only from the email, not the person's words or confirmed facts` : `the figure "${n.raw}" is not in the person's words or confirmed facts`);
+    for (const n of specifics(t).names) if (!word(n, from) && !word(bare(n), from) && !signOff(n) && !initialsOf(bare(n), from)) problems.push(context && mine && (word(n, support) || word(bare(n), support)) ? `the name "${n}" in a claim about the person comes only from the email, not the person's words or confirmed facts` : `the name "${n}" is not in the person's words or confirmed facts`);
+    // A claim about the person that borrows the email's words ("I hold an active clearance" for "do you hold an active clearance?")
+    // repeats the sender's claim as the person's own.
+    const borrowed = context && mine ? [...wordsOf(t)].filter((w) => mailWords.has(w) && !ownWords.has(w) && !SHARED.has(w)) : [];
+    if (borrowed.length) problems.push(`"${t.slice(0, 80)}" states something about the person in the email's words (${borrowed.slice(0, 4).map((w) => `"${w}"`).join(", ")}) that the person never said or confirmed; write only what they said or confirmed`);
+  }
   if (problems.length) return { status: "rewrite", problems: [...new Set(problems)].slice(0, 8), note: "Not shown. Rewrite the draft so it fixes every problem, keeping the tone asked for, and call draft_followup again." };
   return { status: "ok", to, body, attachment: squash(i.document).slice(0, 80) || null, note: `Code shows the draft to the person exactly as written; do not repeat or change it. Nothing is sent.${to ? "" : " No recipient was named: the draft keeps its placeholders; ask who it goes to only if they want it sent."}` };
 }

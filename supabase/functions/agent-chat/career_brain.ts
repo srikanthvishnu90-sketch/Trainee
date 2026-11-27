@@ -74,13 +74,17 @@ export function afterErase<T extends { meta?: unknown }>(newestFirst: T[]): T[] 
 // nothing is kept (afterErase), and when more than 40 remain the thread is longer than the window, so a summary written
 // in code from the account's events goes into the system prompt after the person block.
 export const HISTORY_WINDOW = 40;
+// 2026-11-17 (ag/ma-09-link-list-input): a person's message over the chat's 4,000-character cap (only a pasted list of posting
+// links is let through, chat_input.ts) never reaches the model whole on a later turn either: it is clipped to the cap here.
+export const HISTORY_USER_MAX = 4000;
+const clipUser = (t: string) => t.length <= HISTORY_USER_MAX ? t : `${t.slice(0, HISTORY_USER_MAX)}\n[the rest of this message, ${t.length - HISTORY_USER_MAX} more characters, is not shown]`;
 export function historyWindow(newestFirst: { role: string; content: unknown; meta?: unknown }[]): { history: { role: "user" | "assistant"; content: string }[]; cut: boolean } {
   const kept = afterErase(newestFirst);
   return {
     cut: kept.length > HISTORY_WINDOW,
     history: kept.slice(0, HISTORY_WINDOW).reverse()
       .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
-      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content as string })),
+      .map((m) => ({ role: m.role as "user" | "assistant", content: m.role === "user" ? clipUser(m.content as string) : m.content as string })),
   };
 }
 // The summary when the window cut the thread, from the account's events (null: they could not be read, which is said).

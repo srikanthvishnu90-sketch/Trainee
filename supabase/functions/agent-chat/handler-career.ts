@@ -32,7 +32,8 @@ import { chatSwitches, liveSwitches, readSubmitSettings } from "./chat_switches.
 import { connectUrlsFor } from "../_shared/connect_link.ts"; // D-037: the send consent link
 import { looksLikePendingSecret, redactionNote, redactPending, secretLeadIn } from "../_shared/identity_redact.ts";
 import { corsFor } from "./_shared/chat_cors.ts";
-import { chatInput } from "./_shared/chat_input.ts";
+import { chatInput, OVER_CAP_REPLY, OverCapText } from "./_shared/chat_input.ts";
+import { linkListAsk, overCapRoute, supabaseLinkPending } from "../_shared/career_apply_link.ts";
 import { ownerThread, ChatThreadError } from "./_shared/chat_session.ts";
 import { CareerAccess, CareerOnboarding, CareerRouter, CareerDoorstep, CareerReply, CareerContainment, CareerBatchApply, CareerJobs, CareerProfile } from "../_shared/router_core.career.js";
 import { planCareerTaskIntent, normalizeCareerTaskRequest, createCareerBoardFor, createWorkerBoardProvider, planCareerBatchIntent, planCareerBatchPrepare, normalizeCareerBatchRequest } from "../_shared/career_task_bridge.js";
@@ -357,7 +358,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // waiting, is removed from this text like a labeled one.
     const situation = await readSituation(admin, user.id, Date.now()).catch((e) => { console.error("situation:", e?.message ?? e); return null; });
     // Text, photos, or both (a photo alone is a message: spec 16 item 12).
-    const input = chatInput(rawMessage, images, MAX_MESSAGE_LEN, { codePending: codePending(situation) });
+    // 2026-11-17: past the cap only an apply ask made of known posting links (career_apply_link.ts linkListAsk), and only
+    // while the link read is on; such a turn is code's alone (every model call below refuses it: OverCapText).
+    const input = chatInput(rawMessage, images, MAX_MESSAGE_LEN, { codePending: codePending(situation),
+      ...(Deno.env.get("CAREER_APPLY_LINK") === "off" ? {} : { overCapOk: (t: string) => linkListAsk(t, { crisis: crisisReply }) }) });
     if (!input.ok) return json(cors, { error: input.error }, 400);
     let { message, userContent } = input;
     const { imageBlocks } = input;
@@ -494,6 +498,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     try { careerBatch = normalizeCareerBatchRequest(body.career_batch); }
     catch (_) { return json(cors, { error: "invalid_career_batch", action: null, turn_key: turnKey }, 400); }
     const requestHash = await careerRequestHash(hashedMessage, imageBlocks, careerTask ?? (careerBatch ? { batch: careerBatch } : null));
+    // Architect ruling (2026-11-17, ag/ma-09): a text over the cap (only a pasted list of posting links gets here) goes
+    // straight to the link turn (overCapLinks, applyTurn below); every other code route reads OVER_CAP_ROUTE_TEXT, so none
+    // runs its patterns over up to 64,000 characters. Crisis words beside the links are the message instead (overCapRoute).
+    const overCapTurn = input.overCap === true ? overCapRoute(message, { crisis: crisisReply }) : null;
+    const overCapLinks = overCapTurn?.links ?? null;
+    if (overCapTurn) message = overCapTurn.route;
     // fix/r9-apply-completion (after the request hash, which digests what was typed): an apply or job-search ask as people text it (filler, emoji, a typo, Spanish, romanized Hindi,
     // "can you apply me to ...?") is routed by its plain English reading (career_ask_canon.ts), so the apply turn and the
     // router's search read it as they read the plain ask. Only the routing reads it: the stored message is what was typed,
@@ -525,7 +535,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // R10 WO-D: the first real limit a model call met this turn (the global budget, its pause or window, the provider's rate
     // limit), so a turn the AI could not finish says what stopped and keeps the task instead of falling to a template (limit_stop.ts).
     let limitStop: LimitStop | null = null, limitRetryAt: number | null = null;
+    // Review of ag/ma-09 (2026-11-17): crisis words beside an over-cap link list (overCapRoute gives them as the message and
+    // reads no link) are a message like any under the cap, on every brain path: the crisis reply, the router's or the
+    // brain's, is never pre-empted by the over-cap refusal below.
+    const overCap = input.overCap === true && overCapLinks !== null;
     const callModel: typeof spend.call = async (...a) => {
+      if (overCap) throw new OverCapText();
       try { return await spend.call(...a); } catch (e) { if (!limitStop) { limitStop = stopOfError(e); limitRetryAt = retryAtOf(e, Date.now()); } throw e; }
     };
     // 2026-10-28: this turn's cost row, always (see turnLedger): calls made, zero, or unrecorded. Written in finally, below.
@@ -1154,14 +1169,16 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           }
         }
       }
-      const queued: any = hereOut ? { reply: hereOut.reply, intent: APPLY_QUEUE_INTENT, status: hereOut.status } : !noApply && !hypotheticalOf(message) && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const queued: any = hereOut ? { reply: hereOut.reply, intent: APPLY_QUEUE_INTENT, status: hereOut.status } : (overCapLinks !== null && !siteNo && !planned) || (!noApply && !hypotheticalOf(message) && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx))
         ? await applyTurn({
           ...feature1.apply,
           // FEATURE E2E: a pasted posting link (or a role at a registered board) read from the ATS's public API on demand
           // and stored as the ingest stores it (career_apply_link.ts). CAREER_APPLY_LINK=off turns the read off.
           link: Deno.env.get("CAREER_APPLY_LINK") === "off" ? null
-            : { db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init).then(asAsked), { timeoutMs: 8000, personLink: true }) },
-          message: reach?.apply ?? tailorApply?.apply ?? message, userId: user.id, now: Date.now(), postings: supabasePostingsDb(admin), wants: supabaseWantStore(admin),
+            : { db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init).then(asAsked), { timeoutMs: 8000, personLink: true }),
+              // Links not read within the turn's budget are kept for "keep going" (career_apply_chat.ts LINK_READ_BUDGET_MS).
+              pending: supabaseLinkPending(admin) },
+          message: overCapLinks ?? reach?.apply ?? tailorApply?.apply ?? message, userId: user.id, now: Date.now(), postings: supabasePostingsDb(admin), wants: supabaseWantStore(admin),
           apps: () => supabaseApplications(admin)(user.id),
           facts: screenFacts,
           // The batch ask ("apply to these") reads the postings this thread last listed, as the router kept them.
@@ -1481,6 +1498,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (offerAns.comparison) agentMeta = { ...(agentMeta || {}), offer_comparison: offerAns.comparison }; // LOOP 13: the F-15 File's data
       } else if (outreachStatus) {
         out = { reply: outreachStatus.reply, intent: outreachStatus.intent, resultStatus: outreachStatus.status, contained: false, handler: "outreach_status" };
+      } else if (overCap) {
+        // A text past the cap that no code turn above answered never goes on to the brain or the router (OverCapText).
+        out = { reply: OVER_CAP_REPLY, intent: "message_too_long", resultStatus: "refused", contained: false, handler: "over_cap" };
       } else if (!careerTask && !careerBatch && !researchReplyOn(Deno.env) && researchOverAction(message) && !host.isHostControlled(message, ctx)) {
         // R10 WO-H, spec F.2 (d): company research asked with a no-action boundary while research is switched off. The specific
         // blocker, said plainly; never the batch or people-list path the router's keywords pick, and no facts from memory.

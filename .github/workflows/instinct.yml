@@ -1,0 +1,78 @@
+name: instinct
+# Instinct-style end-to-end acceptance (tests/instinct): brand-new users doing the two features (mass application
+# submission, networking at scale) on every channel, judged only by state. Not part of the required gate yet: it runs on
+# demand (workflow_dispatch) and on a pull request that carries the label "instinct". Its scorecard (per feature, per
+# channel, PASS / FAIL / NOT_BUILT per step with evidence) is the job summary and an artifact. By default the job is
+# green once a scorecard is written (red only if the harness itself broke); with strict it is red on any step not PASS.
+on:
+  workflow_dispatch:
+    inputs:
+      feature:
+        description: "apply, network, scale or all"
+        default: "all"
+      branch_set:
+        description: "comma-separated branches merged onto trunk before the run (empty: run this ref as it is)"
+        default: ""
+      strict:
+        description: "true: fail the job when any step is not PASS"
+        default: "false"
+      options:
+        description: "extra tests/instinct/main.ts options, e.g. --apply-n 60 --scale-users 200"
+        default: ""
+  pull_request:
+    types: [labeled, synchronize, opened, reopened]
+concurrency:
+  group: instinct-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  instinct:
+    name: instinct (end to end, by state)
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'instinct')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: Install tooling and use the runner's packaged Chrome
+        run: |
+          npm ci --prefix tools --no-audit --no-fund
+          browser_path=$(command -v google-chrome)
+          test -x "$browser_path"
+          echo "UPMORE_PLAYWRIGHT_PATH=$GITHUB_WORKSPACE/tools/node_modules/playwright" >> "$GITHUB_ENV"
+          echo "UPMORE_CHROMIUM_PATH=$browser_path" >> "$GITHUB_ENV"
+      - name: Allow sandboxed Chromium user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Harness self-test
+        run: deno test -A --no-check --import-map=tests/instinct/import-map.json tests/instinct/self.test.ts
+      - name: Instinct run
+        env:
+          FEATURE: ${{ inputs.feature || 'all' }}
+          BRANCH_SET: ${{ inputs.branch_set || '' }}
+          STRICT: ${{ inputs.strict || 'false' }}
+          OPTIONS: ${{ inputs.options || '' }}
+        run: |
+          git config --global user.name instinct
+          git config --global user.email instinct@example.invalid
+          args=(--feature "$FEATURE" --out "$RUNNER_TEMP/instinct")
+          [ -n "$BRANCH_SET" ] && args+=(--branch-set "$BRANCH_SET")
+          [ "$STRICT" = "true" ] && args+=(--strict)
+          # shellcheck disable=SC2086
+          bash tests/instinct/run.sh "${args[@]}" -- $OPTIONS
+      - name: Scorecard as the job summary
+        if: always()
+        run: |
+          f="$RUNNER_TEMP/instinct/scorecard.md"
+          if [ -f "$f" ]; then cat "$f" >> "$GITHUB_STEP_SUMMARY"; else echo "no scorecard was written" >> "$GITHUB_STEP_SUMMARY"; fi
+      - name: Keep the scorecard and transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instinct-scorecard
+          path: ${{ runner.temp }}/instinct
+          if-no-files-found: warn

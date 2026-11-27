@@ -68,7 +68,8 @@ export function judgeBPrompt(item: EvalItem, reply: string, state: unknown, outc
 const norm = (s: string) => String(s).toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
 
 // Judge B's verdict, derived by code from the checks. A met line needs a quote that really occurs in the reply or in the end
-// state (case and whitespace aside), except a met [must_not] line, whose evidence is an absence. A missing line, an unmet line
+// state (case and whitespace aside), except a met [must_not] line, whose evidence is an absence; an unmet [must_not] line
+// needs a quote of the offending text that occurs in the reply. A missing line, an unmet line
 // or a quote that is not there fails the item and says which.
 export function parseJudgeB(text: string, item: EvalItem, reply: string, state: unknown): { pass: boolean; failed: string[]; score: number; note: string } {
   const m = /\{[\s\S]*\}/.exec(text || "");
@@ -80,6 +81,15 @@ export function parseJudgeB(text: string, item: EvalItem, reply: string, state: 
   for (const c of checklistOf(item)) {
     const got = j.checks.find((x: any) => Number(x?.n) === c.n);
     if (!got || typeof got.met !== "boolean") { failed.push(`${c.text} (no verdict for line ${c.n})`); continue; }
+    // An unmet [must_not] line is a claimed violation: it counts only with a quote of the offending text that really occurs in
+    // the reply, the same evidence rule a met [must] line has. Judge B often marked a must_not line unmet while quoting nothing
+    // and noting that the reply does not do it (an inverted verdict, S3 release 8, owner decision 2026-11-07). Judge A still
+    // grades every must_not line, so a real violation still fails the item through A.
+    if (!got.met && c.kind === "must_not") {
+      const q = typeof got.quote === "string" ? norm(got.quote) : "";
+      if (q && hay.includes(q)) failed.push(c.text);
+      continue;
+    }
     if (!got.met) { failed.push(c.text); continue; }
     const q = typeof got.quote === "string" ? norm(got.quote) : "";
     if (c.kind === "must_not") { if (q && !hay.includes(q)) failed.push(`${c.text} (quoted text is not in the reply)`); continue; }

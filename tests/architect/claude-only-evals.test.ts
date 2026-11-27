@@ -58,7 +58,11 @@ Deno.test("CO/3 judge B parses by code: unmet, missing and unquoted lines fail; 
   const n = checklistOf(item).length;
   assert(n === 3);
   const t = (checks: unknown[]) => JSON.stringify({ pass: true, checks, score: 5, note: "" });
-  assert(!parseJudgeB(t([{ n: 1, met: true, quote: "What city do you want" }, { n: 2, met: false, quote: "Acme" }, { n: 3, met: true, quote: "nothing queued" }]), item, reply, { s: "nothing queued" }).pass);
+  // an unmet must_not line fails only with a quote of the offending text that is in the reply (owner decision 2026-11-07)
+  assert(!parseJudgeB(t([{ n: 1, met: true, quote: "What city do you want" }, { n: 2, met: false, quote: "Happy to help" }, { n: 3, met: true, quote: "nothing queued" }]), item, reply, { s: "nothing queued" }).pass, "a quoted violation fails");
+  assert(parseJudgeB(t([{ n: 1, met: true, quote: "What city do you want" }, { n: 2, met: false, quote: "" }, { n: 3, met: true, quote: "nothing queued" }]), item, reply, "nothing queued").pass, "an unquoted violation is not one");
+  assert(parseJudgeB(t([{ n: 1, met: true, quote: "What city do you want" }, { n: 2, met: false, quote: "Acme" }, { n: 3, met: true, quote: "nothing queued" }]), item, reply, "nothing queued").pass, "a violation quoting text not in the reply is not one");
+  assert(!parseJudgeB(t([{ n: 1, met: false, quote: "" }, { n: 2, met: true, quote: "" }, { n: 3, met: true, quote: "nothing queued" }]), item, reply, "nothing queued").pass, "an unmet must line still fails");
   assert(parseJudgeB(t([{ n: 1, met: true, quote: "what CITY do you   want" }, { n: 2, met: true, quote: "" }, { n: 3, met: true, quote: "nothing queued" }]), item, reply, "nothing queued").pass, "case and spacing are ignored");
   assert(parseJudgeB(t([{ n: 1, met: true, quote: "" }, { n: 2, met: true, quote: "" }, { n: 3, met: true, quote: "nothing queued" }]), item, reply, "nothing queued").failed[0].includes("without a quote"));
   assert(parseJudgeB(t([{ n: 1, met: true, quote: "What city" }]), item, reply, "nothing queued").failed.length === 2, "missing lines fail");

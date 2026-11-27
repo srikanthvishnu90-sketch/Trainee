@@ -9,7 +9,7 @@
 //         then its numbering level, then the paragraph's own), the section's page and margins and columns, and what may
 //         hold text outside the paragraph flow (tables, text boxes, drawings, headers and footers).
 // deno-lint-ignore-file no-explicit-any
-export const PDFJS = "npm:pdfjs-dist@4.10.38/legacy/build/pdf.mjs";
+export const PDFJS = "https://esm.sh/pdfjs-dist@4.10.38/legacy/build/pdf.mjs";
 
 export interface PdfItem { page: number; order: number; str: string; x: number; y: number; w: number; size: number; font: string; bold: boolean }
 export interface PdfLine { page: number; y: number; items: PdfItem[]; text: string; x: number; x1: number }
@@ -23,7 +23,7 @@ const isBold = (n: string) => /bold|black|heavy|semibold|demi/i.test(n);
 
 let pdfjsP: Promise<any> | null = null;
 export async function readPdfGeometry(bytes: Uint8Array): Promise<PdfGeometry> {
-  pdfjsP ??= import("npm:pdfjs-dist@4.10.38/legacy/build/pdf.mjs"); // a literal specifier: the edge bundler only bundles those
+  pdfjsP ??= import("https://esm.sh/pdfjs-dist@4.10.38/legacy/build/pdf.mjs"); // a literal specifier: the edge bundler only bundles those
   const pdfjs = await pdfjsP;
   const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), disableFontFace: true, isEvalSupported: false, verbosity: 0, useSystemFonts: false }).promise;
   const raw = new TextDecoder("latin1").decode(bytes);

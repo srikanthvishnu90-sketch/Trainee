@@ -145,7 +145,7 @@ export async function ratePdf(bytes: Uint8Array, o: { R?: any; cv?: boolean } = 
   return total("pdf", F, pages, measured);
 }
 async function textLayer(bytes: Uint8Array): Promise<string[]> {
-  const pdfjs: any = await import("npm:pdfjs-dist@4.10.38/legacy/build/pdf.mjs"); // the same pin as career_resume_geometry.ts PDFJS
+  const pdfjs: any = await import("https://esm.sh/pdfjs-dist@4.10.38/legacy/build/pdf.mjs"); // the same pin as career_resume_geometry.ts PDFJS
   const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), disableFontFace: true, isEvalSupported: false, verbosity: 0 }).promise;
   const out: string[] = [];
   for (let p = 1; p <= doc.numPages; p++) { const page = await doc.getPage(p); for (const it of (await page.getTextContent()).items as any[]) if (typeof it.str === "string") out.push(it.str); }

@@ -44,3 +44,20 @@ test("B-05: the staged career artifact stays under the platform ceiling", () => 
     fs.rmSync(stageDir, { recursive: true, force: true });
   }
 });
+
+// Release 12 (deploy-production run 45874743067, HTTP 413 "request entity too large"): an `npm:` specifier in the career graph
+// (npm:pdfjs-dist) made the edge bundler vendor the whole npm package: agent-chat went from 4.5 MB to 38 MB compressed (the
+// platform's 20 MB limit applies to that), while the staged source total above grew only 8.0 -> 10.5 MB and passed. Remote
+// modules (esm.sh, deno.land) bundle only their module graph. No staged career file imports an `npm:` specifier.
+test("release 12: no npm: specifier enters the staged career artifact (the bundler vendors the whole package)", () => {
+  const stageDir = fs.mkdtempSync(path.join(os.tmpdir(), "career-stage-npm-"));
+  try {
+    execFileSync(process.execPath, [path.join(__dirname, "..", "scripts", "career", "stage-career.cjs"), stageDir], { encoding: "utf8" });
+    const hits = [];
+    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (/\.(ts|js|mjs)$/.test(e.name)) { const src = fs.readFileSync(p, "utf8"); for (const m of src.matchAll(/(?:from\s*|import\s*\(\s*)["'](npm:[^"']+)["']/g)) hits.push(`${path.relative(stageDir, p)}: ${m[1]}`); } } };
+    walk(stageDir);
+    assert.deepStrictEqual(hits, [], `npm: specifiers in the career artifact: ${hits.join("; ")}. Use an esm.sh URL pinned to the same version. ${REMEDIATION}`);
+  } finally {
+    fs.rmSync(stageDir, { recursive: true, force: true });
+  }
+});

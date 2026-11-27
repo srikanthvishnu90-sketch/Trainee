@@ -265,6 +265,13 @@ const CareerAlertWatch = (() => {
       jd_text: posting.jd_text || "",
       posted_at: posting.posted_at || null,
       posted_at_quality,
+      // MI-106 (121, Spec 2 §2.5): the repost/stale verdicts 121 annotated on
+      // the posting ride the alert record so the reminder (152) can flag a
+      // possibly-stale first-sight posting instead of presenting it as fresh.
+      reposted: posting.reposted === true,
+      repost_count: posting.repost_count || 0,
+      possibly_stale: posting.possibly_stale === true,
+      first_seen_at: posting.first_seen_at || null,
       detected_at,
       latency_seconds,
       fit_lines,

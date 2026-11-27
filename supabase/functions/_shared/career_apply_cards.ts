@@ -99,11 +99,30 @@ export interface CardStore {
   // SERIAL-1460 (2): the card the given message of this thread showed (meta.card_id), or null when that message is not a
   // card. Read only when the channel passes the id of the message a yes replies to.
   cardOfMessage?(threadId: string, messageId: string | number, userId: string): Promise<string | null>;
+  // Review F2 (2026-11-27): whether the given message of this thread carried another flow's card (a contact, mail-reply,
+  // follow-up or hand-off card: OTHER_CARD_KEYS on its meta). A reply to one is that card's turn, never this card's.
+  otherCardOfMessage?(threadId: string, messageId: string | number, userId: string): Promise<boolean>;
   // D-MS-1: what became of a card that is no longer open: answered by the person, or closed by a newer card. Absent,
   // a yes to a card no longer open is not this turn's.
   cardState?(userId: string, cardId: string): Promise<"open" | "answered" | "closed" | null>;
   // SCALE: the employer of each of these prepared applications (a card's items), in one bounded read, for "not Acme".
   cardCompanies?(userId: string, preparedIds: string[]): Promise<Map<string, string>>;
+}
+
+// Review F2 (2026-11-27): the meta keys of the other flows' cards (career_contact_turn.ts, career_mail_reply.ts,
+// career_inbox_followups.ts, career_apply_handoff.ts). A reply to a message carrying one is not this card's.
+export const OTHER_CARD_KEYS = ["contact_card", "mail_reply_card", "followup_card", "handoff_card"] as const;
+export const otherCard = (meta: unknown): boolean => !!meta && typeof meta === "object" && OTHER_CARD_KEYS.some((k) => (meta as Record<string, unknown>)[k] != null && (meta as Record<string, unknown>)[k] !== false);
+// The chat turn key of the inbound message a delivered reply answered, from that reply's outbox key ("reply:<scoped id>",
+// channel_inbound.ts): the same hash as channel_inbound.ts turnKeyFor (tests/architect/mail-reply-support-20261127.test.ts
+// holds them equal). Any other key (a proactive message, a card push) answered no inbound message: null.
+export async function turnKeyOfReplyKey(key: string): Promise<string | null> {
+  const m = /^reply:(.+)$/.exec(key);
+  if (!m) return null;
+  const scoped = m[1], at = /^(tg|wa):(.+)$/.exec(scoped);
+  const source = at ? `${at[1] === "tg" ? "telegram" : "whatsapp"}:${at[2]}` : scoped;
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source)));
+  return "lm_" + Array.from(h.slice(0, 16), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // D-MS-1 (owner, 2026-10-27): the forms a person answers a card with. Anything else is not an answer and goes to the
@@ -672,6 +691,9 @@ export async function cardTurn(
   const repliedCard = hasReply && o.store.cardOfMessage ? await o.store.cardOfMessage(o.threadId, o.replyTo!, o.userId) : null;
   let shownId: string | null;
   if (hasReply) {
+    // Review F2: a quote-reply to another flow's card (a contact, mail-reply, follow-up or hand-off card) is that card's, and its own
+    // turn checks that card's exact hash; this turn stands down instead of answering "reply to the card message".
+    if (!repliedCard && o.store.otherCardOfMessage && await o.store.otherCardOfMessage(o.threadId, o.replyTo!, o.userId)) return null;
     if (!repliedCard) return wantsApproval ? { reply: NEEDS_REPLY, status: CARD_NEEDS_REPLY_STATUS } : null;
     shownId = repliedCard;
   } else {
@@ -948,6 +970,23 @@ export function supabaseCardStore(admin: any): CardStore {
       if (!c) return null;
       if (c.state === "open") return "open";
       return c.answer && typeof c.answer === "object" && "closed" in c.answer ? "closed" : "answered";
+    },
+    async otherCardOfMessage(threadId, messageId, userId) {
+      const id = String(messageId).slice(0, 200);
+      const metaOf = async (q: any) => (must(await q.limit(1), "read the replied-to message") as any[] | null)?.[0]?.meta ?? null;
+      if (/^[0-9]{1,18}$/.test(id) && otherCard(await metaOf(admin.from("agent_messages").select("meta").eq("thread_id", threadId).eq("role", "assistant").eq("id", Number(id))))) return true;
+      // A texting channel's reply-to id is the provider's id of a delivered reply (career_outbox); that reply's row key names the
+      // inbound message it answered, whose turn key is on the assistant row the turn saved (agent_messages.meta.career_turn_key).
+      const sent = must(
+        await admin.from("career_outbox").select("key,part_of,card_id").eq("user_id", userId).eq("status", "delivered")
+          .or(`provider_id.eq.${JSON.stringify(id)},provider_ids.cs.{${JSON.stringify(id)}}`).limit(2),
+        "read the replied-to text",
+      );
+      const row = Array.isArray(sent) ? sent[0] : null;
+      if (!row || row.card_id) return false;
+      const turnKey = await turnKeyOfReplyKey(String(row.part_of || row.key || ""));
+      if (!turnKey) return false;
+      return otherCard(await metaOf(admin.from("agent_messages").select("meta").eq("thread_id", threadId).eq("role", "assistant").or(`meta->>career_turn_key.eq.${turnKey}`)));
     },
     async cardOfMessage(threadId, messageId, userId) {
       // The app replies to its own message ids (agent_messages.id, this thread); a texting channel replies to the

@@ -294,7 +294,9 @@ export async function draftReply(o: {
   if (codeInReply(String(o.body ?? "")).length) return { status: "refused", reason: "code_in_reply", note: "The reply has a code, password or key next to a word like code, PIN or password. Trainee never sends one. Write the reply without it; nothing was drafted or sent." };
   const name = headingName(mail.from_name);
   const checked = checkFollowup({ kind: "note", recipient: name || null, recipient_options: [], document: null, documents: [], body: String(o.body ?? ""), tone: null },
-    { said: [o.said, mail.from_name, mail.subject, got.text].join("\n"), facts: o.facts });
+    // Review F1 (D-007): the email is someone else's words. Its sender's name, subject and text are kept apart from the person's
+    // own words: they may supply whom the reply is to and what the sender said about the role, never history or a claim about the person.
+    { said: o.said, facts: o.facts, named: [mail.from_name, mail.subject], context: got.text });
   if (checked.status === "rewrite") return { status: "rewrite", problems: checked.problems, note: checked.note };
   if (checked.status === "ask") return { status: "rewrite", problems: [checked.note], note: checked.note };
   if (/\[[^\]\n]{1,40}\]/.test(checked.body)) return { status: "rewrite", problems: ["a placeholder in brackets is left in the reply"], note: "A reply that will be sent can't keep a placeholder: write the words, or ask the person for the one thing missing." };

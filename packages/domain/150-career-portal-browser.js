@@ -250,6 +250,14 @@ const CareerPortalBrowser = (() => {
     // (BUG-238 live addendum: the widget-Degree rule below never fired
     // on real boards because the raw label carries the asterisk).
     const eff = ((f && f.label ? String(f.label).toLowerCase() : "") || hay).replace(/[*✱]\s*$/, "").trim();
+    // Precision (architect, 2026-10-19; C-01): a wrong mapping sends a wrong answer to an employer, an unknown only asks.
+    // The person's own contact facts go only into a free-text box that asks about the person: never a checkbox, radio
+    // or select ("Do you own a Smartphone?"), never a question about someone else (a reference, a referrer, a manager).
+    // Same rule as classifyField in supabase/functions/_shared/career_apply.ts (tests/architect/wo-009-classify-precision.test.ts).
+    // inputType is the helper's (type attribute || tag name): a plain <input> with no type arrives as "input".
+    const ownText = /^(text|input|email|tel|url|search|textarea)$/.test(inputType || "text") && !(f && f.tag === "select") &&
+      !/\breferr|\breferen|\bteam member|\breferee|\bemergency|\bmanager|\bsupervisor|\brecruiter|\bspouse|\bparent|\bguardian|\bemployee who/.test(eff);
+    const educationValue = !/^(checkbox|radio|group)$/.test(inputType || "text");
     if (inputType === "file") {
       // File inputs are the exception to label-first: their visible
       // label is often just "Attach", and the binding carries no typed
@@ -259,7 +267,7 @@ const CareerPortalBrowser = (() => {
       if (/resume|cv\b|curriculum/.test(hay)) return { kind: "standard", profile_key: "resume" };
       return { kind: "unknown" };
     }
-    if (/certif|attest|acknowledge|true and complete|provided.*true/.test(eff) && inputType === "checkbox") return { kind: "attestation", question_key: slug(eff).slice(0, 32) || "attestation" };
+    if (/certif|attest|acknowledge|true and complete|provided.*true|^i understand|i have (read|marked)/.test(eff) && inputType === "checkbox") return { kind: "attestation", question_key: slug(eff).slice(0, 32) || "attestation" };
     if (/authori[sz]ed to work|legally authori[sz]ed|right to work/.test(eff)) return { kind: "screening", question_key: "work_authorization" };
     if (/sponsor/.test(eff)) return { kind: "screening", question_key: "sponsorship" };
     // BUG-238 / FR-396: the bank-derived answer keys (module 149's
@@ -279,10 +287,10 @@ const CareerPortalBrowser = (() => {
     // D4 (BUG-062): education + country keys — the answers exist in the
     // fact bank (F-001 shape) and now have keys to carry them.
     if (/preferred name|preferred first name/.test(eff)) return { kind: "standard", profile_key: "preferred_name" };
-    if (/graduat/.test(eff)) return { kind: "standard", profile_key: "education_graduation_year" };
-    if (/fields? of study|discipline|\bmajor\b|area of study|concentration/.test(eff)) return { kind: "standard", profile_key: "education_discipline" };
-    if (/\bgpa\b|grade point average/.test(eff)) return { kind: "standard", profile_key: "education_gpa" };
-    if (/school|university|college|institution|alma mater/.test(eff)) return { kind: "standard", profile_key: "education_school" };
+    if (educationValue && /graduat/.test(eff)) return { kind: "standard", profile_key: "education_graduation_year" };
+    if (educationValue && /fields? of study|discipline|\bmajor\b|area of study|concentration/.test(eff)) return { kind: "standard", profile_key: "education_discipline" };
+    if (educationValue && /\bgpa\b|grade point average/.test(eff)) return { kind: "standard", profile_key: "education_gpa" };
+    if (ownText && /school|university|college|institution|alma mater/.test(eff)) return { kind: "standard", profile_key: "education_school" };
     // BUG-238: level questions take the derived LEVEL ("Bachelor's
     // Degree" from the education fact), never the degree NAME; a
     // COMPLETED-level question routes to a key only an explicitly
@@ -301,8 +309,8 @@ const CareerPortalBrowser = (() => {
     // are "Bachelor's Degree"-style levels, never degree names, so a
     // widget field labeled just "Degree" takes the derived level. A
     // text degree field keeps the degree name (education_degree).
-    if (/^degree$/.test(eff) && f && /select__input/.test(f.cls || "")) return { kind: "screening", question_key: "education_level" };
-    if (/\bdegree\b|bachelor/.test(eff)) return { kind: "standard", profile_key: "education_degree" };
+    if (educationValue && /^degree$/.test(eff) && f && /select__input/.test(f.cls || "")) return { kind: "screening", question_key: "education_level" };
+    if (educationValue && /\bdegree\b|bachelor/.test(eff)) return { kind: "standard", profile_key: "education_degree" };
     if (f && /^start_year(_\d+)?$/.test(slug(f.name || ""))) return { kind: "standard", profile_key: "education_start_date" }; // Greenhouse's built-in education-entry fields slug to start_year_<n> / end_year_<n> (labels: "Start date year")
     if (f && /^end_year(_\d+)?$/.test(slug(f.name || ""))) return { kind: "standard", profile_key: "education_end_date" };
     if (/(start|begin)/.test(eff) && /(education|school|university|college)/.test(hay)) return { kind: "standard", profile_key: "education_start_date" };
@@ -313,15 +321,15 @@ const CareerPortalBrowser = (() => {
     if (/state of residence|in which (u\.s\. )?state.*(reside|live|located)|which state do you.*(reside|live)|what state.*(reside|live)|province of residence/.test(eff)) return { kind: "standard", profile_key: "state_of_residence" };
     if (/time ?zone/.test(eff)) return { kind: "standard", profile_key: "time_zone" };
     if (/date of birth|birth ?date|\bdob\b/.test(eff)) return { kind: "standard", profile_key: "date_of_birth" };
-    if (/\bcountry\b/.test(eff)) return { kind: "standard", profile_key: "country" };
-    if (/first name|last name|full name|your name|^name\b/.test(eff) || (f && !f.label && (f.name === "name" || f.id === "name"))) return { kind: "standard", profile_key: "name" };
-    if (/e-?mail/.test(eff) || inputType === "email") return { kind: "standard", profile_key: "email" };
-    if (/phone|mobile|telephone/.test(eff) || inputType === "tel") return { kind: "standard", profile_key: "phone" };
-    if (/linkedin/.test(eff)) return { kind: "standard", profile_key: "linkedin" };
-    if (/github/.test(eff)) return { kind: "standard", profile_key: "github" };
-    if (/portfolio|website|web site|personal site/.test(eff)) return { kind: "standard", profile_key: "website" };
-    if (/current company|current employer|present company/.test(eff)) return { kind: "standard", profile_key: "current_company" };
-    if (/location|city|where are you based|current residence/.test(eff) && !/preference|desired/.test(eff)) return { kind: "standard", profile_key: "location" }; // a location PREFERENCE question is an ask, never the current-location value (D7)
+    if (/\bcountry\b/.test(eff) && !/how (many|long)|\byears?\b|\bmonths?\b/.test(eff)) return { kind: "standard", profile_key: "country" };
+    if (ownText && (/first name|last name|full name|your name|^name\b/.test(eff) || (f && !f.label && (f.name === "name" || f.id === "name")))) return { kind: "standard", profile_key: "name" };
+    if (ownText && (/e-?mail/.test(eff) || inputType === "email")) return { kind: "standard", profile_key: "email" };
+    if (ownText && (/\b(tele)?phone\b|\bcell\b|^mobile\b|mobile (phone|number)/.test(eff) || inputType === "tel")) return { kind: "standard", profile_key: "phone" };
+    if (ownText && /linkedin/.test(eff)) return { kind: "standard", profile_key: "linkedin" };
+    if (ownText && /github/.test(eff)) return { kind: "standard", profile_key: "github" };
+    if (ownText && /portfolio|website|web site|personal site/.test(eff)) return { kind: "standard", profile_key: "website" };
+    if (ownText && /current company|current employer|present company/.test(eff)) return { kind: "standard", profile_key: "current_company" };
+    if (ownText && /location|city|where are you based|current residence/.test(eff) && !/preference|desired|applying for|office/.test(eff)) return { kind: "standard", profile_key: "location" }; // a location PREFERENCE question is an ask, never the current-location value (D7)
     if (inputType === "textarea" || /cover letter|additional information|anything else/.test(eff)) return { kind: "free_text", question_key: /cover letter/.test(eff) ? "cover_note" : (slug(eff).slice(0, 40) || "free_text") };
     if (inputType === "checkbox" && /confirm|agree/.test(eff)) return { kind: "attestation", question_key: slug(eff).slice(0, 32) || "attestation" };
     // FDSE-QUESTION-KIND (2026-10-21, MUSE-F-026 proposed; root-cause
@@ -352,7 +360,9 @@ const CareerPortalBrowser = (() => {
     // The react-select marker (BUG-207): an input the board renders as a
     // select__input search box is a widget whose value is a chosen
     // option, never its text — the helper drives it as one.
-    const widget = f && /select__input/.test(f.cls || "") ? "react-select" : null;
+    // A lone checkbox cannot distinguish a confirmed No from an untouched answer (Ashby uses one behind Yes/No buttons).
+    const widget = f.inputType === "checkbox" && kind.kind === "screening" ? "lone-checkbox"
+      : /select__input/.test(f.cls || "") ? "react-select" : null;
     if (f.tag === "select") return { field_id: null, inputType: "select", profile_key: pk, widget, selector: f.selector, options: f.options || [] };
     if (f.inputType === "file") return { field_id: null, inputType: "file", profile_key: pk, widget, selector: f.selector };
     if (f.inputType === "checkbox") return { field_id: null, inputType: "checkbox", profile_key: pk, widget, selector: f.selector };
@@ -613,6 +623,10 @@ const CareerPortalBrowser = (() => {
         if (!state.bindings) board.form();
         const binding = state.bindings[fieldId];
         if (!binding) throw coded("UNKNOWN_FIELD", `no such field on this board: ${fieldId}`);
+        if (binding.widget === "lone-checkbox") {
+          const label = (state.defs || []).find((f) => f.field_id === fieldId)?.label || fieldId;
+          throw coded("RENDERED_WIDGET_REQUIRES_LIVE_PAGE", "This yes/no question needs its live controls before an answer can be verified: " + label);
+        }
         calls.fill += 1;
         if (binding.inputType === "file") {
           if (!o.resumePath) throw coded("RESUME_FILE_MISSING", "the board was built without a local resume file to upload");

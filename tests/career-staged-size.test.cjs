@@ -61,3 +61,21 @@ test("release 12: no npm: specifier enters the staged career artifact (the bundl
     fs.rmSync(stageDir, { recursive: true, force: true });
   }
 });
+
+// PR #881 review B1/B2: pdf.js loads its fake worker with import(workerSrc), a computed specifier the edge bundler never
+// includes; at the edge every PDF read then failed ("Module not found: .../pdf.worker.mjs") while local Deno fetched the worker
+// over the network and stayed green. Wherever the staged artifact imports pdf.mjs by a literal, it also imports pdf.worker.mjs
+// by a literal of the same version (handed to pdf.js as globalThis.pdfjsWorker). scripts/career/edge-pdfjs-probe.sh runs the
+// real check: the bundled probe inside edge-runtime with no network.
+test("release 12: the staged artifact bundles pdf.js's worker by a literal import, same version as pdf.mjs", () => {
+  const stageDir = fs.mkdtempSync(path.join(os.tmpdir(), "career-stage-worker-"));
+  try {
+    execFileSync(process.execPath, [path.join(__dirname, "..", "scripts", "career", "stage-career.cjs"), stageDir], { encoding: "utf8" });
+    const main = new Set(), worker = new Set();
+    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (/\.(ts|js|mjs)$/.test(e.name)) { const src = fs.readFileSync(p, "utf8"); for (const m of src.matchAll(/import\s*\(\s*["']([^"']*pdfjs-dist@([\d.]+)\/[^"']*?\/(pdf|pdf\.worker)\.mjs)["']/g)) (m[3] === "pdf" ? main : worker).add(m[2]); } } };
+    walk(stageDir);
+    for (const v of main) assert.ok(worker.has(v), `pdf.js ${v} is imported but its worker (pdf.worker.mjs ${v}) is not imported by a literal: at the edge every PDF read fails`);
+  } finally {
+    fs.rmSync(stageDir, { recursive: true, force: true });
+  }
+});

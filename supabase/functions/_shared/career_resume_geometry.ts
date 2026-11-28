@@ -1,6 +1,6 @@
 // RELEASE 10: a resume file's real geometry, read from the file itself, for the format rater (career_resume_rater.ts) and the
 // pixel-perfect checker (career_resume_pixel.ts). Nothing here guesses a position.
-//   PDF   Mozilla's pdf.js (npm pdfjs-dist, pinned) reads every text item with its baseline, x, advance width, size and the
+//   PDF   Mozilla's pdf.js (pdfjs-dist 4.10.38 legacy build from esm.sh, pinned; never npm:, which vendors the whole package) reads every text item with its baseline, x, advance width, size and the
 //         font's real name, in the file's content-stream order, plus the page's horizontal rules and its images, from the
 //         operator list. It is loaded only when a PDF is read, so nothing else pays for it. pdf.js is independent of the PDF
 //         writer here (it measures the standard faces with its own metrics), which is what makes the checker an outside
@@ -9,7 +9,7 @@
 //         then its numbering level, then the paragraph's own), the section's page and margins and columns, and what may
 //         hold text outside the paragraph flow (tables, text boxes, drawings, headers and footers).
 // deno-lint-ignore-file no-explicit-any
-export const PDFJS = "npm:pdfjs-dist@4.10.38/legacy/build/pdf.mjs";
+export const PDFJS = "https://esm.sh/pdfjs-dist@4.10.38/legacy/build/pdf.mjs";
 
 export interface PdfItem { page: number; order: number; str: string; x: number; y: number; w: number; size: number; font: string; bold: boolean }
 export interface PdfLine { page: number; y: number; items: PdfItem[]; text: string; x: number; x1: number }
@@ -22,9 +22,18 @@ const STRIP_SUBSET = (n: string) => String(n || "").replace(/^[A-Z]{6}\+/, "");
 const isBold = (n: string) => /bold|black|heavy|semibold|demi/i.test(n);
 
 let pdfjsP: Promise<any> | null = null;
+// pdf.js and its worker, both by literal specifiers (the edge bundler bundles only literals). Release 12 (PR #881 review B1):
+// pdf.js loads its fake worker with `import(workerSrc)`, a computed specifier the bundler never includes, so at the edge every
+// read failed with "Module not found: .../pdf.worker.mjs". The worker module is imported first and handed to pdf.js through
+// `globalThis.pdfjsWorker`, which it checks before importing workerSrc. Every pdf.js user in the career code goes through here.
+export function loadPdfjs(): Promise<any> {
+  pdfjsP ??= import("https://esm.sh/pdfjs-dist@4.10.38/legacy/build/pdf.worker.mjs")
+    .then((w) => { (globalThis as any).pdfjsWorker = w; return import("https://esm.sh/pdfjs-dist@4.10.38/legacy/build/pdf.mjs"); })
+    .catch((e) => { pdfjsP = null; throw e; });
+  return pdfjsP;
+}
 export async function readPdfGeometry(bytes: Uint8Array): Promise<PdfGeometry> {
-  pdfjsP ??= import("npm:pdfjs-dist@4.10.38/legacy/build/pdf.mjs"); // a literal specifier: the edge bundler only bundles those
-  const pdfjs = await pdfjsP;
+  const pdfjs = await loadPdfjs();
   const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), disableFontFace: true, isEvalSupported: false, verbosity: 0, useSystemFonts: false }).promise;
   const raw = new TextDecoder("latin1").decode(bytes);
   const embeddedHint = /\/FontFile[23]?\b/.test(raw);
@@ -119,7 +128,7 @@ export async function readPdfGeometry(bytes: Uint8Array): Promise<PdfGeometry> {
   await doc.destroy();
   return { kind: "pdf", pages, items, lines: linesOf(items), rules, images, fonts: [...fonts].map(([name, embedded]) => ({ name, embedded })), streamText: items.map((i) => i.str) };
 }
-// RELEASE 10 (architect ruling 2026-11-08): the edge's startup probe. pdf.js is the first npm module the edge loads; if it
+// RELEASE 10 (architect ruling 2026-11-08): the edge's startup probe. pdf.js is the first remote PDF module the edge loads; if it
 // does not load or cannot read a page there, the rater is skipped (tailoring falls back to the default file, career_tools.ts)
 // and this logs it once per instance, so a staging check sees it. A one-page PDF of one standard-font word is read back.
 const PROBE_PDF = "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>endobj 4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj 5 0 obj<</Length 36>>stream\nBT /F1 12 Tf 10 50 Td (probe) Tj ET\nendstream endobj\ntrailer<</Root 1 0 R>>\n%%EOF";
